@@ -3392,7 +3392,7 @@
   gap: 6px;
   padding: 3px 11px;
   border-radius: 999px;
-  font-family: var(--mono);
+  font-family: var(--serif);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -3457,6 +3457,15 @@
   --md-text-button-icon-size: 16px;
 }
 
+/* Rappel de lecture des deux portées (adresse vs commune) */
+.alea-scope-hint {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--md-sys-color-on-surface-variant);
+  margin: -6px 0 12px;
+  opacity: 0.9;
+}
+
 .alea-cards {
   display: flex;
   flex-direction: column;
@@ -3465,13 +3474,29 @@
 
 .alea-card {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 9px;
   padding: 12px 14px;
   border-radius: 12px;
   background: var(--md-sys-color-surface-container);
   border: 1px solid var(--md-sys-color-outline-variant);
   transition: border-color 0.18s, background 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+/* En-tête : icône · nom · sévérité · œil — l'œil reste toujours en haut à droite,
+   aligné avec la pastille D03, quelle que soit la sévérité. */
+.alea-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* Corps : zonage · statuts · lien externe */
+.alea-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
 }
 .alea-card:hover {
   border-color: var(--md-sys-color-primary);
@@ -3530,6 +3555,8 @@
   min-width: 0;
 }
 .alea-name {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
@@ -3539,16 +3566,27 @@
 }
 .alea-statuses {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
 }
 .status-chip {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 9px;
-  font-family: var(--mono);
-  font-weight: 600;
+  /* Typographie Material (M3 label-small) — plus de police monospace. */
+  font-family: var(--md-sys-typescale-label-small-font, 'Roboto', sans-serif);
+  font-size: var(--md-sys-typescale-label-small-size, 0.6875rem);
+  font-weight: var(--md-sys-typescale-label-small-weight, 500);
+  line-height: var(--md-sys-typescale-label-small-line-height, 1rem);
+  letter-spacing: var(--md-sys-typescale-label-small-tracking, 0.03125rem);
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -3556,34 +3594,39 @@
 .status-chip md-icon {
   --md-icon-size: 12px;
 }
-.status-chip.chip-on {
-  color: var(--d03-eleve);
-  background: var(--d03-eleve-bg);
-  border-color: rgba(208, 112, 48, 0.35);
-}
+/* Chips de portée (adresse / commune) : sémantique binaire — accent =
+   risque présent, vert = pas de risque. La sévérité est portée par la
+   pastille D03 à droite, jamais par ces chips. */
+.status-chip.chip-on,
 .status-chip.chip-mid {
-  color: var(--d03-modere);
-  background: var(--d03-modere-bg);
-  border-color: rgba(212, 172, 62, 0.35);
+  color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 38%, transparent);
 }
-.status-chip.chip-off {
+.status-chip.chip-none {
   color: var(--d03-tres-faible);
   background: var(--d03-tres-faible-bg);
   border-color: rgba(58, 122, 108, 0.35);
 }
+/* État indéterminé / source indisponible */
+.status-chip.chip-off {
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline-variant);
+}
 .alea-zonage {
-  font-family: var(--mono);
-  font-size: 9.5px;
+  /* Typographie Material (M3 label-small) — plus de police monospace. */
+  font-family: var(--md-sys-typescale-label-small-font, 'Roboto', sans-serif);
+  font-size: var(--md-sys-typescale-label-small-size, 0.6875rem);
+  font-weight: var(--md-sys-typescale-label-small-weight, 500);
+  line-height: var(--md-sys-typescale-label-small-line-height, 1rem);
+  letter-spacing: var(--md-sys-typescale-label-small-tracking, 0.03125rem);
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.alea-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
 .eye-btn {
+  /* Taille M3 standard (40px) — la pastille D03 et l'œil restent alignés
+     sur la même ligne d'en-tête, quelle que soit la sévérité. */
   --md-icon-button-icon-size: 18px;
   --md-icon-button-icon-color: var(--md-sys-color-primary);
   --md-icon-button-unselected-icon-color: var(--md-sys-color-primary);
@@ -3598,6 +3641,7 @@
   border: 1px solid var(--md-sys-color-outline-variant);
   text-decoration: none;
   transition: 0.15s;
+  margin-left: auto;
 }
 .alea-link md-icon {
   --md-icon-size: 15px;
@@ -4085,8 +4129,12 @@
   flex-shrink: 0;
 }
 .legend-range {
-  font-family: var(--mono);
-  font-size: 9px;
+  /* Typographie Material (M3 label-small) — plus de police monospace. */
+  font-family: var(--md-sys-typescale-label-small-font, 'Roboto', sans-serif);
+  font-size: var(--md-sys-typescale-label-small-size, 0.6875rem);
+  font-weight: var(--md-sys-typescale-label-small-weight, 500);
+  line-height: var(--md-sys-typescale-label-small-line-height, 1rem);
+  letter-spacing: var(--md-sys-typescale-label-small-tracking, 0.03125rem);
   color: var(--md-sys-color-on-surface-variant);
   margin-left: auto;
 }

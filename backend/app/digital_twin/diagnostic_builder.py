@@ -128,6 +128,11 @@ def build_diagnostic(
         # propre "risques_par_alea" (dict transmis tel quel ci-dessous).
         "risques_par_alea": risk_result.get("risques_par_alea", {}),
         "projection_2050": risk_result["projection_2050"],
+        # Trajectoire : variables brutes F par péril et par horizon (2026
+        # observé / 2050 modélisé / 2100 indisponible), jamais combinées,
+        # avec provenance et résolution — cf. risk_model.compute_trajectoire
+        # (Phase 1 item 5/6 du roadmap production).
+        "trajectoire": risk_result.get("trajectoire", {}),
         "risques_principaux": risques_principaux or {"risques": [], "source": "moteur_deterministe"},
         "climat": {
             "2050": {

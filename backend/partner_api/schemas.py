@@ -58,6 +58,37 @@ class RiskPeriod(BaseModel):
     risques_par_alea: dict[str, Hazard]
 
 
+class TrajectoirePoint(BaseModel):
+    horizon: int = Field(..., description="2026 (observe) / 2050 (projete) / 2100")
+    type: str = Field(..., description="observe | projete | indisponible")
+    scenario: str | None = Field(None, description="Etiquette RCP/SSP quand connue (ex. rcp8_5), sinon None")
+    valeur: int | None = Field(None, description="Variable brute F 0-100, jamais combinee avec V ni avec d'autres perils")
+    unite: str
+    resolution: str | None = Field(None, description="per-building | commune-level | grid-cell")
+    confiance: str | None = Field(None, description="elevee | moyenne | faible | None")
+    source: str | None
+    date_source: str | None = Field(None, description="Date de generation des donnees source, quand disponible")
+
+
+class TrajectoirePeril(BaseModel):
+    label: str
+    points: list[TrajectoirePoint]
+
+
+class Trajectoire(BaseModel):
+    """Variables brutes par peril et par horizon — jamais combinees.
+
+    C'est le contrat que l'actuaire attend (Phase 1 item 5) : il veut les
+    variables d'alea F elles-memes, propres et etiquetees (horizon, scenario,
+    resolution, provenance), pas un score composite. 2100 est expose comme
+    "indisponible" tant que Copernicus CDS est desactive — jamais simule.
+    """
+
+    horizons: list[int]
+    note: str
+    perils: dict[str, TrajectoirePeril]
+
+
 class AnalyzeResponse(BaseModel):
     adresse: Address
     score_global: int
@@ -66,6 +97,10 @@ class AnalyzeResponse(BaseModel):
     zones: dict[str, Zone]
     risques_par_alea: dict[str, Hazard]
     projection_2050: RiskPeriod
+    trajectoire: Trajectoire | None = Field(
+        default=None,
+        description="Variables brutes F par peril et par horizon (observe 2026 / projete 2050 / indisponible 2100), avec provenance",
+    )
     erreurs_sources: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Sources de collecte en erreur ou indisponibles pour cette adresse (ne bloque pas l'analyse)",

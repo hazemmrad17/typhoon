@@ -27,6 +27,9 @@ from partner_api.schemas import (
     Confidence,
     Hazard,
     RiskPeriod,
+    Trajectoire,
+    TrajectoirePeril,
+    TrajectoirePoint,
     Zone,
 )
 
@@ -35,6 +38,31 @@ logger = get_logger(__name__)
 
 class AddressNotFound(Exception):
     """L'adresse fournie n'a pas pu etre geocodee."""
+
+
+def _trajectoire_from_raw(raw: dict[str, Any] | None) -> Trajectoire | None:
+    """Traduit le dict interne `risk_scores['trajectoire']` (produit par
+    `risk_model.compute_trajectoire`) en contrat public versionne.
+
+    Le contrat interne expose les memes champs ; cette traduction isole la
+    Partner API d'un changement interne futur (comme pour les zones).
+    """
+    if not raw:
+        return None
+    return Trajectoire(
+        horizons=raw.get("horizons", [2026, 2050, 2100]),
+        note=raw.get("note", ""),
+        perils={
+            code: TrajectoirePeril(
+                label=data.get("label", code),
+                points=[
+                    TrajectoirePoint(**point)
+                    for point in data.get("points", [])
+                ],
+            )
+            for code, data in raw.get("perils", {}).items()
+        },
+    )
 
 
 def _zone_from_raw(raw: dict[str, Any]) -> Zone:
@@ -113,6 +141,7 @@ async def analyze_address(address: str) -> AnalyzeResponse:
             risk_scores["projection_2050"]["zones"],
             risk_scores["projection_2050"]["risques_par_alea"],
         ),
+        trajectoire=_trajectoire_from_raw(risk_scores.get("trajectoire")),
         erreurs_sources=building_data.get("erreurs", []),
         genere_le=building_data.get("genere_le", ""),
     )

@@ -177,6 +177,7 @@ def test_dict_serialization():
     assert "score_global" in scores
     assert "zones" in scores
     assert "projection_2050" in scores
+    assert "trajectoire" in scores
 
 
 # ---------------------------------------------------------------------------

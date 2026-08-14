@@ -604,11 +604,51 @@ def _build_zone(
     return zone
 
 
+# Périls suivis par la trajectoire, dans un ordre stable, avec libellé et
+# unité. Chaque point de la trajectoire porte son F brut (indice d'aléa
+# 0-100, avant combinaison avec V), sa provenance (source, statut, résolution)
+# et son étiquette d'horizon — 2026 est OBSERVÉ (données actuelles
+# Géorisques/BDNB), 2050 est MODÉLISÉ (projection climatique), 2100 reste
+# indisponible tant que Copernicus CDS n'est pas activé.
+PERILS_TRAJECTOIRE: list[tuple[str, str, str]] = [
+    ("argile", "Retrait-gonflement des argiles", "indice 0-100"),
+    ("inondation", "Inondation", "indice 0-100"),
+    ("mouvement_terrain", "Mouvement de terrain", "indice 0-100"),
+    ("sismique", "Sismicité", "indice 0-100"),
+    ("radon", "Radon", "indice 0-100"),
+    ("canicule", "Canicule / stress thermique", "indice 0-100"),
+    ("precipitation", "Précipitations intenses", "indice 0-100"),
+    ("feu_foret", "Feu de forêt", "indice 0-100"),
+]
+
+# Résolution géographique honnête par source : un champ BDNB est au niveau du
+# BÂTIMENT, un champ Géorisques au niveau de la COMMUNE (requête par
+# code_insee), une projection climatique au niveau de la GRILLE (cellule
+# météo, ~10-25 km). C'est le drapeau de résolution que l'actuaire attend
+# pour ne pas confondre « per-building » et « commune-level ».
+def _resolution_flag(source: str) -> str:
+    if source.startswith("bdnb."):
+        return "per-building"
+    if source.startswith("open_meteo."):
+        return "grid-cell"
+    return "commune-level"
+
+
+def _confidence_from_status(statut: str | None) -> str | None:
+    if statut == SourceStatus.AVAILABLE.value:
+        return "elevee"
+    if statut == SourceStatus.NO_FEATURE_FOUND.value:
+        return "moyenne"
+    if statut == SourceStatus.SOURCE_ERROR.value:
+        return "faible"
+    return None
+
+
 def _compute_zones_for_period(
     building_data: dict[str, Any],
     climat_block: dict[str, Any] | None,
     is_projection: bool,
-) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     """Calcule les zones pour une période.
 
     D05 : chaque zone calcule F (aléa) et V (vulnérabilité) séparément,
@@ -761,7 +801,20 @@ def _compute_zones_for_period(
         },
     }
 
-    return zones, sources_tracking, risques_par_alea
+    # Traçabilité par péril (provenance) : chaque F brut est associé à son
+    # tracking (source, statut, valeurs brutes). Consommé par la trajectoire.
+    peril_tracking = {
+        "argile": argile_t,
+        "inondation": inondation_t,
+        "mouvement_terrain": mvt_t,
+        "sismique": sismique_t,
+        "radon": radon_t,
+        "canicule": canicule_t,
+        "precipitation": precip_t,
+        "feu_foret": feu_foret_t,
+    }
+
+    return zones, sources_tracking, risques_par_alea, peril_tracking
 
 
 def _score_global(zones: dict[str, dict[str, Any]]) -> int:
@@ -872,6 +925,111 @@ def compute_alea_risks(building_data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 
+# ---------------------------------------------------------------------------
+# Trajectoire — raw variables par péril, par horizon (jamais combinées)
+# ---------------------------------------------------------------------------
+
+
+def compute_trajectoire(
+    building_data: dict[str, Any],
+    risques_2025: dict[str, dict[str, Any]],
+    tracking_2025: dict[str, dict[str, Any]],
+    risques_2050: dict[str, dict[str, Any]],
+    tracking_2050: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Expose les variables brutes F par péril, par horizon, avec provenance.
+
+    C'est la réponse directe à la Phase 1 item 5 du roadmap : l'actuaire ne
+    veut PAS « notre score » — il veut les variables d'aléa par péril, par
+    horizon et par scénario, propres et étiquetées, pour faire tourner ses
+    propres formules. Rien n'est combiné ici : chaque point porte son F brut
+    (0-100, avant la moyenne géométrique avec V), son scénario (RCP/SSP),
+    sa résolution (per-building / commune-level / grid-cell) et sa source.
+
+    Horizons:
+      - 2026 : OBSERVÉ — données actuelles Géorisques/BDNB/Open-Meteo
+        (référence 2015-2024). Ce n'est pas une projection, c'est le présent.
+      - 2050 : MODÉLISÉ — projection climatique (Open-Meteo 2041-2050 ;
+        Copernicus CDS une fois activé), scénario RCP taggé quand connu.
+      - 2100 : NON DISPONIBLE tant que Copernicus n'est pas activé — exposé
+        explicitement comme tel plutôt que simulé (jamais de stub).
+    """
+    copernicus_actif = bool(building_data.get("climat_copernicus"))
+
+    perils: dict[str, Any] = {}
+    for code, label, unite in PERILS_TRAJECTOIRE:
+        r2025 = risques_2025.get(code) or {}
+        r2050 = risques_2050.get(code) or {}
+        t2025 = tracking_2025.get(code) or {}
+        t2050 = tracking_2050.get(code) or {}
+
+        f2025 = r2025.get("risque")
+        f2050 = r2050.get("risque")
+
+        points: list[dict[str, Any]] = []
+
+        # --- 2026 : observé ---
+        points.append(
+            {
+                "horizon": 2026,
+                "type": "observe",
+                "scenario": None,
+                "valeur": f2025,
+                "unite": unite,
+                "resolution": _resolution_flag(t2025.get("source", "")),
+                "confiance": _confidence_from_status(t2025.get("statut")),
+                "source": t2025.get("source"),
+                "date_source": building_data.get("date_generation"),
+            }
+        )
+
+        # --- 2050 : modélisé ---
+        points.append(
+            {
+                "horizon": 2050,
+                "type": "projete",
+                "scenario": "rcp8_5" if copernicus_actif else None,
+                "valeur": f2050,
+                "unite": unite,
+                "resolution": _resolution_flag(t2050.get("source", "")),
+                "confiance": _confidence_from_status(t2050.get("statut")),
+                "source": t2050.get("source"),
+                "date_source": building_data.get("date_generation"),
+            }
+        )
+
+        # --- 2100 : indisponible (Copernicus non activé) ---
+        points.append(
+            {
+                "horizon": 2100,
+                "type": "indisponible",
+                "scenario": None,
+                "valeur": None,
+                "unite": unite,
+                "resolution": None,
+                "confiance": None,
+                "source": "copernicus.cds" if copernicus_actif else None,
+                "date_source": None,
+            }
+        )
+
+        perils[code] = {
+            "label": label,
+            "points": points,
+        }
+
+    return {
+        "horizons": [2026, 2050, 2100],
+        "note": (
+            "Variables brutes d'aléa F (0-100) par péril et par horizon — jamais "
+            "combinées entre elles ni avec la vulnérabilité. 2026 = observé "
+            "(données actuelles), 2050 = modélisé (projection climatique), "
+            "2100 = non disponible tant que Copernicus CDS est désactivé."
+        ),
+        "perils": perils,
+    }
+
+
 def compute_risk_scores(building_data: dict[str, Any]) -> dict[str, Any]:
     """Point d'entrée du scoring_agent.
 
@@ -895,17 +1053,25 @@ def compute_risk_scores(building_data: dict[str, Any]) -> dict[str, Any]:
     projection = climat.get("projection_2041_2050")
 
     logger.info("période référence (2025) :")
-    zones_2025, sources_2025, risques_par_alea_2025 = _compute_zones_for_period(building_data, reference, is_projection=False)
+    zones_2025, sources_2025, risques_par_alea_2025, peril_tracking_2025 = _compute_zones_for_period(building_data, reference, is_projection=False)
     score_2025 = _score_global(zones_2025)
     logger.info("  -> score_global = %d", score_2025)
 
     logger.info("période projection (2050) :")
-    zones_2050, sources_2050, risques_par_alea_2050 = _compute_zones_for_period(building_data, projection or reference, is_projection=True)
+    zones_2050, sources_2050, risques_par_alea_2050, peril_tracking_2050 = _compute_zones_for_period(building_data, projection or reference, is_projection=True)
     score_2050 = _score_global(zones_2050)
     logger.info("  -> score_global = %d", score_2050)
 
     confidence = _compute_confidence(sources_2025)
     logger.info("  -> confiance = %d (%s)", confidence["score"], confidence["niveau"])
+
+    trajectoire = compute_trajectoire(
+        building_data,
+        risques_par_alea_2025,
+        peril_tracking_2025,
+        risques_par_alea_2050,
+        peril_tracking_2050,
+    )
 
     return {
         "score_global": score_2025,
@@ -916,6 +1082,7 @@ def compute_risk_scores(building_data: dict[str, Any]) -> dict[str, Any]:
             "zones": zones_2050,
             "risques_par_alea": risques_par_alea_2050,
         },
+        "trajectoire": trajectoire,
         "confidence": confidence,
         "sources": sources_2025,
     }

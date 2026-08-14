@@ -459,12 +459,19 @@ export function Zone() {
 
   function setAllVisible(visible: boolean) {
     if (!report) return;
-    const codes = (report.aleas || []).map((a) => a.code);
+    /* Tous les aléas à source disponible (présents ou absents) ont une couche
+       affichable sur la carte — les absents montrent la donnée communale.
+       Seuls les aléas à source indisponible (present=null) n'ont rien à
+       afficher et restent hors de la sélection. */
+    const codes = togglableAleas.map((a) => a.code);
     setVisibleLayerKeys(visible ? new Set(codes) : new Set());
   }
 
   /* ── Dérivés du rapport ── */
   const presentAleas = (report?.aleas || []).filter((a) => a.present === true);
+  /* Aléas dont la source est disponible (présents OU absents) : les absents
+     restent visualisables sur la carte via les couches communales WMS/WFS. */
+  const togglableAleas = (report?.aleas || []).filter((a) => a.present !== null);
   const maxScore = presentAleas.length ? Math.max(...presentAleas.map((a) => aleaScore(a))) : null;
   const band = maxScore != null ? D03.find((b) => (maxScore as number) < b.max) || D03[D03.length - 1] : null;
 
@@ -475,10 +482,13 @@ export function Zone() {
     }))
   );
 
-  const allPresentVisible =
+  /* « Tout masquer » n'est affiché que si TOUS les aléas à source disponible
+     sont visibles — c'est ce que la carte peut réellement montrer (les aléas
+     absents ont leurs couches communales WMS/WFS). */
+  const allTogglableVisible =
     report !== null &&
-    (report.aleas || []).length > 0 &&
-    (report.aleas || []).every((a) => visibleLayerKeys.has(a.code));
+    togglableAleas.length > 0 &&
+    togglableAleas.every((a) => visibleLayerKeys.has(a.code));
 
   const pdfUrl = report
     ? `${API}/diagnostic/adresse/rapport-pdf?lat=${report.lat}&lon=${report.lon}`
@@ -730,17 +740,20 @@ export function Zone() {
                         <md-text-button
                           className="toggle-all"
                           aria-label={
-                            allPresentVisible
+                            allTogglableVisible
                               ? 'Masquer toutes les couches sur la carte'
                               : 'Afficher toutes les couches sur la carte'
                           }
-                          onClick={() => setAllVisible(!allPresentVisible)}
+                          onClick={() => setAllVisible(!allTogglableVisible)}
                         >
                           <md-icon slot="icon">
-                            {allPresentVisible ? 'visibility' : 'visibility_off'}
+                            {allTogglableVisible ? 'visibility' : 'visibility_off'}
                           </md-icon>
-                          {allPresentVisible ? 'Tout masquer' : 'Tout afficher'}
+                          {allTogglableVisible ? 'Tout masquer' : 'Tout afficher'}
                         </md-text-button>
+                      </div>
+                      <div className="alea-scope-hint" role="note">
+                        « À votre adresse » : risque détecté sur le bien · « Dans la commune » : risque recensé au niveau communal
                       </div>
                       <div className="alea-cards">
                         {(report.aleas || []).map((a) => (
@@ -1245,51 +1258,70 @@ function AleaCard({
 
   const addrPresent = alea.present === true;
   const communePresent = alea.present_commune !== false;
+  /* L'œil est actif dès que la source est disponible (présent OU absent) :
+     un aléa non présent reste visualisable via la couche communale WMS/WFS.
+     Seule une source indisponible (present=null) n'a rien à montrer. */
+  const canToggle = alea.present !== null;
 
   return (
     <div className={`alea-card${isAbsent ? ' absent' : ''}${isError ? ' error-partial' : ''}`}>
-      <span className={`alea-icon ${band ? band.cls : ''}`}>
-        <md-icon>{icon}</md-icon>
-      </span>
-
-      <div className="alea-left">
+      <div className="alea-head">
+        <span className={`alea-icon ${band ? band.cls : ''}`}>
+          <md-icon>{icon}</md-icon>
+        </span>
         <span className="alea-name">{alea.libelle}</span>
-        <div className="alea-statuses">
-          {isError ? (
-            <span className="status-chip chip-off">
-              <md-icon>cloud_off</md-icon> source indisponible
-            </span>
-          ) : (
-            <>
-              <span className={`status-chip ${addrPresent ? 'chip-on' : 'chip-off'}`}>
-                <md-icon>location_on</md-icon>
-                {addrPresent ? 'CONCERNÉ' : 'PAS DE RISQUE'}
-              </span>
-              <span className={`status-chip ${communePresent ? 'chip-mid' : 'chip-off'}`}>
-                <md-icon>account_balance</md-icon>
-                {communePresent ? 'EXISTANT' : 'NON CONCERNÉ'}
-              </span>
-            </>
-          )}
-        </div>
-        {alea.zonage ? <span className="alea-zonage">{alea.zonage}</span> : null}
-      </div>
-
-      <div className="alea-right">
+        {band && alea.present === true ? (
+          <span className={`d03-pill ${band.cls}`}>{band.label}</span>
+        ) : null}
         <md-icon-button
           className="eye-btn"
           aria-label={
-            visible
-              ? `Masquer la couche ${alea.libelle} sur la carte`
-              : `Afficher la couche ${alea.libelle} sur la carte`
+            canToggle
+              ? visible
+                ? `Masquer la couche ${alea.libelle} sur la carte`
+                : `Afficher la couche ${alea.libelle} sur la carte`
+              : `Aucune couche à afficher pour ${alea.libelle}`
           }
+          title={
+            canToggle
+              ? alea.present === true
+                ? visible
+                  ? `Masquer la couche ${alea.libelle} sur la carte`
+                  : `Afficher la couche ${alea.libelle} sur la carte`
+                : visible
+                  ? `Masquer la couche ${alea.libelle} (risque non présent à l'adresse, donnée communale)`
+                  : `Afficher la couche ${alea.libelle} (risque non présent à l'adresse, donnée communale)`
+              : 'Source indisponible — aucune couche à afficher'
+          }
+          disabled={!canToggle}
           onClick={onToggle}
         >
           <md-icon>{visible ? 'visibility' : 'visibility_off'}</md-icon>
         </md-icon-button>
-        {band && alea.present === true ? (
-          <span className={`d03-pill ${band.cls}`}>{band.label}</span>
-        ) : null}
+      </div>
+
+      <div className="alea-body">
+        {alea.zonage ? <span className="alea-zonage">{alea.zonage}</span> : null}
+        <div className="alea-statuses">
+          {isError ? (
+            <span className="status-chip chip-off">
+              <md-icon>cloud_off</md-icon> Source indisponible
+            </span>
+          ) : (
+            <>
+              <span className={`status-chip ${addrPresent ? 'chip-on' : 'chip-none'}`}>
+                <span className="status-dot" aria-hidden="true" />
+                {addrPresent ? 'Concerné' : 'Pas de risque'}
+              </span>
+              {communePresent !== addrPresent && (
+                <span className={`status-chip ${communePresent ? 'chip-mid' : 'chip-none'}`}>
+                  <span className="status-dot" aria-hidden="true" />
+                  {communePresent ? 'Commune : risque existant' : 'Commune : non concerné'}
+                </span>
+              )}
+            </>
+          )}
+        </div>
         {alea.url_detail ? (
           <a className="alea-link" href={alea.url_detail} target="_blank" rel="noopener">
             <md-icon>open_in_new</md-icon>

@@ -6,7 +6,9 @@
 //   retiré : Mapbox est l'unique moteur de fond de carte.
 //   · Bâtiments 3D (BDNB, extrusion par hauteur réelle) + surlignage accent
 //     de l'empreinte du bâtiment diagnostiqué (extrusion 3D et teinte 2D)
-//   · Couches de risque BRGM (WMS) + WFS Géorisques (step Cartographie)
+//   · Couches de risque BRGM (WMS) + WFS Géorisques, à plat (pas de volumes
+//     3D) — visibilité pilotée par les toggles œil du panneau latéral
+//     (step Cartographie uniquement)
 //   · Parcelles cadastrales IGN (toggle, step Analyse uniquement)
 //   · Popup de l'adresse avec les aléas présents (step Cartographie)
 //   · Resize différé pour suivre la transition du panneau latéral
@@ -32,7 +34,6 @@ import {
 import {
   bboxAround,
   cadastreTileUrl,
-  firstRing,
   fetchWfsLayer,
   geomToWgs84,
   polygonCenter,
@@ -136,6 +137,9 @@ export function UnifiedMap({
   visibleKeysRef.current = visibleLayerKeys;
   const buildingsLimitRef = useRef(buildingsLimit);
   buildingsLimitRef.current = buildingsLimit;
+  /* Couches de risque WMS/WFS créées par `renderReport` : code d'aléa →
+   * ids de couches (fill/outline/raster/circle), pour piloter leur
+   * visibilité depuis les toggles œil du panneau latéral. */
   const layerIdsByKeyRef = useRef<Map<string, string[]>>(new Map());
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
@@ -143,11 +147,6 @@ export function UnifiedMap({
   /* Indicateur du bâtiment cible (épingle accrochée à la géométrie BDNB),
    * visible en 2D comme en 3D. */
   const buildingPinRef = useRef<mapboxgl.Marker | null>(null);
-  /* Couches de risque interactives (hover + clic) : layerId → métadonnées
-   * d'affichage. Alimenté par renderReport, lu par les handlers mousemove/click
-   * posés une seule fois sur la carte. */
-  const interactiveLayersRef = useRef<Map<string, { libelle: string; niveau?: string | null; kind: 'vector' | 'circle' }>>(new Map());
-  const hoverPopupRef = useRef<mapboxgl.Popup | null>(null);
 
   const [is3d, setIs3d] = useState(initial3D);
   const [showParcels, setShowParcels] = useState(false);
@@ -227,7 +226,6 @@ export function UnifiedMap({
       ensureBuildingsLayer(map);
       updateBuildingsTarget(map);
       placeBuildingPin(map);
-      setupRiskLayerInteractions(map);
       void loadBuildings(map);
       if (showRisks) renderReport(map, latestReportRef.current);
     });
@@ -273,8 +271,6 @@ export function UnifiedMap({
       pinElRef.current = null;
       buildingPinRef.current?.remove();
       buildingPinRef.current = null;
-      hoverPopupRef.current?.remove();
-      hoverPopupRef.current = null;
       map.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -305,10 +301,9 @@ export function UnifiedMap({
     if (showRisks) {
       renderReport(map, report);
     } else {
-      // Quitter Cartographie sans ça laissait les couches de zone (fills +
-      // extrusions P6) posées sur la carte : `renderReport` ne se relance
-      // pas ici, donc rien ne les cachait — elles restaient visibles (et se
-      // superposaient) une fois passé en Analyse.
+      // Quitter Cartographie sans ça laissait les couches de zone posées
+      // sur la carte : `renderReport` ne se relance pas ici, donc rien ne
+      // les cachait — elles restaient visibles une fois passé en Analyse.
       hideLayersModeLayers(map);
       popupRef.current?.remove();
       popupRef.current = null;
@@ -324,28 +319,24 @@ export function UnifiedMap({
     applyRiskLayersVisibility(map);
   }, [visibleLayerKeys]);
 
-  /** Applique la visibilité des couches de risque en tenant compte à la fois
-   *  du toggle par aléa (`visibleLayerKeys`) et du mode 2D/3D : une couche
-   *  `fill` (zone plate) n'est montrée qu'en 2D, son pendant `fill-extrusion`
-   *  (P6) qu'en 3D — `line`/`circle`/`raster` restent inchangés par le 2D/3D. */
+  /** Applique la visibilité des couches de risque selon le toggle par aléa
+   *  du panneau latéral (`visibleLayerKeys`) — et uniquement en 2D : ce sont
+   *  des aplats au sol (pas d'extrusion), qui en caméra inclinée (3D) se
+   *  lisent comme des volumes au milieu des bâtiments extrudés, ce qui n'est
+   *  pas l'effet voulu. Repassent visibles dès le retour en 2D. */
   function applyRiskLayersVisibility(map: mapboxgl.Map) {
     for (const [key, ids] of layerIdsByKeyRef.current) {
-      const keyVisible = visibleKeysRef.current.has(key);
+      const visible = visibleKeysRef.current.has(key) && !is3dRef.current;
       for (const id of ids) {
-        const layer = map.getLayer(id);
-        if (!layer) continue;
-        let visible = keyVisible;
-        if (layer.type === 'fill') visible = keyVisible && !is3dRef.current;
-        else if (layer.type === 'fill-extrusion') visible = keyVisible && is3dRef.current;
-        map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
       }
     }
   }
 
-  /** Cache toutes les couches de risque « Layers mode » (fills/extrusions
-   *  WMS/WFS de `renderReport`), indépendamment de `visibleLayerKeys` —
-   *  utilisé en quittant Cartographie pour ne pas laisser les couches de la
-   *  carte précédente visibles sur les étapes suivantes. */
+  /** Cache toutes les couches de risque (fills WMS/WFS de `renderReport`),
+   *  indépendamment de `visibleLayerKeys` — utilisé en quittant Cartographie
+   *  pour ne pas laisser les couches de la carte précédente visibles sur
+   *  les étapes suivantes. */
   function hideLayersModeLayers(map: mapboxgl.Map) {
     for (const ids of layerIdsByKeyRef.current.values()) {
       for (const id of ids) {
@@ -355,52 +346,6 @@ export function UnifiedMap({
   }
 
   /* ═══════════ Couches sources et rendu ═══════════ */
-
-  /** Survol + clic sur les couches de risque (vecteur WFS + cercles fallback) :
-   *  posé une fois sur la carte, lit `interactiveLayersRef` (mis à jour à
-   *  chaque `renderReport`) pour retrouver libellé/niveau de la feature visée. */
-  function setupRiskLayerInteractions(map: mapboxgl.Map) {
-    const featureAt = (point: mapboxgl.Point) => {
-      const ids = Array.from(interactiveLayersRef.current.keys()).filter((id) => map.getLayer(id));
-      if (!ids.length) return null;
-      const feats = map.queryRenderedFeatures(point, { layers: ids });
-      if (!feats.length) return null;
-      const meta = interactiveLayersRef.current.get(String(feats[0].layer?.id));
-      return meta ?? null;
-    };
-    const tooltipHtml = (meta: { libelle: string; niveau?: string | null; kind: 'vector' | 'circle' }) => {
-      const band = bandForKey(meta.niveau);
-      const label = band?.label ?? meta.niveau ?? '—';
-      const note = meta.kind === 'circle' ? ' · présence communale (zone exacte non localisée)' : '';
-      return (
-        `<div class="mb-hover-title">${escHtml(meta.libelle)}</div>` +
-        `<div class="mb-hover-level" style="color:${band?.color ?? '#E8E6DC'}">${escHtml(label)}${escHtml(note)}</div>`
-      );
-    };
-    map.on('mousemove', (e) => {
-      const meta = featureAt(e.point);
-      map.getCanvas().style.cursor = meta ? 'pointer' : '';
-      if (!meta) {
-        hoverPopupRef.current?.remove();
-        hoverPopupRef.current = null;
-        return;
-      }
-      if (!hoverPopupRef.current) {
-        hoverPopupRef.current = new mapboxgl.Popup({
-          closeButton: false, closeOnClick: false, offset: 12, className: 'mb-hover-popup',
-        });
-      }
-      hoverPopupRef.current.setLngLat(e.lngLat).setHTML(tooltipHtml(meta)).addTo(map);
-    });
-    map.on('click', (e) => {
-      const meta = featureAt(e.point);
-      if (!meta) return;
-      new mapboxgl.Popup({ closeButton: true, offset: 12, className: 'mb-hover-popup' })
-        .setLngLat(e.lngLat)
-        .setHTML(tooltipHtml(meta))
-        .addTo(map);
-    });
-  }
 
   /** Bâtiments 3D natifs Mapbox : tout le bâti OSM extrudé (hauteurs réelles
    *  OSM, approx.) — remplace le chargement BDNB par viewport pour l'effet
@@ -565,7 +510,6 @@ export function UnifiedMap({
       }
     }
     layerIdsByKeyRef.current.clear();
-    interactiveLayersRef.current.clear();
     const seq = ++renderSeqRef.current;
 
     placeMarker(map, rep);
@@ -613,16 +557,20 @@ export function UnifiedMap({
     /* Surbrillance du bâtiment diagnostiqué */
     updateBuildingsTarget(map);
 
-    /* Couches WMS + WFS. Le vecteur (WFS) prime sur le raster (WMS) dès que
-     * la donnée existe pour l'aléa (principe #4 de la doc) : plusieurs
-     * FeatureType peuvent composer un même aléa (ex. ppr agrège 8 couches de
-     * périmètres) — on les fusionne en une seule source. Le raster reste le
-     * repli si le vecteur ne renvoie aucune feature dans la bbox. */
+    /* Couches WMS + WFS, à plat (pas de volumes 3D). Le vecteur (WFS) prime
+     * sur le raster (WMS) dès que la donnée existe pour l'aléa : plusieurs
+     * FeatureType peuvent composer un même aléa (ex. ppr agrège 8 couches
+     * de périmètres) — on les fusionne en une seule source. Le raster reste
+     * le repli si le vecteur ne renvoie aucune feature dans la bbox. */
     const bbox = bboxAround(rep.lon, rep.lat);
-    const beforeId = map.getLayer(BUILDINGS_LAYER) ? BUILDINGS_LAYER : undefined;
     const renderLayers = async () => {
       for (const a of rep.aleas || []) {
         if (seq !== renderSeqRef.current) return;
+        /* Aléas à source indisponible (present=null) : aucune donnée à
+           afficher. Les aléas ABSENTS (present=false) restent affichables :
+           leurs couches WMS/WFS montrent la donnée communale — l'utilisateur
+           peut visualiser le risque même s'il n'est pas présent à l'adresse. */
+        if (a.present === null) continue;
         const band = a.niveau ? bandForKey(a.niveau) : undefined;
         const color = band?.color || '#7A9187';
         const visible = visibleKeysRef.current.has(a.code);
@@ -644,50 +592,32 @@ export function UnifiedMap({
             } catch { /* couche suivante */ }
           }
           if (merged.length) {
-            const data = withNiveauProp({ type: 'FeatureCollection', features: merged }, a.niveau);
+            const data = {
+              type: 'FeatureCollection' as const,
+              features: merged.map((f) => ({ ...f, properties: { ...(f.properties || {}), niveau: a.niveau } })),
+            };
             map.addSource(sourceId, { type: 'geojson', data });
-            const fillVisible = visible && !is3dRef.current;
-            const extrusionVisible = visible && is3dRef.current;
             map.addLayer({
               id: layerId, type: 'fill', source: sourceId,
-              layout: { visibility: fillVisible ? 'visible' : 'none' },
+              layout: { visibility: visible ? 'visible' : 'none' },
               paint: {
-                'fill-color': d03ColorExpr(color),
+                'fill-color': color,
                 'fill-opacity': 0.5,
                 'fill-outline-color': '#263238',
               },
-            }, beforeId);
+            });
             const outlineId = `${layerId}-outline`;
             map.addLayer({
               id: outlineId, type: 'line', source: sourceId,
               layout: { visibility: visible ? 'visible' : 'none' },
               paint: {
-                'line-color': d03ColorExpr(color),
-                'line-width': d03LineWidthExpr(),
+                'line-color': color,
+                'line-width': a.niveau === 'critique' ? 3 : a.niveau === 'eleve' ? 2 : 1.2,
                 'line-opacity': 0.6,
               },
-            }, beforeId);
-            /* Extrusion 3D (P6) : les zones de risque deviennent des volumes
-             * qu'on survole — hauteur codée sur le niveau D03, plafonnée pour
-             * rester lisible face aux bâtiments. Passe sous BUILDINGS_LAYER
-             * (before:) pour ne jamais masquer le surlignage du bâtiment cible. */
-            const extrusionId = `${layerId}-extrusion`;
-            map.addLayer({
-              id: extrusionId, type: 'fill-extrusion', source: sourceId,
-              layout: { visibility: extrusionVisible ? 'visible' : 'none' },
-              paint: {
-                'fill-extrusion-height': d03HeightExpr(),
-                'fill-extrusion-base': 0,
-                'fill-extrusion-color': d03ColorExpr(color),
-                'fill-extrusion-opacity': 0.55,
-                'fill-extrusion-vertical-gradient': false,
-              },
-            }, beforeId);
+            });
             track(layerId);
             track(outlineId);
-            track(extrusionId);
-            interactiveLayersRef.current.set(layerId, { libelle: a.libelle, niveau: a.niveau, kind: 'vector' });
-            interactiveLayersRef.current.set(extrusionId, { libelle: a.libelle, niveau: a.niveau, kind: 'vector' });
             wfsRendered = true;
           }
         }
@@ -701,7 +631,9 @@ export function UnifiedMap({
         }
 
         /* Fallback : cercle ponctuel — marque une présence communale, pas la
-         * zone exacte du risque (cf. tooltip au survol). */
+         * zone exacte du risque. Réservé aux aléas PRÉSENTS : pour un aléa
+         * absent sans couche WMS/WFS il n'y a aucune donnée à montrer. */
+        if (a.present !== true) continue;
         map.addSource(sourceId, {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [rep.lon, rep.lat] }, properties: {} }] },
@@ -713,7 +645,6 @@ export function UnifiedMap({
         }
         map.addLayer({ id: layerId, type: 'circle', source: sourceId, layout: { visibility: visible ? 'visible' : 'none' }, paint: circle });
         track(layerId);
-        interactiveLayersRef.current.set(layerId, { libelle: a.libelle, niveau: a.niveau, kind: 'circle' });
       }
     };
     void renderLayers();
@@ -795,8 +726,6 @@ export function UnifiedMap({
       map.setLayoutProperty(BUILDINGS_2D_LAYER, 'visibility', enabled ? 'none' : 'visible');
     }
     if (enabled) updateBuildingsTarget(map); // filtre BDNB → bâtiment cible
-    // Couches de risque : bascule fill (2D) ↔ fill-extrusion (3D, P6).
-    applyRiskLayersVisibility(map);
     map.easeTo({ pitch: enabled ? 55 : 0, duration: 800 });
     if (enabled) void loadBuildings(map);
   }
@@ -823,34 +752,12 @@ export function UnifiedMap({
     }
   }
 
-  const activeAleas = showRisks
-    ? (report?.aleas || []).filter((a) => a.present === true && a.niveau && visibleLayerKeys.has(a.code))
-    : [];
-  const activeBandKeys = Array.from(new Set(activeAleas.map((a) => a.niveau as string)));
-  const activeBands = D03.filter((b) => activeBandKeys.includes(b.key));
-
   return (
     <div className="mb-demo-wrap">
       {mapError ? (
         <div className="mb-demo-error"><md-icon>error</md-icon><p>{mapError}</p></div>
       ) : (
         <div ref={containerRef} className="mb-demo-map" />
-      )}
-      {!mapError && activeAleas.length > 0 && (
-        <div className="mb-map-legend" role="group" aria-label="Légende des risques affichés">
-          <div className="mb-map-legend-head">
-            <md-icon>layers</md-icon>
-            <span>{activeAleas.length} couche{activeAleas.length > 1 ? 's' : ''} active{activeAleas.length > 1 ? 's' : ''}</span>
-          </div>
-          <div className="mb-map-legend-bands">
-            {activeBands.map((b) => (
-              <div className="mb-map-legend-row" key={b.key}>
-                <span className="mb-map-legend-dot" style={{ background: b.color }} />
-                <span>{b.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
       {!mapError && (
         <div className="mb-demo-tools" role="group" aria-label="Options de la carte">
@@ -888,34 +795,6 @@ export function UnifiedMap({
       )}
     </div>
   );
-}
-
-/* ── Couleur/épaisseur par bande D03 (couches de risque vecteur) ── */
-/** `fill-color`/`line-color` par bande D03 (propriété `niveau` injectée au
- *  fetch, cf. `withNiveauProp`) — repli sur `fallback` si le niveau est
- *  absent/inconnu. */
-function d03ColorExpr(fallback: string): any {
-  const stops: any[] = [];
-  for (const b of D03) stops.push(b.key, b.color);
-  return ['match', ['coalesce', ['get', 'niveau'], ''], ...stops, fallback];
-}
-/** Contour plus épais aux niveaux élevés — hiérarchie visuelle du risque. */
-function d03LineWidthExpr(): any {
-  return ['match', ['coalesce', ['get', 'niveau'], ''], 'critique', 3, 'eleve', 2, 1.2];
-}
-/** Hauteur d'extrusion 3D (P6) par bande D03 — la carte « se soulève » là où
- *  le risque est fort ; plafonnée à 14 m pour rester lisible face au bâti. */
-function d03HeightExpr(): any {
-  return ['match', ['coalesce', ['get', 'niveau'], ''],
-    'critique', 14, 'eleve', 10, 'modere', 6, 'faible', 3, 'tres_faible', 1.5, 1];
-}
-/** Injecte le niveau D03 de l'aléa dans chaque feature (le WFS Géorisques ne
- *  porte pas ce champ) pour permettre le coloriage par `d03ColorExpr`. */
-function withNiveauProp(fc: GeoJSON.FeatureCollection, niveau: string | null | undefined): GeoJSON.FeatureCollection {
-  return {
-    ...fc,
-    features: fc.features.map((f) => ({ ...f, properties: { ...(f.properties || {}), niveau } })),
-  };
 }
 
 /* ── Couleur des volumes extrudés ── */
