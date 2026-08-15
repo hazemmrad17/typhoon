@@ -12,6 +12,9 @@ Three.js.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from app.agents import recommandations_agent, scoring_agent
@@ -24,6 +27,10 @@ from app.scoring.risk_model import _niveau
 from partner_api.schemas import (
     Address,
     AnalyzeResponse,
+    BatchItemResult,
+    BatchItemStatus,
+    BatchPollResponse,
+    BatchSubmitResponse,
     Confidence,
     Hazard,
     RiskPeriod,
@@ -93,8 +100,11 @@ def _period_from_raw(score_global: int, zones_raw: dict[str, Any], hazards_raw: 
     )
 
 
-async def analyze_address(address: str) -> AnalyzeResponse:
+async def analyze_address(address: str, scenario: str = "rcp8_5") -> AnalyzeResponse:
     """Point d'entree unique de la Partner API : adresse -> risque + recommandations.
+
+    `scenario` (rcp4_5 / rcp8_5) pilote les points projetes de la trajectoire ;
+    les deux RCP restent exposes en comparaison (champ `scenarios`).
 
     Leve AddressNotFound si l'adresse ne peut pas etre geocodee (entree
     invalide, 422 cote route). Toute autre erreur individuelle de source
@@ -102,7 +112,7 @@ async def analyze_address(address: str) -> AnalyzeResponse:
     consignee dans building_data["erreurs"] et le score est calcule avec
     les sources disponibles, comme dans /diagnostic.
     """
-    logger.info("partner_api.analyze_address -- adresse=%r", address)
+    logger.info("partner_api.analyze_address -- adresse=%r scenario=%s", address, scenario)
 
     try:
         building_data = await collect(address, enable_copernicus=settings.copernicus_enabled)
@@ -110,7 +120,7 @@ async def analyze_address(address: str) -> AnalyzeResponse:
         raise AddressNotFound(str(exc)) from exc
 
     state: dict[str, Any] = {"building_data": building_data, "formulaire": None}
-    state.update(scoring_agent.run(state))
+    state.update(scoring_agent.run(state, scenario=scenario))
     state.update(await recommandations_agent.run(state))
 
     risk_scores = state["risk_scores"]
@@ -144,4 +154,91 @@ async def analyze_address(address: str) -> AnalyzeResponse:
         trajectoire=_trajectoire_from_raw(risk_scores.get("trajectoire")),
         erreurs_sources=building_data.get("erreurs", []),
         genere_le=building_data.get("genere_le", ""),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch — Phase 4B, item 24 : soumission async + polling
+# ---------------------------------------------------------------------------
+
+# Store en memoire (process-local) : suffisant pour un premier lancement. Un
+# backend durable (Redis/Postgres) viendra avec la mise en production — voir
+# Phase 3 (deploiement) du roadmap. TTL simple pour eviter une fuite memoire.
+_BATCH_TTL_S = 24 * 3600
+_BATCH_MAX_CONCURRENCY = 8
+
+_batches: dict[str, dict[str, Any]] = {}
+
+
+def _batch_status(batch: dict[str, Any]) -> str:
+    states = {it["status"] for it in batch["items"]}
+    if states <= {BatchItemStatus.COMPLETED, BatchItemStatus.FAILED}:
+        return "completed"
+    if BatchItemStatus.PROCESSING in states:
+        return "processing"
+    return "queued"
+
+
+async def _run_batch_worker(batch_id: str) -> None:
+    """Traite les adresses du lot avec une concurrence bornee."""
+    batch = _batches[batch_id]
+    semaphore = asyncio.Semaphore(_BATCH_MAX_CONCURRENCY)
+
+    async def process_item(item: dict[str, Any]) -> None:
+        async with semaphore:
+            if item["status"] != BatchItemStatus.PENDING:
+                return
+            item["status"] = BatchItemStatus.PROCESSING
+            try:
+                item["result"] = await analyze_address(item["address"], scenario=item.get("scenario", "rcp8_5"))
+                item["status"] = BatchItemStatus.COMPLETED
+            except AddressNotFound as exc:
+                item["status"] = BatchItemStatus.FAILED
+                item["error"] = f"adresse non trouvee : {exc}"
+            except Exception as exc:  # une adresse ne doit pas tuer le lot
+                logger.exception("batch %s -- echec pour %r", batch_id, item["address"])
+                item["status"] = BatchItemStatus.FAILED
+                item["error"] = f"{type(exc).__name__}: {exc}"
+
+    await asyncio.gather(*(process_item(item) for item in batch["items"]))
+    batch["done_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def submit_batch(addresses: list[str], scenario: str = "rcp8_5") -> BatchSubmitResponse:
+    """Cree un lot et lance son traitement en arriere-plan."""
+    batch_id = uuid.uuid4().hex[:12]
+    batch: dict[str, Any] = {
+        "id": batch_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "items": [
+            {"address": a, "scenario": scenario, "status": BatchItemStatus.PENDING, "result": None, "error": None}
+            for a in addresses
+        ],
+    }
+    _batches[batch_id] = batch
+    asyncio.get_running_loop().create_task(_run_batch_worker(batch_id))
+    return BatchSubmitResponse(batch_id=batch_id, status="queued", total=len(addresses))
+
+
+def get_batch(batch_id: str) -> BatchPollResponse | None:
+    """Etat d'un lot (polling). Retourne None si le lot n'existe pas."""
+    batch = _batches.get(batch_id)
+    if batch is None:
+        return None
+    items = batch["items"]
+    return BatchPollResponse(
+        batch_id=batch_id,
+        status=_batch_status(batch),
+        total=len(items),
+        completed=sum(1 for it in items if it["status"] == BatchItemStatus.COMPLETED),
+        failed=sum(1 for it in items if it["status"] == BatchItemStatus.FAILED),
+        items=[
+            BatchItemResult(
+                address=it["address"],
+                status=it["status"],
+                result=it["result"],
+                error=it["error"],
+            )
+            for it in items
+        ],
     )

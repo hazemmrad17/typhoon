@@ -47,7 +47,7 @@ async def _collector_node(state: TyphoonState) -> dict:
 
 
 def _scoring_node(state: TyphoonState) -> dict:
-    return scoring_agent.run(state)
+    return scoring_agent.run(state, scenario=state.get("scenario", "rcp8_5"))
 
 
 async def _recommandations_node(state: TyphoonState) -> dict:

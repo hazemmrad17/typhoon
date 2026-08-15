@@ -60,6 +60,7 @@ approximee, uniquement les valeurs du fichier officiel telecharge.
 
 from __future__ import annotations
 
+import os
 import shutil
 import zipfile
 from pathlib import Path
@@ -109,6 +110,23 @@ def _download_marker() -> Path:
     return _cache_dir() / ".download_complete"
 
 
+def _ensure_credentials_in_env() -> None:
+    """Injette les identifiants CDS dans l'environnement avant tout appel.
+
+    cdsapi lit sa configuration dans os.environ (CDSAPI_URL / CDSAPI_KEY),
+    avec repli sur $HOME/.cdsapirc. Ce projet centralise tout dans le .env
+    racine (lu par pydantic-settings), mais rien ne le copie vers os.environ
+    automatiquement. On le fait ici, au plus près de l'usage, pour que le
+    token fonctionne sans fichier .cdsapirc sur le disque.
+    """
+    url = settings.cdsapi_url
+    key = settings.cdsapi_key
+    if url:
+        os.environ.setdefault("CDSAPI_URL", url)
+    if key:
+        os.environ.setdefault("CDSAPI_KEY", key)
+
+
 def ensure_dataset_downloaded(force: bool = False) -> Path:
     """Telecharge (une seule fois, puis mis en cache) le jeu de donnees
     Copernicus defini par _REQUEST, et retourne le repertoire de cache.
@@ -131,6 +149,7 @@ def ensure_dataset_downloaded(force: bool = False) -> Path:
 
     import cdsapi  # import tardif : evite la dependance dure si non utilise
 
+    _ensure_credentials_in_env()
     cache_dir.mkdir(parents=True, exist_ok=True)
     client = cdsapi.Client()
     result = client.retrieve(DATASET_ID, dict(_REQUEST))
@@ -180,3 +199,112 @@ def read_indicators_at_point(lat: float, lon: float) -> dict[str, Any]:
                 resultats[f"{path.stem}__{var}"] = point[var].values.tolist()
 
     return resultats
+
+
+# ---------------------------------------------------------------------------
+# Traduction indicateurs → bloc climat 2100 (trajectoire Phase 1 item 3)
+# ---------------------------------------------------------------------------
+
+# Les variables CDS sémantiquement proches de celles que lisent les sous-
+# scores canicule/précipitation de risk_model. `heatwave_days` (jours de
+# canicule/an) est l'équivalent direct de `jours_chaleur_extreme_par_an`
+# (mêmes unités, mêmes seuils) ; `frequency_of_extreme_precipitation` est
+# une fraction (0-1), mappée avec ses propres seuils — on ne force jamais
+# un indicateur CDS dans des seuils calibrés pour une autre unité.
+_VAR_HEATWAVE_DAYS = "heatwave_days"
+_VAR_EXTREME_PRECIP_FREQ = "frequency_of_extreme_precipitation"
+
+# Scénarios climatiques téléchargés par _REQUEST (experiment : rcp4_5 + rcp8_5).
+# Chaque scénario produit ses propres fichiers NetCDF : la sélection se fait
+# par jeton dans le nom de fichier (clé `{stem}__{variable}`).
+SCENARIOS_CDS: tuple[str, ...] = ("rcp4_5", "rcp8_5")
+
+
+def scenario_available(climat_copernicus: dict[str, Any] | None, scenario: str) -> bool:
+    """True si des indicateurs du scénario demandé sont présents dans les
+    données téléchargées (jeton du scénario dans une clé `{stem}__{variable}`).
+
+    Évite que le repli de `_pick_key` (scénario → yearly → n'importe quelle
+    clé) produise un bloc 2100 d'un AUTRE scénario sous une mauvaise
+    étiquette — chaque scénario doit être strictement issu de ses propres
+    fichiers NetCDF.
+    """
+    if not climat_copernicus:
+        return False
+    return any(scenario in str(k).lower() for k in climat_copernicus)
+
+# Fenêtre « 2100 » : moyenne des N dernières années de la série (le dataset
+# s'arrête en 2100 ; on prend la décennie finale 2090-2100).
+_HORIZON_2100_WINDOW = 11
+
+
+def _series_value_2100(values: Any) -> float | None:
+    """Valeur à l'horizon 2100 d'une série d'indicateurs annuels.
+
+    Gère les trois formes observables selon l'agrégation : liste (série
+    annuelle — moyenne de la fenêtre finale), ou scalaire (agrégation déjà
+    faite). Retourne None si aucune valeur exploitable.
+    """
+    if isinstance(values, (int, float)):
+        return float(values)
+    if not isinstance(values, (list, tuple)) or not values:
+        return None
+    nums = [float(v) for v in values if isinstance(v, (int, float))]
+    if not nums:
+        return None
+    window = nums[-_HORIZON_2100_WINDOW:]
+    return sum(window) / len(window)
+
+
+def _pick_key(data: dict[str, Any], variable: str, scenario: str | None = None) -> str | None:
+    """Cherche la clé `{stem}__{variable}` la plus adaptée.
+
+    Priorité : scénario demandé (rcp8_5 par défaut), puis agrégation
+    annuelle (yearly), puis n'importe quelle occurrence de la variable.
+    """
+    candidates = [k for k in data if f"__{variable}" in k]
+    if not candidates:
+        return None
+    if scenario:
+        for c in candidates:
+            if scenario in c.lower():
+                return c
+    for c in candidates:
+        if "yearly" in c.lower():
+            return c
+    return candidates[0]
+
+
+def extract_climate_2100(climat_copernicus: dict[str, Any] | None, scenario: str = "rcp8_5") -> dict[str, Any] | None:
+    """Construit un bloc climat 2100 lisible par les sous-scores de risk_model.
+
+    Retourne `{"jours_chaleur_extreme_par_an": ...,
+    "frequency_extreme_precipitation": ...}` (mêmes clés que le bloc
+    Open-Meteo pour les champs partagés, plus le champ brut de fréquence),
+    ou None si les indicateurs CDS ne sont pas (encore) disponibles — le
+    point 2100 de la trajectoire reste alors honnêtement `indisponible`.
+    """
+    if not climat_copernicus:
+        return None
+
+    heat_key = _pick_key(climat_copernicus, _VAR_HEATWAVE_DAYS, scenario)
+    precip_key = _pick_key(climat_copernicus, _VAR_EXTREME_PRECIP_FREQ, scenario)
+    if not heat_key and not precip_key:
+        return None
+
+    bloc: dict[str, Any] = {}
+    if heat_key:
+        valeur = _series_value_2100(climat_copernicus[heat_key])
+        if valeur is not None:
+            bloc["jours_chaleur_extreme_par_an"] = round(valeur, 1)
+    if precip_key:
+        valeur = _series_value_2100(climat_copernicus[precip_key])
+        if valeur is not None:
+            bloc["frequency_extreme_precipitation"] = round(valeur, 4)
+
+    if not bloc:
+        return None
+    # Marqueur interne : permet à risk_model de distinguer un bloc Copernicus
+    # (fréquence CDS) d'un bloc Open-Meteo (mm) sans ambiguïté.
+    bloc["__copernicus_2100"] = True
+    return bloc

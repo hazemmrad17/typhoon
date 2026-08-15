@@ -58,6 +58,8 @@ class AleaDetail(BaseModel):
     source: str = "georisques"
     url_detail: str | None = None     # lien vers la fiche officielle Géorisques
     erreur: str | None = None         # rempli si la sous-source a échoué
+    resolution: str | None = None     # "per-building, polygon-checked" (WFS vecteur) ou
+                                      # "commune-level estimate" (interrogation par code_insee)
 
 
 # ---------------------------------------------------------------------------

@@ -149,3 +149,100 @@ def test_trajectoire_jamais_combinee():
                 assert banned not in pt, f"{code}: {banned} ne doit pas apparaitre"
     # Un peril absent (feu de foret non recense) a quand meme ses 3 points
     assert traj["perils"]["feu_foret"]["points"][0]["type"] == "observe"
+
+
+def _climat_copernicus_factice(
+    heatwave_days: float = 12.0, precip_freq: float = 0.12, scenario: str = "rcp8_5"
+) -> dict:
+    """Reproduit la forme stockee par le collecteur : cles `{stem}__{var}`
+    par scenario, chaque serie annuelle couvrant la fenetre 2090-2100
+    (_series_value_2100 moyenne les 11 dernieres annees, donc on fournit
+    11 valeurs terminant sur la cible)."""
+    return {
+        f"{scenario}__yearly__heatwave_days": [heatwave_days] * 11,
+        f"{scenario}__yearly__frequency_of_extreme_precipitation": [precip_freq] * 11,
+    }
+
+
+def test_trajectoire_2100_copernicus():
+    """Avec des donnees CDS telechargees, 2100 cesse d'etre indisponible pour
+    les perils pilotés par le climat — et reste honnetement indisponible pour
+    les perils statiques (jamais de valeur dupliquee depuis 2050)."""
+    data = _building_data_factice(alerte_argiles="moyen")
+    data["climat_copernicus"] = _climat_copernicus_factice()
+
+    scores = compute_risk_scores(data)
+    traj = scores["trajectoire"]["perils"]
+
+    # Canicule : 12 j/an -> bande 80, source taggee Copernicus, resolution grille
+    canicule_2100 = traj["canicule"]["points"][2]
+    assert canicule_2100["type"] == "projete"
+    assert canicule_2100["horizon"] == 2100
+    assert canicule_2100["valeur"] == 80
+    assert canicule_2100["scenario"] == "rcp8_5"
+    assert canicule_2100["source"] == "copernicus.cds.canicule"
+    assert canicule_2100["resolution"] == "grid-cell"
+    assert canicule_2100["confiance"] == "elevee"
+
+    # Precipitation : frequence 0.12 -> bande 80, source Copernicus
+    precip_2100 = traj["precipitation"]["points"][2]
+    assert precip_2100["type"] == "projete"
+    assert precip_2100["valeur"] == 80
+    assert precip_2100["source"] == "copernicus.precipitation"
+    assert precip_2100["resolution"] == "grid-cell"
+
+    # Perils statiques : 2100 reste indisponible (pas de duplication 2050)
+    for code in ("sismique", "radon", "mouvement_terrain", "inondation", "argile", "feu_foret"):
+        pt = traj[code]["points"][2]
+        assert pt["type"] == "indisponible", f"{code}: 2100 ne doit pas etre simule"
+        assert pt["valeur"] is None
+        assert pt["resolution"] is None
+
+    # Les horizons 2026/2050 ne bougent pas quand Copernicus est actif
+    assert traj["inondation"]["points"][0]["valeur"] == 15  # 0 CATNAT (repli)
+
+
+def test_trajectoire_2100_sans_copernicus():
+    """Sans donnees CDS, le bloc 2100 reste indisponible pour tous les perils
+    (source copernicus.cds taggee quand le flag est active, sinon None)."""
+    scores = compute_risk_scores(_building_data_factice(alerte_argiles="moyen"))
+    traj = scores["trajectoire"]["perils"]
+    for code, p in traj.items():
+        pt = p["points"][2]
+        assert pt["type"] == "indisponible"
+        assert pt["valeur"] is None
+        assert pt["source"] is None  # flag Copernicus desactive
+        assert pt["scenario"] is None
+
+
+def test_trajectoire_2100_comparaison_scenarios():
+    """Les deux RCP telecharges (rcp4_5 + rcp8_5) sont exposes en comparaison
+    sur chaque point 2100 projete (`scenarios`) ; `scenario` et `valeur`
+    suivent la selection primaire sans relancer le calcul."""
+    data = _building_data_factice(alerte_argiles="moyen")
+    # rcp4_5 : 8 j/an -> bande 60 ; rcp8_5 : 16 j/an -> bande 80
+    data["climat_copernicus"] = {
+        **_climat_copernicus_factice(heatwave_days=8.0, precip_freq=0.06, scenario="rcp4_5"),
+        **_climat_copernicus_factice(heatwave_days=16.0, precip_freq=0.16, scenario="rcp8_5"),
+    }
+
+    # Selection primaire rcp8_5 (defaut)
+    scores = compute_risk_scores(data)
+    canicule_2100 = scores["trajectoire"]["perils"]["canicule"]["points"][2]
+    assert canicule_2100["type"] == "projete"
+    assert canicule_2100["scenario"] == "rcp8_5"
+    assert canicule_2100["valeur"] == 80
+    assert canicule_2100["scenarios"] == {"rcp4_5": 60, "rcp8_5": 80}
+
+    # Selection primaire rcp4_5 : la valeur affichee bascule, la comparaison reste
+    scores45 = compute_risk_scores(data, scenario="rcp4_5")
+    pt45 = scores45["trajectoire"]["perils"]["canicule"]["points"][2]
+    assert pt45["scenario"] == "rcp4_5"
+    assert pt45["valeur"] == 60
+    assert pt45["scenarios"] == {"rcp4_5": 60, "rcp8_5": 80}
+
+    # La comparaison ne concerne que les perils pilotes par Copernicus :
+    # un peril statique reste indisponible, sans carte `scenarios`
+    sismique_2100 = scores["trajectoire"]["perils"]["sismique"]["points"][2]
+    assert sismique_2100["type"] == "indisponible"
+    assert "scenarios" not in sismique_2100

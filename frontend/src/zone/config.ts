@@ -155,6 +155,44 @@ export interface RisqueReport {
   avertissement?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Trajectoire climatique (Phase 1 — risk_model.compute_trajectoire)
+// Variables brutes F par péril et par horizon, jamais combinées, avec
+// provenance. Portée par la réponse /diagnostic/fast (digital_twin.trajectoire)
+// et la Partner API /v1/analyze.
+// ---------------------------------------------------------------------------
+
+export interface TrajectoirePoint {
+  horizon: number;            // 2026 (observe) / 2050 (projete) / 2100
+  type: 'observe' | 'projete' | 'indisponible';
+  scenario: string | null;    // scénario sélectionné (rcp4_5 / rcp8_5) quand connu, sinon null
+  valeur: number | null;      // variable brute F 0-100 sous le scénario sélectionné, jamais combinée
+  scenarios?: Record<string, number | null> | null;  // F brut sous chaque RCP téléchargé (comparaison sans relancer)
+  unite: string;
+  resolution: string | null;  // per-building | commune-level | grid-cell
+  confiance: string | null;   // elevee | moyenne | faible | null
+  source: string | null;
+  date_source: string | null;
+}
+
+/* Scénarios climatiques RCP — le CDS télécharge les deux (rcp4_5 + rcp8_5) ;
+   le sélecteur de la carte de décision bascule la comparaison. */
+export const SCENARIOS: { key: string; label: string; hint: string }[] = [
+  { key: 'rcp4_5', label: 'RCP 4.5', hint: 'Trajectoire modérée (atténuation des émissions)' },
+  { key: 'rcp8_5', label: 'RCP 8.5', hint: 'Trajectoire haute (statu quo des émissions)' },
+];
+
+export interface TrajectoirePeril {
+  label: string;
+  points: TrajectoirePoint[];
+}
+
+export interface Trajectoire {
+  horizons: number[];
+  note: string;
+  perils: Record<string, TrajectoirePeril>;
+}
+
 export interface RecommandationsIA {
   resume: string;
   actions_prioritaires: string[];

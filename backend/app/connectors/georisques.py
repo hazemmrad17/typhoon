@@ -18,6 +18,7 @@ from datetime import date
 
 import httpx
 
+from app.connectors.georisques_wfs import resolve_per_building
 from app.core.config import settings
 from app.schemas.risque_report import AleaDetail, NiveauRisque, RisqueReport
 
@@ -53,6 +54,22 @@ async def fetch_georisques_raw(
     """
     resultat: dict = {"erreurs": []}
     latlon = f"{lon},{lat}"
+
+    # Résolution au bâtiment (WFS vecteur) : le point de l'adresse est testé
+    # contre les géométries réelles (point-in-polygon / proximité) pour les
+    # aléas qui ont une couche vecteur. Si le WFS est indisponible, chaque aléa
+    # retombe au niveau commune (resolution="commune-level").
+    #
+    # Client dédié : la passerelle de georisques.gouv.fr lie une connexion
+    # keep-alive à un seul backend — mélanger l'API REST (`/api/v1`) et le WFS
+    # (`/services`) sur le même AsyncClient fait 404 « no Route matched » sur
+    # toutes les requêtes suivantes. On isole donc le WFS sur sa propre connexion.
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as wfs_client:
+            resultat["batiment"] = await resolve_per_building(wfs_client, lon, lat)
+    except Exception:
+        # Ne doit jamais faire échouer le diagnostic : repli commune.
+        resultat["batiment"] = {}
 
     sources = {
         "risques_commune":    ("gaspar/risques",          {"code_insee": citycode}),
@@ -133,6 +150,20 @@ def _is_source_failed(raw: dict, cle: str) -> bool:
     )
 
 
+def _batiment_status(raw: dict, code: str) -> tuple[bool | None, str]:
+    """Statut au bâtiment + niveau de résolution pour un aléa donné.
+
+    Retourne (present, resolution) :
+    - present=True/False quand le WFS a pu trancher au bâtiment,
+    - present=None quand le WFS était indisponible (repli commune,
+      resolution="commune-level").
+    """
+    info = ((raw or {}).get("batiment") or {}).get(code)
+    if not info:
+        return None, "commune-level"
+    return info.get("present"), info.get("resolution", "commune-level")
+
+
 # ---------------------------------------------------------------------------
 # Normalisation aléa par aléa
 # ---------------------------------------------------------------------------
@@ -189,11 +220,14 @@ def _alea_canalisations(raw: dict) -> AleaDetail:
         or _has_hazard_keyword(raw, "tmd")
     )
     score = 45 if hazard else 5
+    present_bat, resolution = _batiment_status(raw, "canalisations")
+    present = present_bat if present_bat is not None else hazard
     return AleaDetail(
         code="canalisations", libelle="Réseaux et canalisations",
-        present=hazard,
+        present=present,
         present_commune=hazard,
         niveau=_score_to_niveau(score),
+        resolution="per-building, polygon-checked" if resolution == "per-building" else "commune-level estimate",
         url_detail="https://www.georisques.gouv.fr/risques/transport-de-matieres-dangereuses",
     )
 
@@ -240,12 +274,15 @@ def _alea_ppr(raw: dict) -> AleaDetail:
     score = 10
     if n_ppr >= 3: score = 75
     elif n_ppr >= 1: score = 50
+    present_bat, resolution = _batiment_status(raw, "ppr")
+    present = present_bat if present_bat is not None else (n_ppr > 0)
     return AleaDetail(
         code="ppr", libelle="Plan de Prévention des Risques (PPR)",
-        present=(n_ppr > 0),
+        present=present,
         present_commune=(n_ppr > 0),
         niveau=_score_to_niveau(score),
         zonage=f"{n_ppr} PPR recensé(s)" if n_ppr > 0 else "Aucun PPR prescrit",
+        resolution="per-building, polygon-checked" if resolution == "per-building" else "commune-level estimate",
         url_detail="https://www.georisques.gouv.fr/risques/plans-de-prevention-des-risques",
     )
 
@@ -265,12 +302,15 @@ def _alea_ssp(raw: dict) -> AleaDetail:
     score = 10
     if n_ssp >= 5: score = 70
     elif n_ssp >= 1: score = 40
+    present_bat, resolution = _batiment_status(raw, "ssp")
+    present = present_bat if present_bat is not None else (n_ssp > 0)
     return AleaDetail(
         code="ssp", libelle="Sites et sols pollués (SSP)",
-        present=(n_ssp > 0),
+        present=present,
         present_commune=(n_ssp > 0),
         niveau=_score_to_niveau(score),
         zonage=f"{n_ssp} site(s) ou sol(s) pollué(s)" if n_ssp > 0 else "Aucun site recensé",
+        resolution="per-building, polygon-checked" if resolution == "per-building" else "commune-level estimate",
         url_detail="https://www.georisques.gouv.fr/risques/sites-et-sols-pollues",
     )
 

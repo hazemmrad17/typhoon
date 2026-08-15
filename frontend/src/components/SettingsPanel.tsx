@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { MOCK_USER } from './mockUser';
+import { PROFILE_LABELS, useUserProfile, type UserProfile } from '../typhoon/useUserProfile';
 import { BrandIcon, type BrandName } from './BrandIcon';
 
 export type SettingsTabKey = 'account' | 'security' | 'billing' | 'notifications' | 'connections';
@@ -204,6 +205,7 @@ function SaveBar({ onSave, onReset }: { onSave: () => void; onReset?: () => void
 /* ───────────────────────────── Onglet Compte ───────────────────────────── */
 
 function AccountTab() {
+  const { profile, changeProfile } = useUserProfile();
   const [avatar, setAvatar] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -353,6 +355,32 @@ function AccountTab() {
           </div>
         </div>
         <SaveBar onSave={() => undefined} onReset={reset} />
+      </SectionCard>
+
+      <SectionCard
+        title="Métier / Profil"
+        description="Le profil pilote la vue de diagnostic : l'assureur reçoit une carte de décision avec trajectoire climatique, le promoteur garde son parcours actuel (recommandations + artisans)."
+      >
+        <div className="profile-select-row">
+          <div className="field">
+            <SelectField
+              label="Profil métier"
+              value={profile}
+              onChange={(v) => changeProfile(v as UserProfile)}
+            >
+              {(Object.keys(PROFILE_LABELS) as UserProfile[]).map((p) => (
+                <option key={p} value={p}>{PROFILE_LABELS[p]}</option>
+              ))}
+            </SelectField>
+          </div>
+          <p className="profile-hint">
+            {profile === 'assurance'
+              ? 'Vue Décision : verdict de souscription, aléas par péril et trajectoire 2026 → 2050 → 2100.'
+              : profile === 'banque'
+                ? 'Vue Banque : parcours simplifié vers le rapport officiel (ERRIAL).'
+                : 'Vue Promoteur : parcours actuel inchangé (recommandations chiffrées + artisans).'}
+          </p>
+        </div>
       </SectionCard>
 
       <SectionCard title="Supprimer le compte">

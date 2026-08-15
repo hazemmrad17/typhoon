@@ -33,6 +33,11 @@ import re
 from enum import Enum
 from typing import Any
 
+from app.connectors.copernicus import (
+    SCENARIOS_CDS,
+    extract_climate_2100,
+    scenario_available,
+)
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -315,7 +320,7 @@ def _argile_subscore(
 
     if aggravation_2050:
         base = min(base + 12, 100)
-        source += " ; +12 pts pour horizon 2050 (sécheresses plus fréquentes, cf. BRGM/CCR)"
+        source += " ; +12 pts pour horizon projeté (sécheresses plus fréquentes, cf. BRGM/CCR)"
 
     return _clamp(base), source, tracking
 
@@ -458,11 +463,11 @@ def _feu_foret_subscore(georisques: dict[str, Any] | None) -> tuple[int, str, di
     return 10, "aucun aléa feu de forêt recensé par Géorisques", tracking
 
 
-def _canicule_subscore(climat_block: dict[str, Any] | None) -> tuple[int, str, dict[str, Any]]:
+def _canicule_subscore(climat_block: dict[str, Any] | None, source: str = "open_meteo.canicule") -> tuple[int, str, dict[str, Any]]:
     jours = (climat_block or {}).get("jours_chaleur_extreme_par_an")
-    tracking = {"source": "open_meteo.canicule", "statut": SourceStatus.AVAILABLE.value if jours is not None else SourceStatus.NOT_COLLECTED.value}
+    tracking = {"source": source, "statut": SourceStatus.AVAILABLE.value if jours is not None else SourceStatus.NOT_COLLECTED.value}
     if jours is None:
-        return 30, "jours de chaleur extrême non disponibles (Open-Meteo)", tracking
+        return 30, "jours de chaleur extrême non disponibles", tracking
     if jours < 3:
         base = 20
     elif jours < 6:
@@ -471,7 +476,8 @@ def _canicule_subscore(climat_block: dict[str, Any] | None) -> tuple[int, str, d
         base = 60
     else:
         base = 80
-    return _clamp(base), f"{jours:.1f} j de chaleur extrême/an (Open-Meteo)", tracking
+    provenance = "Copernicus CDS" if source.startswith("copernicus.") else "Open-Meteo"
+    return _clamp(base), f"{jours:.1f} j de chaleur extrême/an ({provenance})", tracking
 
 
 def _precipitation_subscore(climat_block: dict[str, Any] | None) -> tuple[int, str, dict[str, Any]]:
@@ -488,6 +494,33 @@ def _precipitation_subscore(climat_block: dict[str, Any] | None) -> tuple[int, s
     else:
         base = 65
     return _clamp(base), f"{mm:.0f} mm/an de précipitations (Open-Meteo)", tracking
+
+
+def _precipitation_frequency_subscore(climat_block: dict[str, Any] | None) -> tuple[int, str, dict[str, Any]]:
+    """Sous-score précipitations intenses à partir de la FRÉQUENCE des
+    épisodes extrêmes (Copernicus `frequency_of_extreme_precipitation`, 0-1).
+
+    Unité différente de `precipitation_annuelle_moyenne_mm` (Open-Meteo) :
+    on ne force pas cette valeur dans les seuils calibrés pour les mm — elle
+    a ses propres seuils, calibrés sur la fréquence (fraction d'épisodes
+    extrêmes par an). Même grille D03, même honnêteté de provenance.
+    """
+    freq = (climat_block or {}).get("frequency_extreme_precipitation")
+    tracking = {
+        "source": "copernicus.precipitation",
+        "statut": SourceStatus.AVAILABLE.value if freq is not None else SourceStatus.NOT_COLLECTED.value,
+    }
+    if freq is None:
+        return 30, "fréquence de précipitations extrêmes non disponible (Copernicus CDS)", tracking
+    if freq < 0.02:
+        base = 20
+    elif freq < 0.05:
+        base = 40
+    elif freq < 0.10:
+        base = 60
+    else:
+        base = 80
+    return _clamp(base), f"fréquence d'épisodes de précipitations extrêmes = {freq:.3f} (Copernicus CDS)", tracking
 
 
 # ---------------------------------------------------------------------------
@@ -629,7 +662,7 @@ PERILS_TRAJECTOIRE: list[tuple[str, str, str]] = [
 def _resolution_flag(source: str) -> str:
     if source.startswith("bdnb."):
         return "per-building"
-    if source.startswith("open_meteo."):
+    if source.startswith(("open_meteo.", "copernicus.")):
         return "grid-cell"
     return "commune-level"
 
@@ -653,6 +686,12 @@ def _compute_zones_for_period(
 
     D05 : chaque zone calcule F (aléa) et V (vulnérabilité) séparément,
     puis combine via moyenne géométrique : R = 100 × (F/100)^0.5 × (V/100)^0.5
+
+    Horizon 2100 : quand `climat_block` porte les clés Copernicus
+    (`frequency_extreme_precipitation`, `jours_chaleur_extreme_par_an`
+    issus de CDS), la canicule lit le bloc comme d'habitude et les
+    précipitations basculent sur le sous-score de fréquence (même grille
+    D03, unité CDS différente).
     """
     georisques = building_data.get("georisques")
     bdnb = building_data.get("bdnb")
@@ -664,14 +703,25 @@ def _compute_zones_for_period(
     if is_projection and precip_ref and precip_now:
         precip_delta_pct = max(0.0, (precip_now - precip_ref) / precip_ref * 100)
 
+    # Bloc 2100 Copernicus : la précipitation s'exprime en fréquence (CDS),
+    # pas en mm annuels — on utilise le sous-score dédié, jamais les seuils
+    # calibrés pour l'unité Open-Meteo. Le marqueur `__copernicus_2100` est
+    # posé par extract_climate_2100 (les blocs Open-Meteo ne l'ont pas).
+    copernicus_2100 = bool(climat_block) and climat_block.get("__copernicus_2100") is True
+
     # --- Tous les sous-scores F (aléas) ---
     argile_score, argile_src, argile_t = _argile_subscore(bdnb, georisques, aggravation_2050=is_projection)
     inondation_score, inondation_src, inondation_t = _inondation_subscore(georisques, precip_delta_pct)
     mvt_score, mvt_src, mvt_t = _mouvement_terrain_subscore(georisques)
     sismique_score, sismique_src, sismique_t = _sismique_subscore(georisques)
     radon_score, radon_src, radon_t = _radon_subscore(georisques)
-    canicule_score, canicule_src, canicule_t = _canicule_subscore(climat_block)
-    precip_score, precip_src, precip_t = _precipitation_subscore(climat_block)
+    canicule_score, canicule_src, canicule_t = _canicule_subscore(
+        climat_block, source="copernicus.cds.canicule" if copernicus_2100 else "open_meteo.canicule"
+    )
+    if copernicus_2100:
+        precip_score, precip_src, precip_t = _precipitation_frequency_subscore(climat_block)
+    else:
+        precip_score, precip_src, precip_t = _precipitation_subscore(climat_block)
     feu_foret_score, feu_foret_src, feu_foret_t = _feu_foret_subscore(georisques)
 
     # --- V (vulnérabilité du bâtiment) ---
@@ -936,6 +986,11 @@ def compute_trajectoire(
     tracking_2025: dict[str, dict[str, Any]],
     risques_2050: dict[str, dict[str, Any]],
     tracking_2050: dict[str, dict[str, Any]],
+    risques_2100: dict[str, dict[str, Any]] | None = None,
+    tracking_2100: dict[str, dict[str, Any]] | None = None,
+    scenarios_2100: dict[str, dict[str, dict[str, Any]]] | None = None,
+    tracking_2100_by_scenario: dict[str, dict[str, dict[str, Any]]] | None = None,
+    scenario: str = "rcp8_5",
 ) -> dict[str, Any]:
     """Expose les variables brutes F par péril, par horizon, avec provenance.
 
@@ -955,6 +1010,12 @@ def compute_trajectoire(
         explicitement comme tel plutôt que simulé (jamais de stub).
     """
     copernicus_actif = bool(building_data.get("climat_copernicus"))
+    # Copernicus effectivement exploité pour 2100 : le bloc a pu être extrait
+    # (indicateurs heatwave_days / frequency_of_extreme_precipitation au point).
+    copernicus_2100 = bool(risques_2100)
+    # Scénario sélectionné (rcp4_5 / rcp8_5) — celui qui pilote `valeur` ; les
+    # autres restent disponibles dans `scenarios` pour comparaison.
+    scenario = scenario if scenario in SCENARIOS_CDS else SCENARIOS_CDS[-1]
 
     perils: dict[str, Any] = {}
     for code, label, unite in PERILS_TRAJECTOIRE:
@@ -962,9 +1023,12 @@ def compute_trajectoire(
         r2050 = risques_2050.get(code) or {}
         t2025 = tracking_2025.get(code) or {}
         t2050 = tracking_2050.get(code) or {}
+        r2100 = (risques_2100 or {}).get(code) or {}
+        t2100 = (tracking_2100 or {}).get(code) or {}
 
         f2025 = r2025.get("risque")
         f2050 = r2050.get("risque")
+        f2100 = r2100.get("risque") if copernicus_2100 else None
 
         points: list[dict[str, Any]] = []
 
@@ -988,7 +1052,7 @@ def compute_trajectoire(
             {
                 "horizon": 2050,
                 "type": "projete",
-                "scenario": "rcp8_5" if copernicus_actif else None,
+                "scenario": scenario if copernicus_actif else None,
                 "valeur": f2050,
                 "unite": unite,
                 "resolution": _resolution_flag(t2050.get("source", "")),
@@ -998,40 +1062,88 @@ def compute_trajectoire(
             }
         )
 
-        # --- 2100 : indisponible (Copernicus non activé) ---
-        points.append(
-            {
+        # --- 2100 : projeté (Copernicus CDS) ou explicitement indisponible ---
+        # Périmètre honnête : seuls les périls dont le F 2100 provient
+        # réellement de Copernicus (source taggée `copernicus.*`) reçoivent
+        # un point projeté. Un péril statique (sismique, radon...) n'a pas
+        # de projection 2100 — on le déclare indisponible, jamais on ne
+        # duplique la valeur 2050 (pas de stub).
+        source_2100 = t2100.get("source", "") if isinstance(t2100, dict) else ""
+        if copernicus_2100 and f2100 is not None and source_2100.startswith("copernicus."):
+            point_2100: dict[str, Any] = {
                 "horizon": 2100,
-                "type": "indisponible",
-                "scenario": None,
-                "valeur": None,
+                "type": "projete",
+                "scenario": scenario,
+                "valeur": f2100,
                 "unite": unite,
-                "resolution": None,
-                "confiance": None,
-                "source": "copernicus.cds" if copernicus_actif else None,
-                "date_source": None,
+                "resolution": _resolution_flag(source_2100),
+                "confiance": _confidence_from_status(t2100.get("statut")),
+                "source": source_2100,
+                "date_source": building_data.get("date_generation"),
             }
-        )
+            # Comparaison de scénarios : F brut du même péril sous chaque RCP
+            # téléchargé (rcp4_5 / rcp8_5), pour que l'assureur et l'actuaire
+            # comparent sans relancer le diagnostic. Seuls les périls dont le F
+            # provient réellement de Copernicus y figurent.
+            per_scenario: dict[str, int] = {}
+            for sc, risques_sc in (scenarios_2100 or {}).items():
+                r_sc = (risques_sc or {}).get(code) or {}
+                t_sc = ((tracking_2100_by_scenario or {}).get(sc) or {}).get(code) or {}
+                src_sc = t_sc.get("source", "") if isinstance(t_sc, dict) else ""
+                if r_sc.get("risque") is not None and src_sc.startswith("copernicus."):
+                    per_scenario[sc] = int(r_sc["risque"])
+            if per_scenario:
+                point_2100["scenarios"] = per_scenario
+            points.append(point_2100)
+        else:
+            points.append(
+                {
+                    "horizon": 2100,
+                    "type": "indisponible",
+                    "scenario": None,
+                    "valeur": None,
+                    "unite": unite,
+                    "resolution": None,
+                    "confiance": None,
+                    "source": "copernicus.cds" if copernicus_actif else None,
+                    "date_source": None,
+                }
+            )
 
         perils[code] = {
             "label": label,
             "points": points,
         }
 
+    note = (
+        "Variables brutes d'aléa F (0-100) par péril et par horizon — jamais "
+        "combinées entre elles ni avec la vulnérabilité. 2026 = observé "
+        "(données actuelles), 2050 = modélisé (projection climatique). "
+    )
+    if copernicus_2100:
+        dispo = sorted(scenarios_2100 or {scenario})
+        note += (
+            f"2100 = projeté (Copernicus CDS, scénario {scenario} — "
+            f"comparaison {' / '.join(dispo)}, fenêtre 2090-2100)."
+        )
+    else:
+        note += "2100 = non disponible tant que Copernicus CDS n'est pas activé."
+
     return {
         "horizons": [2026, 2050, 2100],
-        "note": (
-            "Variables brutes d'aléa F (0-100) par péril et par horizon — jamais "
-            "combinées entre elles ni avec la vulnérabilité. 2026 = observé "
-            "(données actuelles), 2050 = modélisé (projection climatique), "
-            "2100 = non disponible tant que Copernicus CDS est désactivé."
-        ),
+        "note": note,
         "perils": perils,
     }
 
 
-def compute_risk_scores(building_data: dict[str, Any]) -> dict[str, Any]:
+def compute_risk_scores(building_data: dict[str, Any], scenario: str = "rcp8_5") -> dict[str, Any]:
     """Point d'entrée du scoring_agent.
+
+    `scenario` (rcp4_5 / rcp8_5) désigne le scénario climatique qui pilote
+    les points projetés de la trajectoire. Le téléchargement CDS contient les
+    DEUX scénarios : chaque point 2100 projeté porte donc aussi la valeur F
+    sous l'autre RCP (champ `scenarios`) pour comparaison immédiate, sans
+    relancer le diagnostic.
 
     Retourne un dict avec :
       - score_global : int (0-100)
@@ -1062,6 +1174,37 @@ def compute_risk_scores(building_data: dict[str, Any]) -> dict[str, Any]:
     score_2050 = _score_global(zones_2050)
     logger.info("  -> score_global = %d", score_2050)
 
+    # --- Horizon 2100 : Copernicus CDS (une fois la licence acceptée et le
+    # téléchargement effectué). Sans données CDS, les périls 2100 restent
+    # honnêtement `indisponible` dans la trajectoire. Le téléchargement
+    # contient les DEUX scénarios (_REQUEST : rcp4_5 + rcp8_5) : on calcule
+    # chaque passe pour que le frontend et l'actuaire comparent les RCP sans
+    # relancer le diagnostic. `scenario` désigne la sélection primaire
+    # (pilote `valeur` des points 2100).
+    if scenario not in SCENARIOS_CDS:
+        scenario = SCENARIOS_CDS[-1]
+    climat_copernicus = building_data.get("climat_copernicus")
+    scenarios_2100: dict[str, dict[str, dict[str, Any]]] = {}
+    tracking_2100_by_scenario: dict[str, dict[str, dict[str, Any]]] = {}
+    for sc in SCENARIOS_CDS:
+        if not scenario_available(climat_copernicus, sc):
+            continue
+        climat_2100 = extract_climate_2100(climat_copernicus, scenario=sc)
+        if not climat_2100:
+            continue
+        logger.info("période projection (2100, Copernicus CDS, scénario %s) :", sc)
+        (
+            _zones_2100,
+            _sources_2100,
+            risques_par_alea_2100_sc,
+            peril_tracking_2100_sc,
+        ) = _compute_zones_for_period(building_data, climat_2100, is_projection=True)
+        scenarios_2100[sc] = risques_par_alea_2100_sc
+        tracking_2100_by_scenario[sc] = peril_tracking_2100_sc
+
+    risques_par_alea_2100 = scenarios_2100.get(scenario)
+    peril_tracking_2100 = tracking_2100_by_scenario.get(scenario)
+
     confidence = _compute_confidence(sources_2025)
     logger.info("  -> confiance = %d (%s)", confidence["score"], confidence["niveau"])
 
@@ -1071,6 +1214,11 @@ def compute_risk_scores(building_data: dict[str, Any]) -> dict[str, Any]:
         peril_tracking_2025,
         risques_par_alea_2050,
         peril_tracking_2050,
+        risques_2100=risques_par_alea_2100,
+        tracking_2100=peril_tracking_2100,
+        scenarios_2100=scenarios_2100,
+        tracking_2100_by_scenario=tracking_2100_by_scenario,
+        scenario=scenario,
     )
 
     return {

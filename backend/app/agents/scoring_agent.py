@@ -19,8 +19,8 @@ from app.scoring.risk_model import compute_risk_scores
 logger = get_logger(__name__)
 
 
-def run(state: TyphoonState) -> dict:
+def run(state: TyphoonState, scenario: str = "rcp8_5") -> dict:
     t0 = time.perf_counter()
-    risk_scores = compute_risk_scores(state["building_data"])
-    logger.info("scoring_agent (noeud) -- termine en %.2fs", time.perf_counter() - t0)
+    risk_scores = compute_risk_scores(state["building_data"], scenario=scenario)
+    logger.info("scoring_agent (noeud) -- termine en %.2fs (scenario=%s)", time.perf_counter() - t0, scenario)
     return {"risk_scores": risk_scores}

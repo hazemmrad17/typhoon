@@ -10,6 +10,7 @@ traduction dict interne -> ce schema se fait dans `service.py`.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -17,6 +18,14 @@ from pydantic import BaseModel, Field
 
 class AnalyzeRequest(BaseModel):
     address: str = Field(..., min_length=3, description="Adresse postale complete du bien a analyser")
+    scenario: str = Field(
+        default="rcp8_5",
+        description=(
+            "Scenario climatique RCP (rcp4_5 / rcp8_5) qui pilote les points "
+            "projetes 2050/2100 de la trajectoire. Les deux scenarios sont "
+            "telecharges et restent exposes en comparaison (champ `scenarios`)."
+        ),
+    )
 
 
 class Address(BaseModel):
@@ -61,8 +70,17 @@ class RiskPeriod(BaseModel):
 class TrajectoirePoint(BaseModel):
     horizon: int = Field(..., description="2026 (observe) / 2050 (projete) / 2100")
     type: str = Field(..., description="observe | projete | indisponible")
-    scenario: str | None = Field(None, description="Etiquette RCP/SSP quand connue (ex. rcp8_5), sinon None")
-    valeur: int | None = Field(None, description="Variable brute F 0-100, jamais combinee avec V ni avec d'autres perils")
+    scenario: str | None = Field(None, description="Scenario selectionne (rcp4_5 / rcp8_5) quand connu, sinon None")
+    valeur: int | None = Field(None, description="Variable brute F 0-100 sous le scenario selectionne, jamais combinee avec V ni avec d'autres perils")
+    scenarios: dict[str, int | None] | None = Field(
+        None,
+        description=(
+            "F brut du meme peril sous chaque scenario RCP telecharge "
+            "(ex. {\"rcp4_5\": 60, \"rcp8_5\": 80}) — comparaison sans "
+            "relancer le diagnostic. Present uniquement sur les points "
+            "projetes (2100) pilotés par Copernicus CDS."
+        ),
+    )
     unite: str
     resolution: str | None = Field(None, description="per-building | commune-level | grid-cell")
     confiance: str | None = Field(None, description="elevee | moyenne | faible | None")
@@ -106,3 +124,55 @@ class AnalyzeResponse(BaseModel):
         description="Sources de collecte en erreur ou indisponibles pour cette adresse (ne bloque pas l'analyse)",
     )
     genere_le: str
+
+
+# ---------------------------------------------------------------------------
+# Batch — Phase 4B, item 24 : submit/poll pour des livres entiers
+# ---------------------------------------------------------------------------
+
+class BatchItemStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class BatchItemResult(BaseModel):
+    """Resultat d'une adresse dans un lot — meme contrat qu'une analyse seule.
+
+    `error` est rempli quand l'adresse n'a pas pu etre analyse (adresse non
+    geocodee, echec fatale) ; le reste du lot continue dans ce cas.
+    """
+
+    address: str
+    status: BatchItemStatus
+    result: AnalyzeResponse | None = None
+    error: str | None = None
+
+
+class BatchRequest(BaseModel):
+    addresses: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=10000,
+        description="Adresses a analyser (livre entier, centaines de milliers max en production)",
+    )
+    scenario: str = Field(
+        default="rcp8_5",
+        description="Scenario RCP (rcp4_5 / rcp8_5) applique a tout le lot (points projetes 2050/2100 de la trajectoire)",
+    )
+
+
+class BatchSubmitResponse(BaseModel):
+    batch_id: str
+    status: str = Field("queued", description="queued | processing | completed | failed")
+    total: int
+
+
+class BatchPollResponse(BaseModel):
+    batch_id: str
+    status: str
+    total: int
+    completed: int
+    failed: int
+    items: list[BatchItemResult]

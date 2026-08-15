@@ -15,6 +15,8 @@ import asyncio
 import time
 import uuid
 
+from typing import Literal
+
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -57,6 +59,14 @@ class DiagnosticRequest(BaseModel):
         default=settings.copernicus_enabled,
         description="Activer/désactiver Copernicus (CDS) dans la collecte.",
     )
+    scenario: Literal["rcp4_5", "rcp8_5"] = Field(
+        default="rcp8_5",
+        description=(
+            "Scénario climatique qui pilote les points projetés 2050/2100 de la "
+            "trajectoire (Copernicus CDS). Les deux scénarios sont téléchargés "
+            "et restent disponibles en comparaison (champ `scenarios`)."
+        ),
+    )
 
 
 @router.post("/diagnostic")
@@ -72,6 +82,7 @@ async def run_diagnostic(payload: DiagnosticRequest) -> dict:
                 "adresse": payload.adresse,
                 "formulaire": payload.formulaire,
                 "copernicus": payload.copernicus,
+                "scenario": payload.scenario,
             },
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -100,7 +111,7 @@ async def run_diagnostic_fast(payload: DiagnosticRequest) -> dict:
     try:
         building_data = await collect(payload.adresse, enable_copernicus=payload.copernicus)
         state: dict = {"building_data": building_data, "formulaire": payload.formulaire}
-        state.update(scoring_agent.run(state))
+        state.update(scoring_agent.run(state, scenario=payload.scenario))
         state.update(digital_twin_agent.run(state))
     except Exception as exc:
         logger.exception("diagnostic/fast -- échec pour %r", payload.adresse)

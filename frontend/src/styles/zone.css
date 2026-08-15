@@ -3347,6 +3347,261 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* ── Sélecteur de profil métier (Paramètres → Compte, Phase A) ── */
+.profile-select-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.profile-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 0;
+}
+
+/* ── Carte de décision (vue Assurance, Phase 4A) ── */
+.decision-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+.decision-verdict {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid;
+}
+.decision-verdict-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.decision-verdict-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.decision-verdict-value {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 650;
+}
+.decision-verdict-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.decision-verdict.verdict-ok {
+  border-color: color-mix(in srgb, var(--d03-ok, #2e7d32) 45%, transparent);
+  background: color-mix(in srgb, var(--d03-ok, #2e7d32) 9%, transparent);
+  color: var(--d03-ok, #2e7d32);
+}
+.decision-verdict.verdict-expertise {
+  border-color: color-mix(in srgb, #e6a23c 45%, transparent);
+  background: color-mix(in srgb, #e6a23c 10%, transparent);
+  color: #b97d14;
+}
+.decision-verdict.verdict-refuse {
+  border-color: color-mix(in srgb, #d32f2f 45%, transparent);
+  background: color-mix(in srgb, #d32f2f 10%, transparent);
+  color: #c62828;
+}
+.decision-verdict.verdict-na {
+  border-color: var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.decision-score-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding-top: 4px;
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.decision-score-num {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1;
+}
+.decision-score-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Aléas présents — pills compactes */
+.decision-aleas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.decision-aleas-label,
+.decision-trajectoire-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.decision-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.decision-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+.decision-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.decision-pill-none {
+  color: var(--md-sys-color-on-surface-variant);
+  font-style: italic;
+}
+
+/* Trajectoire climatique */
+.decision-trajectoire {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.decision-trajectoire-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.traj-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.horizon-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-high);
+}
+.scenario-toggle {
+  outline: 1px solid var(--md-sys-color-outline-variant);
+}
+.horizon-btn {
+  appearance: none;
+  border: 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+  background: transparent;
+  cursor: pointer;
+}
+.horizon-btn.active {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}
+.trajectoire-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.traj-row {
+  display: grid;
+  grid-template-columns: 1fr 58px 88px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+.traj-row:last-child {
+  border-bottom: 0;
+}
+.traj-head {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-low);
+}
+.traj-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.traj-point {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 26px;
+  border-radius: 8px;
+  font-family: var(--serif);
+  font-size: 12px;
+  font-weight: 650;
+  color: #fff;
+}
+.traj-point.traj-point-na {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.traj-niveau {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.decision-trajectoire-empty {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.decision-trajectoire-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.provenance-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--md-sys-color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
 /* ── Score global ── */
 .score-block {
   padding: 18px 20px;

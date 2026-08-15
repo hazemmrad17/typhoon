@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     copernicus_enabled: bool = False
     copernicus_cache_dir: str = str(BASE_DIR / "data" / "lookup" / "copernicus")
 
+    # Identifiants Copernicus Climate Data Store (compte + jeton CDS).
+    # Lus depuis le .env racine (CDSAPI_URL / CDSAPI_KEY) et injectes dans
+    # os.environ par app/connectors/copernicus.py._ensure_credentials_in_env
+    # avant chaque appel cdsapi (qui, lui, lit os.environ ou ~/.cdsapirc).
+    cdsapi_url: str = ""
+    cdsapi_key: str = ""
+
     # Lookup local DVF - meme logique de chemin absolu. Les CSV par
     # departement (voir backend/data/lookup/dvf/README.md) ne sont pas
     # versionnes dans le repo et pesent lourd : chaque poste doit les

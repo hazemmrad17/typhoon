@@ -573,7 +573,9 @@ export function UnifiedMap({
         if (a.present === null) continue;
         const band = a.niveau ? bandForKey(a.niveau) : undefined;
         const color = band?.color || '#7A9187';
-        const visible = visibleKeysRef.current.has(a.code);
+        // Aplats au sol, pas d'extrusion : masqués en 3D (caméra inclinée),
+        // sinon ils se lisent comme des volumes parmi les bâtiments extrudés.
+        const visible = visibleKeysRef.current.has(a.code) && !is3dRef.current;
         const layerId = `alea-${a.code}`;
         const sourceId = `src-${layerId}`;
         const track = (id: string) => {
@@ -726,6 +728,7 @@ export function UnifiedMap({
       map.setLayoutProperty(BUILDINGS_2D_LAYER, 'visibility', enabled ? 'none' : 'visible');
     }
     if (enabled) updateBuildingsTarget(map); // filtre BDNB → bâtiment cible
+    applyRiskLayersVisibility(map); // couches de risque : 2D uniquement
     map.easeTo({ pitch: enabled ? 55 : 0, duration: 800 });
     if (enabled) void loadBuildings(map);
   }

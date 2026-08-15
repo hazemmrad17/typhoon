@@ -7,7 +7,7 @@
 //   données fraîches (arrêtés CatNat, zonages évoluent).
 // =============================================================================
 
-import type { RisqueReport, RapportNarratif } from './config';
+import type { RisqueReport, RapportNarratif, Trajectoire } from './config';
 
 export interface CachedDiagnostic {
   /** Adresse normalisée (clé de recherche, minuscules). */
@@ -15,6 +15,8 @@ export interface CachedDiagnostic {
   report: RisqueReport;
   /** Rapport narratif Mistral si déjà généré (coûteux → on le conserve). */
   rapport: RapportNarratif | null;
+  /** Trajectoire climatique (vue Assurance) — capturée depuis /diagnostic/fast. */
+  trajectoire?: Trajectoire | null;
   createdAt: number;
   rapportAt: number | null;
   /** Version du prompt/rapport IA qui a généré ce rapport (RAPPORT_VERSION).
@@ -122,6 +124,18 @@ export function putCachedDiagnostic(
     },
     ...without,
   ]);
+}
+
+/** Rattache la trajectoire climatique à un diagnostic déjà caché. */
+export function putCachedTrajectoire(address: string, trajectoire: Trajectoire | null): void {
+  const key = normKey(address);
+  if (!key) return;
+  const entries = loadCache();
+  const idx = entries.findIndex((c) => c.key === key);
+  if (idx === -1) return;
+  const next = [...entries];
+  next[idx] = { ...next[idx], trajectoire };
+  saveCache(next);
 }
 
 /** Rattache un rapport narratif Mistral à un diagnostic déjà caché. */

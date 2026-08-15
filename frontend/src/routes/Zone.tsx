@@ -20,6 +20,8 @@ import { ZoneRecommendations } from '../components/ZoneRecommendations';
 import { ZoneArtisans } from '../components/ZoneArtisans';
 import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
+import { useUserProfile } from '../typhoon/useUserProfile';
+import { DecisionCard } from '../components/DecisionCard';
 import {
   API,
   D03,
@@ -33,6 +35,7 @@ import {
   type RisqueReport,
   type RapportNarratif,
   type GeocodeSuggestion,
+  type Trajectoire,
 } from '../zone/config';
 import type { RecommendationZone } from '../jumeau/recommendations';
 import {
@@ -46,11 +49,38 @@ import {
   getCachedDiagnostic,
   putCachedDiagnostic,
   putCachedRapport,
+  putCachedTrajectoire,
   removeCachedDiagnostic,
 } from '../zone/diagnosticCache';
 import '../styles/zone.css';
 
 const LEGEND_RANGES = ['<20', '20–39', '40–59', '60–79', '≥80'];
+
+/* ── Multi-profils (Phase A) : ordre du stepper + features par profil.
+   Le promoteur reste la vue par défaut et ne voit AUCUNE différence — seul
+   l'ordre/la visibilité des étapes change pour l'assurance et la banque. */
+const STEP_ORDER: Record<string, string[]> = {
+  promoteur: ['adresse', 'carto', 'analyse', 'recommandations', 'artisans', 'rapport'],
+  assurance: ['adresse', 'decision', 'analyse', 'recommandations', 'rapport'],
+  banque: ['adresse', 'carto', 'analyse', 'rapport'],
+};
+
+const FEATURES: Record<string, { decision: boolean; artisans: boolean }> = {
+  promoteur: { decision: false, artisans: true },
+  assurance: { decision: true, artisans: false },
+  banque: { decision: false, artisans: false },
+};
+
+/* Libellés du stepper par étape logique (le promoteur garde ses libellés actuels). */
+const STEP_LABELS: Record<string, string> = {
+  adresse: 'Adresse',
+  decision: 'Décision',
+  carto: 'Cartographie',
+  analyse: 'Analyse',
+  recommandations: 'Recommandations',
+  artisans: 'Artisans',
+  rapport: 'Rapport IA',
+};
 
 /* Erreur structurée du rapport IA — contrat backend /diagnostic/adresse/rapport :
    { error: <code>, detail: <message utilisateur>, cause: <cause technique> } */
@@ -75,6 +105,7 @@ export function Zone() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { theme, accent, mode, setThemeMode } = useTyphoonTheme();
+  const { profile } = useUserProfile();
   const isMobile = useIsMobile();
   /* Sidenav repliée par défaut : dépliée uniquement quand elle est épinglée
      (toggle) ou pendant le survol (peek, voir ZoneSidenav). */
@@ -128,6 +159,10 @@ export function Zone() {
      `batiment_groupe_risques`, story D2) du bâtiment diagnostiqué : alimente
      la section Risques de la fiche BDNB et le mode carte « Risques bâtiment ». */
   const [batimentRisques, setBatimentRisques] = useState<BatimentRisques | null>(null);
+  /* Trajectoire climatique (variables brutes F par péril et par horizon) —
+     capturée depuis la réponse /diagnostic/fast (digital_twin.trajectoire),
+     la même requête qui alimente déjà les recommandations. Vue « Assurance ». */
+  const [trajectoire, setTrajectoire] = useState<Trajectoire | null>(null);
 
   useEffect(() => {
     const id = report?.bdnb?.batiment?.batiment_groupe_id;
@@ -164,11 +199,24 @@ export function Zone() {
       const fastResponse = await fetch(`${API}/diagnostic/fast`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adresse: address, copernicus: false }),
+        /* Copernicus activé (fail-soft si la licence CDS n'est pas encore
+           acceptée) + scénario RCP par défaut : les points 2100 projetés
+           portent alors la comparaison rcp4_5 / rcp8_5 pour la carte de
+           décision (sélecteur instantané, sans relancer le diagnostic). */
+        body: JSON.stringify({ adresse: address, copernicus: true, scenario: 'rcp8_5' }),
       });
       if (!fastResponse.ok) throw new Error(`Diagnostic détaillé HTTP ${fastResponse.status}`);
       const fastContract = await fastResponse.json();
       if (!fastContract?._resume) throw new Error('Contexte de recommandations absent');
+      /* Trajectoire climatique (vue Assurance) : le digital_twin porte la
+         trajectoire produite par risk_model.compute_trajectoire. On la met
+         aussi en cache pour qu'un re-diagnostic (servi depuis le cache) la
+         restitue sans appel réseau. */
+      if (fastContract.trajectoire && typeof fastContract.trajectoire === 'object') {
+        const traj = fastContract.trajectoire as Trajectoire;
+        setTrajectoire(traj);
+        putCachedTrajectoire(address, traj);
+      }
 
       const recommendationsResponse = await fetch(`${API}/diagnostic/recommandations`, {
         method: 'POST',
@@ -240,6 +288,7 @@ export function Zone() {
       if (cached) {
         setReport(cached.report);
         setRapport(cached.rapport ?? null);
+        setTrajectoire(cached.trajectoire ?? null);
         setRapportError(null);
         setFromCache(true);
         setConversations((prev) => {
@@ -267,6 +316,7 @@ export function Zone() {
       setRapport(null);
       setRapportError(null);
       setFromCache(false);
+      setTrajectoire(null);
     }
     /* Rafraîchissement forcé : on laisse le rapport actuel (et son badge
        éventuel) en place pendant le chargement — il n'est remplacé qu'en
@@ -467,6 +517,25 @@ export function Zone() {
     setVisibleLayerKeys(visible ? new Set(codes) : new Set());
   }
 
+  /* ── Multi-profils : étapes visibles pour le profil courant ──
+     Chaque étape logique garde son index numérique historique (les rendus
+     `step === N` ci-dessous en dépendent) ; seul l'ordre/les libellés changent. */
+  const STEP_INDEX: Record<string, number> = {
+    adresse: 0,
+    decision: 1,
+    carto: 1,
+    analyse: 2,
+    recommandations: 3,
+    artisans: 4,
+    rapport: 5,
+  };
+  const profileSteps = (STEP_ORDER[profile] || STEP_ORDER.promoteur).map((id) => ({
+    id,
+    label: STEP_LABELS[id] ?? id,
+    index: STEP_INDEX[id] ?? 0,
+  }));
+  const features = FEATURES[profile] || FEATURES.promoteur;
+
   /* ── Dérivés du rapport ── */
   const presentAleas = (report?.aleas || []).filter((a) => a.present === true);
   /* Aléas dont la source est disponible (présents OU absents) : les absents
@@ -547,10 +616,10 @@ export function Zone() {
           >
             <md-icon>menu</md-icon>
           </md-icon-button>
-          {STEPS.map((s, i) => {
-          const active = i === step;
-          const done = i < step;
-          const isError = i === 0 && stepError;
+          {profileSteps.map((s, i) => {
+          const active = s.index === step;
+          const done = s.index < step;
+          const isError = s.index === 0 && stepError;
           return (
             <div className="step-segment" key={s.id}>
               <button
@@ -560,7 +629,7 @@ export function Zone() {
                 }`}
                 aria-current={active ? 'step' : undefined}
                 aria-invalid={isError || undefined}
-                onClick={() => goToStep(i)}
+                onClick={() => goToStep(s.index)}
               >
                 <span className="step-dot">
                   {isError ? (
@@ -573,7 +642,7 @@ export function Zone() {
                 </span>
                 <span className="step-label">{s.label}</span>
               </button>
-              {i < STEPS.length - 1 && (
+              {i < profileSteps.length - 1 && (
                 <span className={`step-connector${done ? ' done' : ''}`} aria-hidden="true" />
               )}
             </div>
@@ -720,19 +789,32 @@ export function Zone() {
                           </div>
                         ))}
                       </div>
-                    </details>      <div className="score-block">
-        <div className="score-row">
-          <span className="score-num" style={{ color: band?.color }}>
-            {maxScore ?? '—'}
-          </span>
-          <div className="score-meta">
-            <span className="score-label">Score de risque global /100</span>
-            <span className={`d03-pill ${band ? band.cls : ''}`}>
-              {band ? band.label : 'Indéterminé'}
-            </span>
-          </div>
-        </div>
-      </div>
+                    </details>
+                    {features.decision ? (
+                      /* Vue Assurance (Phase 4A) : la carte de décision remplace
+                         le score global mis en avant — la décomposition par aléa
+                         et la trajectoire climatique priment, le score global est
+                         rétrogradé en petite ligne (roadmap item 20). */
+                      <DecisionCard
+                        aleas={report.aleas || []}
+                        trajectoire={trajectoire}
+                        scoreGlobal={maxScore}
+                      />
+                    ) : (
+                      <div className="score-block">
+                        <div className="score-row">
+                          <span className="score-num" style={{ color: band?.color }}>
+                            {maxScore ?? '—'}
+                          </span>
+                          <div className="score-meta">
+                            <span className="score-label">Score de risque global /100</span>
+                            <span className={`d03-pill ${band ? band.cls : ''}`}>
+                              {band ? band.label : 'Indéterminé'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="aleas-section">
                       <div className="section-heading">
