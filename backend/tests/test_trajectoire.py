@@ -22,6 +22,8 @@ def _building_data_factice(
     annee_construction: int | None = 1990,
     jours_chaleur: float | None = 5.0,
     precip_proj: float | None = 700.0,
+    batiment_ppr: dict | None = None,
+    ppr_commune: bool = False,
 ) -> dict:
     # Le champ reel du collecteur est `libelle_risque_jo` (cf.
     # typhon_risk_engine/tests/fixtures/nice_06088.json et _count_catnat dans
@@ -56,6 +58,33 @@ def _building_data_factice(
             "catnat": {"data": catnat_data},
             "zonage_sismique": None,
             "cavites": None,
+            # Résolution WFS au bâtiment (georisques["batiment"]["ppr"]) :
+            # present=False = le point de l'adresse n'est dans AUCUN périmètre
+            # PPR, même si la commune en a un.
+            **(
+                {"batiment": {"ppr": batiment_ppr}}
+                if batiment_ppr is not None
+                else {}
+            ),
+            # PPRI prescrit au niveau commune (liste REST gaspar/pprn) — la
+            # forme paginée Spring que _data_list sait lire.
+            **(
+                {
+                    "ppr": {
+                        "content": [
+                            {
+                                "modeleProcedure": "R.123-3 PPRI",
+                                "libPpr": "PPRI de la plaine",
+                                "zonageReglementaire": {
+                                    "listTypeReg": [{"code": "03"}]  # rouge
+                                },
+                            }
+                        ]
+                    }
+                }
+                if ppr_commune
+                else {}
+            ),
         },
         "climat_open_meteo": {
             "reference_2015_2024": {
@@ -246,3 +275,50 @@ def test_trajectoire_2100_comparaison_scenarios():
     sismique_2100 = scores["trajectoire"]["perils"]["sismique"]["points"][2]
     assert sismique_2100["type"] == "indisponible"
     assert "scenarios" not in sismique_2100
+
+
+def test_trajectoire_inondation_resolution_batiment():
+    """Phase 1 item 4 (per-building) : quand le WFS a tranché que le point de
+    l'adresse n'est dans AUCUN périmètre PPR, la surcote PPRI communale ne
+    s'applique plus — et le point porte la résolution honnête « per-building »."""
+    # Commune avec PPRI rouge prescrit + WFS qui dit « bâtiment hors périmètre »
+    data = _building_data_factice(
+        nb_catnat_inondation=3,
+        ppr_commune=True,
+        batiment_ppr={"present": False, "resolution": "per-building"},
+    )
+    scores = compute_risk_scores(data)
+    inondation_2026 = scores["trajectoire"]["perils"]["inondation"]["points"][0]
+
+    # 3 CATNAT -> base 55 ; SANS la surcote PPRI (qui pousserait à 60) puisque
+    # le point est hors périmètre malgré le PPRI communal.
+    assert inondation_2026["valeur"] == 55
+    assert inondation_2026["resolution"] == "per-building"  # WFS a tranché
+    assert inondation_2026["source"] == "georisques.inondation"
+    # La mention « hors périmètre » est portée par la justification du péril.
+    assert "hors périmètre PPR" in scores["risques_par_alea"]["inondation"]["justification"]
+
+    # Même commune, mais WFS indisponible (pas de batiment) : repli commune,
+    # la surcote PPRI s'applique (valeur 60), résolution commune-level.
+    data_commune = _building_data_factice(nb_catnat_inondation=3, ppr_commune=True)
+    scores_commune = compute_risk_scores(data_commune)
+    pt_commune = scores_commune["trajectoire"]["perils"]["inondation"]["points"][0]
+    assert pt_commune["valeur"] == 60
+    assert pt_commune["resolution"] == "commune-level"
+
+    # Bâtiment DANS un périmètre PPR (present=True) : la surcote s'applique,
+    # la résolution reste per-building et le détail de zonage est conservé.
+    data_dans = _building_data_factice(
+        nb_catnat_inondation=3,
+        ppr_commune=True,
+        batiment_ppr={"present": True, "resolution": "per-building"},
+    )
+    scores_dans = compute_risk_scores(data_dans)
+    pt_dans = scores_dans["trajectoire"]["perils"]["inondation"]["points"][0]
+    assert pt_dans["valeur"] == 60
+    assert pt_dans["resolution"] == "per-building"
+    assert "zone rouge" in scores_dans["risques_par_alea"]["inondation"]["justification"]
+
+    # La résolution per-building est conservée à l'horizon 2050 aussi
+    # (le bâtiment ne bouge pas : la vérification WFS reste valide).
+    assert scores["trajectoire"]["perils"]["inondation"]["points"][1]["resolution"] == "per-building"

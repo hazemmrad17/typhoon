@@ -13,7 +13,7 @@
 // =============================================================================
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { UnifiedMap } from '../components/UnifiedMap';
 import { BuildingFiche } from '../components/BuildingFiche';
 import { ZoneRecommendations } from '../components/ZoneRecommendations';
@@ -22,6 +22,17 @@ import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
 import { DecisionCard } from '../components/DecisionCard';
+import { ProvenancePanel } from '../components/ProvenancePanel';
+import { CopernicusStatusBanner } from '../components/CopernicusStatusBanner';
+import {
+  addToWatchlist as addToWatchlistStore,
+  loadCatNatLatest,
+  loadWatchlist,
+  recordCatNatLatest,
+  saveCatNatLatest,
+  saveWatchlist,
+  type WatchlistEntry,
+} from '../zone/watchlist';
 import {
   API,
   D03,
@@ -103,6 +114,7 @@ const STEPS = [
 
 export function Zone() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { theme, accent, mode, setThemeMode } = useTyphoonTheme();
   const { profile } = useUserProfile();
@@ -163,6 +175,14 @@ export function Zone() {
      capturée depuis la réponse /diagnostic/fast (digital_twin.trajectoire),
      la même requête qui alimente déjà les recommandations. Vue « Assurance ». */
   const [trajectoire, setTrajectoire] = useState<Trajectoire | null>(null);
+  /* Panneau « Sources & provenance » (Ticket 1 — vue Assurance) : ouvert par
+     le bouton de la carte de décision, rend les données déjà dans la réponse. */
+  const [provenanceOpen, setProvenanceOpen] = useState(false);
+  /* Watchlist (Ticket 5) : liste suivie + toast de confirmation d'ajout. */
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => loadWatchlist());
+  const [catNatLatest, setCatNatLatest] = useState<Record<string, number>>(() => loadCatNatLatest());
+  const [watchlistToast, setWatchlistToast] = useState(false);
+  const watchlistToastTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const id = report?.bdnb?.batiment?.batiment_groupe_id;
@@ -343,6 +363,17 @@ export function Zone() {
 
       const r = (await resp.json()) as RisqueReport;
       setReport(r);
+      /* Watchlist : enregistre le dernier comptage CatNat observé pour cette
+         adresse (données déjà fetchées — alimente le badge sans appel réseau). */
+      const catnatCount = (r.aleas || []).reduce(
+        (acc, a) => acc + (a.catnat_historique?.length ?? 0),
+        0
+      );
+      setCatNatLatest((prev) => {
+        const next = recordCatNatLatest(prev, r.adresse_normalisee || value, catnatCount);
+        saveCatNatLatest(next);
+        return next;
+      });
       void loadDetailedRecommendations(r.adresse_normalisee || value);
       setFromCache(false); // données fraîches du réseau → badge « en cache » retiré
       putCachedDiagnostic(r); // sauvegarde le résultat pour les prochains passages
@@ -480,6 +511,29 @@ export function Zone() {
     }
   }
 
+  /* ── Export PDF assurance (Ticket 2) : trajectoire par horizon + disclaimer.
+     Rejoue la logique de la carte de décision (verdict + tableau) dans le
+     template jsPDF dédié — les profils promoteur/banque gardent l'export
+     générique ci-dessus, inchangé. */
+  async function handleExportInsurerPdf() {
+    if (!report || exportingPdf) return;
+    setExportingPdf(true);
+    setExportPdfError(null);
+    try {
+      const { exportInsurerPdf } = await import('../zone/pdf-export');
+      await exportInsurerPdf({
+        report,
+        trajectoire,
+        aleas: report.aleas || [],
+      });
+    } catch (err) {
+      console.error('Export PDF assurance échoué :', err);
+      setExportPdfError("L'export PDF a échoué dans le navigateur. Réessayez.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   /* ── Visibilité des couches ── */
   function toggleLayer(code: string) {
     setVisibleLayerKeys((prev) => {
@@ -599,6 +653,12 @@ export function Zone() {
           setDrawerOpen(false);
           goToStep(0);
         }}
+        onNavigate={(path) => {
+          setDrawerOpen(false);
+          navigate(path);
+        }}
+        profile={profile}
+        activePath={location.pathname}
         conversations={conversations}
         activeAddress={report?.adresse_normalisee ?? null}
         onOpenConversation={handleOpenConversation}
@@ -795,11 +855,29 @@ export function Zone() {
                          le score global mis en avant — la décomposition par aléa
                          et la trajectoire climatique priment, le score global est
                          rétrogradé en petite ligne (roadmap item 20). */
+                      <>
+                      <CopernicusStatusBanner />
                       <DecisionCard
                         aleas={report.aleas || []}
                         trajectoire={trajectoire}
                         scoreGlobal={maxScore}
+                        onOpenProvenance={() => setProvenanceOpen(true)}
+                        onExportPdf={features.decision ? () => void handleExportInsurerPdf() : undefined}
+                        onAddWatchlist={
+                          features.decision
+                            ? () => {
+                                const addr = report.adresse_normalisee || report.adresse_saisie;
+                                const next = addToWatchlistStore(watchlist, addr, report.code_insee);
+                                setWatchlist(next);
+                                saveWatchlist(next);
+                                if (watchlistToastTimer.current) window.clearTimeout(watchlistToastTimer.current);
+                                setWatchlistToast(true);
+                                watchlistToastTimer.current = window.setTimeout(() => setWatchlistToast(false), 2600);
+                              }
+                            : undefined
+                        }
                       />
+                      </>
                     ) : (
                       <div className="score-block">
                         <div className="score-row">
@@ -1111,6 +1189,22 @@ export function Zone() {
         onClick={() => setDrawerOpen(false)}
       />
 
+      {/* Toast « ajouté à la watchlist » */}
+      {watchlistToast && (
+        <div className="watchlist-toast" role="status" aria-live="polite">
+          <md-icon>bookmark_added</md-icon>
+          <span>Adresse ajoutée à la watchlist</span>
+        </div>
+      )}
+
+      {/* Panneau « Sources & provenance » (vue Assurance) */}
+      {provenanceOpen && (
+        <ProvenancePanel
+          aleas={report?.aleas || []}
+          trajectoire={trajectoire}
+          onClose={() => setProvenanceOpen(false)}
+        />
+      )}
     </main>
   );
 }

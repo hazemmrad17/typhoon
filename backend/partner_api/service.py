@@ -12,9 +12,6 @@ Three.js.
 
 from __future__ import annotations
 
-import asyncio
-import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from app.agents import recommandations_agent, scoring_agent
@@ -23,12 +20,11 @@ from app.connectors.geocoding import GeocodingError
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.scoring.risk_model import _niveau
+from app.services import batch as batch_service
 
 from partner_api.schemas import (
     Address,
     AnalyzeResponse,
-    BatchItemResult,
-    BatchItemStatus,
     BatchPollResponse,
     BatchSubmitResponse,
     Confidence,
@@ -160,85 +156,27 @@ async def analyze_address(address: str, scenario: str = "rcp8_5") -> AnalyzeResp
 # ---------------------------------------------------------------------------
 # Batch — Phase 4B, item 24 : soumission async + polling
 # ---------------------------------------------------------------------------
+# L'implementation (store + worker + polling) vit desormais dans
+# `app/services/batch.py` (Ticket 3 — insurerpagesplan) : la route interne
+# /diagnostic/batch la reutilise pour le Portfolio, sans dupliquer la logique
+# ni exposer de cle d'API. Ici on ne fait que brancher l'analyseur Partner
+# (`analyze_address`) et traduire le dict brut vers le contrat pydantic.
 
-# Store en memoire (process-local) : suffisant pour un premier lancement. Un
-# backend durable (Redis/Postgres) viendra avec la mise en production — voir
-# Phase 3 (deploiement) du roadmap. TTL simple pour eviter une fuite memoire.
-_BATCH_TTL_S = 24 * 3600
-_BATCH_MAX_CONCURRENCY = 8
-
-_batches: dict[str, dict[str, Any]] = {}
-
-
-def _batch_status(batch: dict[str, Any]) -> str:
-    states = {it["status"] for it in batch["items"]}
-    if states <= {BatchItemStatus.COMPLETED, BatchItemStatus.FAILED}:
-        return "completed"
-    if BatchItemStatus.PROCESSING in states:
-        return "processing"
-    return "queued"
-
-
-async def _run_batch_worker(batch_id: str) -> None:
-    """Traite les adresses du lot avec une concurrence bornee."""
-    batch = _batches[batch_id]
-    semaphore = asyncio.Semaphore(_BATCH_MAX_CONCURRENCY)
-
-    async def process_item(item: dict[str, Any]) -> None:
-        async with semaphore:
-            if item["status"] != BatchItemStatus.PENDING:
-                return
-            item["status"] = BatchItemStatus.PROCESSING
-            try:
-                item["result"] = await analyze_address(item["address"], scenario=item.get("scenario", "rcp8_5"))
-                item["status"] = BatchItemStatus.COMPLETED
-            except AddressNotFound as exc:
-                item["status"] = BatchItemStatus.FAILED
-                item["error"] = f"adresse non trouvee : {exc}"
-            except Exception as exc:  # une adresse ne doit pas tuer le lot
-                logger.exception("batch %s -- echec pour %r", batch_id, item["address"])
-                item["status"] = BatchItemStatus.FAILED
-                item["error"] = f"{type(exc).__name__}: {exc}"
-
-    await asyncio.gather(*(process_item(item) for item in batch["items"]))
-    batch["done_at"] = datetime.now(timezone.utc).isoformat()
+# Re-export du store partage (les tests existants y accedent via `svc._batches`).
+_batches = batch_service._batches
 
 
 def submit_batch(addresses: list[str], scenario: str = "rcp8_5") -> BatchSubmitResponse:
-    """Cree un lot et lance son traitement en arriere-plan."""
-    batch_id = uuid.uuid4().hex[:12]
-    batch: dict[str, Any] = {
-        "id": batch_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "items": [
-            {"address": a, "scenario": scenario, "status": BatchItemStatus.PENDING, "result": None, "error": None}
-            for a in addresses
-        ],
-    }
-    _batches[batch_id] = batch
-    asyncio.get_running_loop().create_task(_run_batch_worker(batch_id))
-    return BatchSubmitResponse(batch_id=batch_id, status="queued", total=len(addresses))
+    """Cree un lot et lance son traitement en arriere-plan (service partage)."""
+    payload = batch_service.submit_batch(
+        addresses, analyzer=analyze_address, scenario=scenario
+    )
+    return BatchSubmitResponse(**payload)
 
 
 def get_batch(batch_id: str) -> BatchPollResponse | None:
     """Etat d'un lot (polling). Retourne None si le lot n'existe pas."""
-    batch = _batches.get(batch_id)
-    if batch is None:
+    payload = batch_service.get_batch(batch_id)
+    if payload is None:
         return None
-    items = batch["items"]
-    return BatchPollResponse(
-        batch_id=batch_id,
-        status=_batch_status(batch),
-        total=len(items),
-        completed=sum(1 for it in items if it["status"] == BatchItemStatus.COMPLETED),
-        failed=sum(1 for it in items if it["status"] == BatchItemStatus.FAILED),
-        items=[
-            BatchItemResult(
-                address=it["address"],
-                status=it["status"],
-                result=it["result"],
-                error=it["error"],
-            )
-            for it in items
-        ],
-    )
+    return BatchPollResponse(**payload)

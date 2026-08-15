@@ -62,11 +62,19 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+
+# ── État du téléchargement (partagé entre requêtes) ──
+# Permet à l'API de statut (GET /diagnostic/copernicus/status) de dire « en
+# cours » / « en échec » pendant le premier téléchargement, et évite que
+# deux diagnostics concurrents lancent chacun leur propre téléchargement.
+_download_state: dict[str, Any] = {"in_progress": False, "error": None}
+_download_state_lock = threading.Lock()
 
 DATASET_ID = "sis-ecde-climate-indicators"
 
@@ -127,6 +135,30 @@ def _ensure_credentials_in_env() -> None:
         os.environ.setdefault("CDSAPI_KEY", key)
 
 
+def copernicus_status() -> dict[str, Any]:
+    """Etat du pipeline Copernicus pour l'UI (banniere Décision).
+
+    Sans aucun appel réseau : marqueur de fin de téléchargement, flag de
+    téléchargement en cours, dernière erreur (ex. licence non acceptée),
+    taille du cache déjà présent.
+    """
+    with _download_state_lock:
+        in_progress = bool(_download_state["in_progress"])
+        last_error = _download_state["error"]
+    cache_dir = _cache_dir()
+    nc_files = sorted(cache_dir.glob("*.nc")) if cache_dir.exists() else []
+    cache_bytes = sum(f.stat().st_size for f in nc_files)
+    return {
+        "enabled": bool(settings.copernicus_enabled),
+        "configured": bool(settings.cdsapi_url and settings.cdsapi_key),
+        "download_complete": _download_marker().exists(),
+        "in_progress": in_progress,
+        "last_error": last_error,
+        "cache_files": len(nc_files),
+        "cache_bytes": cache_bytes,
+    }
+
+
 def ensure_dataset_downloaded(force: bool = False) -> Path:
     """Telecharge (une seule fois, puis mis en cache) le jeu de donnees
     Copernicus defini par _REQUEST, et retourne le repertoire de cache.
@@ -135,6 +167,10 @@ def ensure_dataset_downloaded(force: bool = False) -> Path:
     regroupant plusieurs NetCDF (un par combinaison variable/scenario) :
     les deux cas sont geres, sans hypothese sur le contenu exact tant que
     le telechargement n'a pas ete effectivement observe.
+
+    Un seul téléchargement à la fois : si un autre diagnostic est en train
+    de télécharger, on échoue proprement (le diagnostic continue sans
+    Copernicus, le premier téléchargement remplira le cache).
     """
     cache_dir = _cache_dir()
     marker = _download_marker()
@@ -147,23 +183,39 @@ def ensure_dataset_downloaded(force: bool = False) -> Path:
             "completez-le depuis le formulaire CDS ('Show API request code')."
         )
 
+    with _download_state_lock:
+        if _download_state["in_progress"]:
+            raise CopernicusDataMissing(
+                "Téléchargement Copernicus déjà en cours (autre diagnostic) — réessayez plus tard."
+            )
+        _download_state["in_progress"] = True
+        _download_state["error"] = None
+
     import cdsapi  # import tardif : evite la dependance dure si non utilise
 
-    _ensure_credentials_in_env()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    client = cdsapi.Client()
-    result = client.retrieve(DATASET_ID, dict(_REQUEST))
-    downloaded_path = Path(result.download())
+    try:
+        _ensure_credentials_in_env()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        client = cdsapi.Client()
+        result = client.retrieve(DATASET_ID, dict(_REQUEST))
+        downloaded_path = Path(result.download())
 
-    if downloaded_path.suffix == ".zip":
-        with zipfile.ZipFile(downloaded_path) as archive:
-            archive.extractall(cache_dir)
-        downloaded_path.unlink(missing_ok=True)
-    else:
-        shutil.move(str(downloaded_path), cache_dir / downloaded_path.name)
+        if downloaded_path.suffix == ".zip":
+            with zipfile.ZipFile(downloaded_path) as archive:
+                archive.extractall(cache_dir)
+            downloaded_path.unlink(missing_ok=True)
+        else:
+            shutil.move(str(downloaded_path), cache_dir / downloaded_path.name)
 
-    marker.write_text("ok", encoding="utf-8")
-    return cache_dir
+        marker.write_text("ok", encoding="utf-8")
+        return cache_dir
+    except Exception as exc:
+        with _download_state_lock:
+            _download_state["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        with _download_state_lock:
+            _download_state["in_progress"] = False
 
 
 def read_indicators_at_point(lat: float, lon: float) -> dict[str, Any]:

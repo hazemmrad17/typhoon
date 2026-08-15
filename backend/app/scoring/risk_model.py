@@ -325,12 +325,53 @@ def _argile_subscore(
     return _clamp(base), source, tracking
 
 
-def _ppr_inondation(georisques: dict[str, Any] | None) -> tuple[bool, float | None, str | None]:
-    """(ppri_present, hauteur_eau_m, zone_ppr) depuis les PPR bruts.
+def _batiment_status_ppr(georisques: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Statut WFS au bâtiment pour le péril PPR (`georisques["batiment"]["ppr"]`).
+
+    Retourne `{"present": bool|None, "resolution": str}` si la résolution au
+    bâtiment a été tentée, sinon None (WFS jamais appelé / pas de couche).
+    present=False signifie que le WFS a répondu et que le point de l'adresse
+    n'est dans AUCUN périmètre PPR — même si la commune en a un.
+    """
+    if not isinstance(georisques, dict):
+        return None
+    batiment = georisques.get("batiment")
+    if not isinstance(batiment, dict):
+        return None
+    info = batiment.get("ppr")
+    if not isinstance(info, dict):
+        return None
+    return info
+
+
+def _ppr_inondation(georisques: dict[str, Any] | None) -> tuple[bool, float | None, str | None, str]:
+    """(ppri_present, hauteur_eau_m, zone_ppr, resolution) depuis les PPR.
+
+    Résolution au bâtiment d'abord (WFS, `georisques["batiment"]["ppr"]`) :
+    si le point de l'adresse a été testé contre les périmètres réels et n'est
+    dans aucun, le bâtiment n'est pas exposé — `ppri=False` même si la commune
+    a un PPRI prescrit (c'est tout l'intérêt du per-building). Si le point EST
+    dans un périmètre, on garde la lecture communale pour le détail de zonage
+    (rouge/bleue) mais la résolution reste per-building. Sans résultat WFS,
+    repli commune (comportement historique).
 
     Phase 6 : hauteur reelle derivee du zonage reglementaire du PPRI
     (rouge = interdiction -> bande 1.5-3 m, bleue = prescriptions -> 0.5-1.5 m).
     """
+    bat = _batiment_status_ppr(georisques)
+    if bat is not None and bat.get("resolution") == "per-building":
+        if bat.get("present") is False:
+            return False, None, None, "per-building"
+        # present=True : le point est dans un périmètre — détail de zonage depuis
+        # la liste communale, mais résolution au bâtiment.
+        ppri, hauteur, zone = _ppr_inondation_commune(georisques)
+        return ppri, hauteur, zone, "per-building"
+    ppri, hauteur, zone = _ppr_inondation_commune(georisques)
+    return ppri, hauteur, zone, "commune-level"
+
+
+def _ppr_inondation_commune(georisques: dict[str, Any] | None) -> tuple[bool, float | None, str | None]:
+    """(ppri_present, hauteur_eau_m, zone_ppr) depuis les PPR bruts communaux."""
     pprs = _data_list(georisques, "ppr")
     if not pprs:
         return False, None, None
@@ -366,7 +407,7 @@ def _inondation_subscore(
     hazard_present = _has_hazard(georisques, "inondation")
     zones_inondables = _truthy_hazard_flag((georisques or {}).get("zones_inondables"))
     zones_en_erreur = _source_en_erreur(georisques, "zones_inondables")
-    ppri, hauteur_eau_m, zone_ppr = _ppr_inondation(georisques)
+    ppri, hauteur_eau_m, zone_ppr, resolution_ppr = _ppr_inondation(georisques)
 
     base = 15
     if inondations >= 6:
@@ -391,6 +432,10 @@ def _inondation_subscore(
     if ppri:
         source += " ; PPRI prescrit sur la commune" + (f" (zone {zone_ppr})" if zone_ppr else "")
         base = max(base, 60)
+    elif resolution_ppr == "per-building":
+        # Le WFS a tranché : le point de l'adresse n'est dans aucun périmètre
+        # PPR, même si la commune a un PPRI prescrit — pas de surcote PPRI ici.
+        source += " ; point hors périmètre PPR (vérification WFS au bâtiment)"
 
     tracking: dict[str, Any] = {
         "source": "georisques.inondation",
@@ -401,6 +446,7 @@ def _inondation_subscore(
         "ppri_present": ppri,
         "hauteur_eau_m": hauteur_eau_m,
         "zone_ppr": zone_ppr,
+        "resolution": resolution_ppr,
     }
     if zones_en_erreur:
         tracking["statut"] = SourceStatus.SOURCE_ERROR.value
@@ -665,6 +711,19 @@ def _resolution_flag(source: str) -> str:
     if source.startswith(("open_meteo.", "copernicus.")):
         return "grid-cell"
     return "commune-level"
+
+
+def _point_resolution(tracking: dict[str, Any] | None, source: str) -> str:
+    """Résolution d'un point de trajectoire.
+
+    Priorité au drapeau porté par le tracking quand la résolution au bâtiment
+    a réellement réussi (WFS `georisques["batiment"]` → "per-building") — c'est
+    l'information honnête par point, pas une inférence sur le nom de la source.
+    Sinon, repli sur la règle par source (`_resolution_flag`).
+    """
+    if isinstance(tracking, dict) and tracking.get("resolution") in ("per-building", "commune-level", "grid-cell"):
+        return tracking["resolution"]
+    return _resolution_flag(source)
 
 
 def _confidence_from_status(statut: str | None) -> str | None:
@@ -1040,7 +1099,7 @@ def compute_trajectoire(
                 "scenario": None,
                 "valeur": f2025,
                 "unite": unite,
-                "resolution": _resolution_flag(t2025.get("source", "")),
+                "resolution": _point_resolution(t2025, t2025.get("source", "")),
                 "confiance": _confidence_from_status(t2025.get("statut")),
                 "source": t2025.get("source"),
                 "date_source": building_data.get("date_generation"),
@@ -1055,7 +1114,7 @@ def compute_trajectoire(
                 "scenario": scenario if copernicus_actif else None,
                 "valeur": f2050,
                 "unite": unite,
-                "resolution": _resolution_flag(t2050.get("source", "")),
+                "resolution": _point_resolution(t2050, t2050.get("source", "")),
                 "confiance": _confidence_from_status(t2050.get("statut")),
                 "source": t2050.get("source"),
                 "date_source": building_data.get("date_generation"),
@@ -1076,7 +1135,7 @@ def compute_trajectoire(
                 "scenario": scenario,
                 "valeur": f2100,
                 "unite": unite,
-                "resolution": _resolution_flag(source_2100),
+                "resolution": _point_resolution(t2100, source_2100),
                 "confiance": _confidence_from_status(t2100.get("statut")),
                 "source": source_2100,
                 "date_source": building_data.get("date_generation"),

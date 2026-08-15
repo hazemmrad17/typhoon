@@ -12,6 +12,17 @@ import type { RefObject } from 'react';
 import { MOCK_USER } from './mockUser';
 import type { Conversation } from '../zone/conversations';
 import type { ThemeMode } from '../typhoon/useTyphoonTheme';
+import type { UserProfile } from '../typhoon/useUserProfile';
+
+/* ── Entrées de navigation par profil — le promoteur/banque ne voient QUE
+   « Nouveau diagnostic » (comportement inchangé) ; l'assurance a en plus
+   Portfolio et Watchlist (Tickets 4 & 5 du plan insurerpagesplan). */
+const PROFILE_NAV: Record<string, Array<{ path: string; label: string; icon: string }>> = {
+  assurance: [
+    { path: '/portfolio', label: 'Portfolio', icon: 'dashboard' },
+    { path: '/watchlist', label: 'Watchlist', icon: 'bookmarks' },
+  ],
+};
 
 /* ── Menu utilisateur : onglets navigables du panneau Paramètres + déconnexion ── */
 const USER_MENU_ITEMS: Array<{ tab: string; label: string; icon: string }> = [
@@ -51,6 +62,9 @@ export type ZoneSidenavProps = {
   hidden: boolean;
   theme: 'dark' | 'light';
   mode: ThemeMode;
+  profile?: UserProfile;
+  /** Chemin actif pour surligner l'entrée de navigation courante. */
+  activePath?: string;
   onThemeModeChange: (mode: ThemeMode) => void;
   onToggleCollapse: () => void;
   onOpenAccount: () => void;
@@ -60,6 +74,8 @@ export type ZoneSidenavProps = {
   onSignOut: () => void;
   onCloseDrawer: () => void;
   onNewDiagnostic: () => void;
+  /** Navigation interne (Portfolio / Watchlist…). */
+  onNavigate?: (path: string) => void;
   conversations: Conversation[];
   activeAddress: string | null;
   onOpenConversation: (address: string) => void;
@@ -76,6 +92,8 @@ export function ZoneSidenav({
   hidden,
   theme,
   mode,
+  profile,
+  activePath,
   onThemeModeChange,
   onToggleCollapse,
   onOpenAccount,
@@ -83,11 +101,13 @@ export function ZoneSidenav({
   onSignOut,
   onCloseDrawer,
   onNewDiagnostic,
+  onNavigate,
   conversations,
   activeAddress,
   onOpenConversation,
   onDeleteConversation,
 }: ZoneSidenavProps) {
+  const profileNav = (profile ? PROFILE_NAV[profile] : undefined) || [];
   /* Survol (desktop, replié) : dépliage temporaire « peek » — la sidenav
      n'est dépliée durablement que si elle est épinglée (toggle) ; sinon elle
      se déplie tant que la souris reste dessus puis se replie au départ. */
@@ -222,19 +242,41 @@ export function ZoneSidenav({
           <md-icon-button title="Nouveau diagnostic" aria-label="Nouveau diagnostic" onClick={onNewDiagnostic}>
             <md-icon>add_circle</md-icon>
           </md-icon-button>
+          {profileNav.map((item) => (
+            <md-icon-button
+              key={item.path}
+              className={activePath === item.path ? ' sidenav-rail-active' : ''}
+              title={item.label}
+              aria-label={item.label}
+              onClick={() => onNavigate?.(item.path)}
+            >
+              <md-icon>{item.icon}</md-icon>
+            </md-icon-button>
+          ))}
         </nav>
       ) : (
         /* ── Mode déplié : liste M3 + historique « Récent » ── */
         <div className="sidenav-body">
           <md-list className="sidenav-nav">
             <md-list-item
-              className="sidenav-new"
+              className={`sidenav-new${activePath === '/zone' || !activePath ? ' active' : ''}`}
               type="button"
               onClick={onNewDiagnostic}
             >
               <md-icon slot="start">add_circle</md-icon>
               <span slot="headline">Nouveau diagnostic</span>
             </md-list-item>
+            {profileNav.map((item) => (
+              <md-list-item
+                key={item.path}
+                className={`sidenav-nav-item${activePath === item.path ? ' active' : ''}`}
+                type="button"
+                onClick={() => onNavigate?.(item.path)}
+              >
+                <md-icon slot="start">{item.icon}</md-icon>
+                <span slot="headline">{item.label}</span>
+              </md-list-item>
+            ))}
           </md-list>
 
           <ConversationHistory

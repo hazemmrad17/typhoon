@@ -92,6 +92,17 @@ function currentAccent(): string {
 
 /* ── Props ── */
 
+/** Point du Portfolio (Ticket 4) : une adresse diagnostiquée en lot, avec
+    sa bande D03 et son score — rendu en « mode points » (pas de rapport). */
+export interface PortfolioPoint {
+  lat: number;
+  lon: number;
+  label: string;
+  /** Clé de bande D03 (tres_faible … critique) — colore le point. */
+  band?: string | null;
+  score?: number | null;
+}
+
 interface UnifiedMapProps {
   report: RisqueReport | null;
   visibleLayerKeys?: ReadonlySet<string>;
@@ -107,6 +118,9 @@ interface UnifiedMapProps {
   /** 3D au démarrage. */
   initial3D?: boolean;
   fitZoom?: number;
+  /** Mode « points » (Portfolio) : une pastille par adresse colorée par
+   *  bande D03. Quand fourni (non vide), remplace le rendu rapport. */
+  points?: PortfolioPoint[];
 }
 
 /* ── Composant ── */
@@ -120,6 +134,7 @@ export function UnifiedMap({
   buildingsLimit = 200,
   initial3D = true,
   fitZoom = 16.5,
+  points,
 }: UnifiedMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -131,6 +146,8 @@ export function UnifiedMap({
   const is3dRef = useRef(initial3D);
   const latestReportRef = useRef(report);
   latestReportRef.current = report;
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
   const batimentRef = useRef(batiment);
   batimentRef.current = batiment;
   const visibleKeysRef = useRef(visibleLayerKeys);
@@ -172,7 +189,10 @@ export function UnifiedMap({
       return;
     }
 
-    const rep = latestReportRef.current;
+    /* Mode « points » (Portfolio) : le centre/zoom initial suit les points
+       (fitBounds au load), pas le rapport — pas de rapport ici. */
+    const pts = pointsRef.current;
+    const rep = pts?.length ? null : latestReportRef.current;
     const center: [number, number] = rep ? [rep.lon, rep.lat] : [2.35, 46.8];
 
     const map = new mapboxgl.Map({
@@ -221,6 +241,11 @@ export function UnifiedMap({
       mapReadyRef.current = true;
       // Si le style a fini par se charger (retry HMR/dev), on lève le bandeau.
       setMapError(null);
+      const pts = pointsRef.current;
+      if (pts?.length) {
+        renderPortfolioPoints(map, pts);
+        return;
+      }
       ensureCadastreLayer(map);
       ensureNativeBuildings(map);
       ensureBuildingsLayer(map);
@@ -293,6 +318,16 @@ export function UnifiedMap({
     if (is3dRef.current) void loadBuildings(map);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batiment, report]);
+
+  /* ── Mode points (Portfolio) : re-rendu quand la liste change ── */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (points?.length) {
+      renderPortfolioPoints(map, points);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points]);
 
   /* ── Gros plan (step Cartographie : marqueur + popup + calques aléas) ── */
   useEffect(() => {
@@ -652,6 +687,132 @@ export function UnifiedMap({
     void renderLayers();
   }
 
+  /* ── Rendu Portfolio (mode « points », Ticket 4) : une pastille par
+     adresse colorée par bande D03, popup au clic, fitBounds global. ── */
+
+  const PORTFOLIO_LAYER = 'mb-portfolio-points';
+  const PORTFOLIO_OUTLINE = 'mb-portfolio-outline';
+  const PORTFOLIO_SOURCE = 'mb-portfolio-src';
+  const PORTFOLIO_LABELS = 'mb-portfolio-labels';
+
+  function renderPortfolioPoints(map: mapboxgl.Map, pts: PortfolioPoint[]) {
+    for (const id of [PORTFOLIO_LAYER, PORTFOLIO_OUTLINE, PORTFOLIO_LABELS]) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    if (map.getSource(PORTFOLIO_SOURCE)) map.removeSource(PORTFOLIO_SOURCE);
+
+    if (!pts.length) return;
+
+    const features: GeoJSON.Feature[] = pts
+      .filter((p) => isFinite(p.lat) && isFinite(p.lon))
+      .map((p) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [p.lon, p.lat] },
+        properties: {
+          label: p.label,
+          band: p.band ?? null,
+          score: p.score ?? null,
+        },
+      }));
+
+    map.addSource(PORTFOLIO_SOURCE, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features },
+    });
+
+    /* Couleur par bande D03 — fallback ardoise pour « pas de bande ». */
+    const colorExpr: any = [
+      'match',
+      ['get', 'band'],
+      ...D03.flatMap((b) => [b.key, b.color]),
+      '#64748b',
+    ];
+
+    map.addLayer({
+      id: PORTFOLIO_LAYER,
+      type: 'circle',
+      source: PORTFOLIO_SOURCE,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 5, 8, 9, 12, 13],
+        'circle-color': colorExpr,
+        'circle-opacity': 0.85,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1.2,
+      },
+    });
+    map.addLayer({
+      id: PORTFOLIO_OUTLINE,
+      type: 'circle',
+      source: PORTFOLIO_SOURCE,
+      filter: ['==', ['get', 'band'], 'critique'],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 7, 8, 11, 12, 15],
+        'circle-color': 'transparent',
+        'circle-stroke-color': '#B03020',
+        'circle-stroke-width': 2,
+      },
+    });
+    map.addLayer({
+      id: PORTFOLIO_LABELS,
+      type: 'symbol',
+      source: PORTFOLIO_SOURCE,
+      minzoom: 10,
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-size': 10.5,
+        'text-anchor': 'top',
+        'text-offset': [0, 1.1],
+        'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+        'text-max-width': 10,
+      },
+      paint: {
+        'text-color': '#111827',
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 1.4,
+      },
+    });
+
+    /* Popup au clic : adresse + bande + score. */
+    map.on('click', PORTFOLIO_LAYER, (e) => {
+      popupRef.current?.remove();
+      popupRef.current = null;
+      const f = e.features?.[0];
+      if (!f?.geometry || f.geometry.type !== 'Point') return;
+      const props = f.properties || {};
+      const band = D03.find((b) => b.key === props.band);
+      popupRef.current = new mapboxgl.Popup({ offset: 18, closeButton: true, maxWidth: '260px' })
+        .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+        .setHTML(
+          `<div class="mb-risk-head"><md-icon aria-hidden="true">location_on</md-icon>` +
+          `<span class="mb-risk-addr">${escHtml(props.label)}</span></div>` +
+          `<div class="mb-risk-rows">` +
+          `<div class="mb-risk-row"><span class="mb-risk-name">Bande D03</span>` +
+          `<span class="mb-risk-pill" style="--risk-color:${band?.color ?? '#64748b'}">${escHtml(band?.label ?? '—')}</span></div>` +
+          (props.score != null
+            ? `<div class="mb-risk-row"><span class="mb-risk-name">Score</span>` +
+              `<span class="mb-risk-pill">${props.score}/100</span></div>`
+            : '') +
+          `</div>`
+        )
+        .addTo(map);
+    });
+    map.on('mouseenter', PORTFOLIO_LAYER, () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', PORTFOLIO_LAYER, () => {
+      map.getCanvas().style.cursor = '';
+    });
+
+    /* Cadrage global sur les points. */
+    const bounds = new mapboxgl.LngLatBounds();
+    pts.forEach((p) => {
+      if (isFinite(p.lat) && isFinite(p.lon)) bounds.extend([p.lon, p.lat]);
+    });
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 60, maxZoom: 13, duration: 900 });
+    }
+  }
+
   /* ── Marqueur ── */
 
   function placeMarker(map: mapboxgl.Map, rep: RisqueReport | null) {
@@ -762,7 +923,7 @@ export function UnifiedMap({
       ) : (
         <div ref={containerRef} className="mb-demo-map" />
       )}
-      {!mapError && (
+      {!mapError && !(points?.length) && (
         <div className="mb-demo-tools" role="group" aria-label="Options de la carte">
           {allowParcels && (
             <button type="button"

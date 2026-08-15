@@ -74,12 +74,20 @@ export function DecisionCard({
   trajectoire,
   scoreGlobal,
   onOpenProvenance,
+  onExportPdf,
+  onAddWatchlist,
 }: {
   aleas: AleaDetail[];
   trajectoire: Trajectoire | null;
   scoreGlobal: number | null;
   onOpenProvenance?: () => void;
+  /** Export PDF assurance (Ticket 2) — câblé depuis /zone. */
+  onExportPdf?: () => void;
+  /** Ajout à la watchlist (Ticket 5) — câblé depuis /zone. */
+  onAddWatchlist?: () => void;
 }) {
+  /* Copier la synthèse : état « copié » temporaire pour le retour visuel. */
+  const [copied, setCopied] = useState(false);
   /* Horizon sélectionné : 2026 (actuel) / 2050 / 2100 — la carte se recolore
      selon la valeur brute du péril à cet horizon (donnée réelle, pas un stub). */
   const [horizon, setHorizon] = useState<number>(2026);
@@ -117,6 +125,35 @@ export function DecisionCard({
     if (!pt) return null;
     if (pt.scenarios && scenario in pt.scenarios) return pt.scenarios[scenario] ?? null;
     return pt.valeur;
+  }
+
+  /* ── Copier la synthèse : texte brut (verdict + score + top périls + horizon) ── */
+  async function handleCopySynthese() {
+    const lines = [
+      `Typhoon — Synthèse souscription — ${new Date().toLocaleDateString('fr-FR')}`,
+      `Verdict : ${verdict.label}${band ? ` (bande ${band.label})` : ''}`,
+      `Score global : ${scoreGlobal ?? maxScore ?? '—'} / 100`,
+      `Horizon : ${horizon}`,
+    ];
+    if (presentAleas.length) {
+      lines.push(`Aléas présents : ${presentAleas.map((a) => a.libelle).join(', ')}`);
+    }
+    perilEntries.forEach(([code, p]) => {
+      const pt = p.points.find((x) => x.horizon === horizon) ?? null;
+      if (!pt || pt.type === 'indisponible') return;
+      const v = valueForPoint(pt);
+      const b = pt ? bandForValue(v) : null;
+      lines.push(`· ${p.label} : ${v ?? '—'} /100${b ? ` (${b.label})` : ''} — ${pt.resolution ?? 'commune-level'}`);
+    });
+    const text = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* presse-papiers indisponible (http non sécurisé…) — on laisse le texte visible via alert */
+      window.alert('Impossible d\'accéder au presse-papiers.\n\n' + text);
+    }
   }
 
   return (
@@ -241,11 +278,30 @@ export function DecisionCard({
                   ? `Projeté (Copernicus CDS) — scénario ${scenarioOptions.find((s) => s.key === scenario)?.label ?? scenario}, comparaison RCP disponible (infobulle des cellules).`
                   : 'Non simulé tant que Copernicus CDS est désactivé.'}
           </span>
-          {onOpenProvenance && (
-            <button type="button" className="provenance-link" onClick={onOpenProvenance}>
-              Sources & provenance
+          <div className="decision-actions">
+            {onOpenProvenance && (
+              <button type="button" className="decision-action" onClick={onOpenProvenance}>
+                <md-icon>database</md-icon>
+                Sources &amp; provenance
+              </button>
+            )}
+            <button type="button" className="decision-action" onClick={() => void handleCopySynthese()}>
+              <md-icon>{copied ? 'check' : 'content_copy'}</md-icon>
+              {copied ? 'Copié !' : 'Copier la synthèse'}
             </button>
-          )}
+            {onExportPdf && (
+              <button type="button" className="decision-action" onClick={onExportPdf}>
+                <md-icon>picture_as_pdf</md-icon>
+                Exporter PDF
+              </button>
+            )}
+            {onAddWatchlist && (
+              <button type="button" className="decision-action" onClick={onAddWatchlist}>
+                <md-icon>bookmark_add</md-icon>
+                Ajouter à la watchlist
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </section>

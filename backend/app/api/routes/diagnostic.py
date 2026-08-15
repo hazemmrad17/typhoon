@@ -33,6 +33,7 @@ from app.connectors.bdnb import (
 )
 from app.connectors.geocoding import GeocodingError, geocode_address
 from app.connectors.georisques import get_risque_report
+from app.connectors.copernicus import copernicus_status
 from app.connectors.lidar_hd import fetch_building_lidar
 from app.connectors.lidar_mesh import build_building_mesh, build_building_meta
 from app.core.config import settings
@@ -40,9 +41,61 @@ from app.core.logging import get_logger
 from app.recommandations.adresse_recommandations import recommander
 from app.recommandations.rapport_narratif import generer_rapport_narratif
 from app.schemas.risque_report import RisqueReport
+from app.services import batch as batch_service
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Batch interne — Ticket 3 (insurerpagesplan)
+# Même contrat que les routes Partner /v1/batch, SANS clé d'API : appel
+# same-origin depuis le Portfolio du frontend (aucune clé dans le JS).
+# L'analyseur est celui de la Partner API (analyze_address) : le service
+# partagé app/services/batch.py est générique — on lui injecte l'analyseur.
+# ---------------------------------------------------------------------------
+
+class InternalBatchRequest(BaseModel):
+    addresses: list[str] = Field(..., min_length=1, max_length=10000)
+    scenario: Literal["rcp4_5", "rcp8_5"] = Field(default="rcp8_5")
+
+
+@router.post("/diagnostic/batch")
+async def submit_internal_batch(payload: InternalBatchRequest) -> dict:
+    """Soumet un lot d'adresses (Portfolio) et le traite en arriere-plan.
+
+    Retourne `{batch_id, status, total}` — meme contrat que
+    POST /v1/batch (Partner API), sans cle d'API.
+    """
+    from partner_api.service import analyze_address
+
+    logger.info("POST /diagnostic/batch  n=%d scenario=%s", len(payload.addresses), payload.scenario)
+    try:
+        return batch_service.submit_batch(
+            payload.addresses, analyzer=analyze_address, scenario=payload.scenario
+        )
+    except Exception as exc:
+        logger.exception("diagnostic/batch -- echec soumission")
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+@router.get("/diagnostic/batch/{batch_id}")
+async def poll_internal_batch(batch_id: str) -> dict:
+    """Etat d'un lot interne (polling). 404 si le batch_id est inconnu."""
+    batch = batch_service.get_batch(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail=f"lot inconnu : {batch_id}")
+    return batch
+
+
+@router.get("/diagnostic/copernicus/status")
+async def copernicus_status_route() -> dict:
+    """État du pipeline Copernicus (bannière de la carte de décision).
+
+    Sans appel réseau : dit si le téléchargement CDS est terminé, en cours,
+    en échec (ex. licence non acceptée), et la taille du cache déjà présent.
+    """
+    return copernicus_status()
 
 
 # ---------------------------------------------------------------------------
