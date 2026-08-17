@@ -3468,6 +3468,15 @@
 .cds-banner-link md-icon {
   font-size: 14px;
 }
+.cds-banner-cta {
+  --md-filled-button-container-height: 30px;
+  --md-filled-button-label-text-size: 12px;
+  --md-filled-button-leading-space: 14px;
+  --md-filled-button-trailing-space: 14px;
+  --md-filled-button-icon-size: 16px;
+  align-self: flex-start;
+  margin-top: 8px;
+}
 
 /* ── Carte de décision (vue Assurance, Phase 4A) ── */
 .decision-card {

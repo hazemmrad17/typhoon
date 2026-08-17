@@ -98,6 +98,39 @@ async def copernicus_status_route() -> dict:
     return copernicus_status()
 
 
+class CopernicusDownloadRequest(BaseModel):
+    force: bool = Field(
+        default=False,
+        description="Re-télécharger même si le cache est valide (changement de requête, données corrompues).",
+    )
+
+
+@router.post("/diagnostic/copernicus/download")
+async def copernicus_download_route(payload: CopernicusDownloadRequest | None = None) -> dict:
+    """Lance le téléchargement CDS en arrière-plan (une seule fois, thread daemon).
+
+    Idempotent : retourne `{started: bool, reason: str}`. reason vaut
+    "started" si le téléchargement démarre, "in_progress" si un autre tourne
+    déjà, "already_complete" si le cache est valide (sauf force=true),
+    "not_configured" si CDSAPI_URL/CDSAPI_KEY manquent (409). Suivre l'état
+    via GET /diagnostic/copernicus/status.
+    """
+    from app.connectors.copernicus import start_download
+
+    force = bool(payload.force if payload else False)
+    logger.info("POST /diagnostic/copernicus/download  force=%s", force)
+    result = start_download(force=force)
+    if result.get("reason") == "not_configured":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "copernicus_non_configure",
+                "detail": "CDSAPI_URL / CDSAPI_KEY absents de la configuration — renseignez-les dans le .env puis redémarrez.",
+            },
+        )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Diagnostic complet (jumeau numérique 3D)
 # ---------------------------------------------------------------------------

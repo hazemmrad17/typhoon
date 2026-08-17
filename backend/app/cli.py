@@ -50,6 +50,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--batch", help="Fichier texte avec une adresse par ligne, traitees a la suite")
     parser.add_argument("--force", action="store_true", help="Ne pas avertir si l'adresse est hors region PACA")
     parser.add_argument("--no-copernicus", action="store_true", help="Desactiver Copernicus CDS dans la collecte")
+    parser.add_argument(
+        "--download-copernicus",
+        action="store_true",
+        help=(
+            "Lancer le téléchargement CDS une seule fois (cache local) puis quitter — "
+            "sans réseau bloqué vers cds.climate.copernicus.eu. Ajouter --force pour "
+            "re-télécharger même si le cache est valide."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -120,6 +129,27 @@ async def _batch_run(batch_file: str, force: bool, enable_copernicus: bool = Tru
 async def _main() -> int:
     args = _parse_args()
     copernicus_enabled = not args.no_copernicus
+
+    if args.download_copernicus:
+        from app.connectors.copernicus import copernicus_status, ensure_dataset_downloaded
+
+        print(
+            "Téléchargement CDS (une seule fois, puis cache local)... "
+            "cela peut prendre quelques minutes selon la file d'attente CDS.",
+            file=sys.stderr,
+        )
+
+        def _run_download() -> dict:
+            ensure_dataset_downloaded(force=args.force)
+            return copernicus_status()
+
+        try:
+            status = await asyncio.to_thread(_run_download)
+        except Exception as exc:
+            print(f"Echec du téléchargement CDS : {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(status, indent=2, ensure_ascii=False))
+        return 0
 
     if args.batch:
         return await _batch_run(args.batch, args.force, enable_copernicus=copernicus_enabled)

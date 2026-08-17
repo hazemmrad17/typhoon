@@ -321,10 +321,20 @@ export function Zone() {
         setVisibleLayerKeys(
           new Set(
             (cached.report.aleas || [])
-              .filter((a) => a.present === true)
+              .filter((a) => a.present !== null)
               .map((a) => a.code)
           )
         );
+        /* Diagnostic en cache ANTÉRIEUR à la mise en service Copernicus : le
+           rapport restauré n'a pas de trajectoire. On la rattrape en
+           arrière-plan (POST /diagnostic/fast uniquement — pas de
+           re-diagnostic complet) : la restitution reste instantanée, la
+           carte de décision se remplit dès que le contrat arrive, et le
+           cache est mis à jour (putCachedTrajectoire) pour ne le faire
+           qu'une seule fois par adresse. */
+        if (!cached.trajectoire) {
+          void backfillTrajectoire(cached.report.adresse_normalisee || value);
+        }
         return;
       }
     }
@@ -386,12 +396,36 @@ export function Zone() {
       setStepError(false); // l'adresse est validée → étapes suivantes débloquées
       setStep(1); // → étape Cartographie (aléas + carte unifiée)
       setVisibleLayerKeys(
-        new Set((r.aleas || []).filter((a) => a.present === true).map((a) => a.code))
+        new Set((r.aleas || []).filter((a) => a.present !== null).map((a) => a.code))
       );
     } catch {
       setDiagError('Erreur réseau — backend inaccessible ?');
     } finally {
       setLoading(false);
+    }
+  }
+
+  /* Rattrapage trajectoire pour les diagnostics en cache antérieurs à
+     Copernicus : relance uniquement /diagnostic/fast (léger, sans
+     recommandations) pour remplir la carte de décision sans re-diagnostiquer
+     l'adresse. Fail-soft : si le contrat ou la trajectoire manquent, on
+     laisse la restitution en cache telle quelle. */
+  async function backfillTrajectoire(address: string) {
+    try {
+      const resp = await fetch(`${API}/diagnostic/fast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adresse: address, copernicus: true, scenario: 'rcp8_5' }),
+      });
+      if (!resp.ok) return;
+      const contract = await resp.json();
+      if (contract?.trajectoire && typeof contract.trajectoire === 'object') {
+        const traj = contract.trajectoire as Trajectoire;
+        setTrajectoire(traj);
+        putCachedTrajectoire(address, traj);
+      }
+    } catch {
+      /* Non bloquant : la restitution en cache reste valable. */
     }
   }
 
@@ -991,7 +1025,6 @@ export function Zone() {
                   showRisks={step === 1}
                   allowParcels={step === 2}
                   buildingsLimit={step === 1 ? 500 : 200}
-                  initial3D
                   fitZoom={16.5}
                 />
               </section>

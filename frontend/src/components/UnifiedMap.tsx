@@ -168,7 +168,7 @@ export function UnifiedMap({
   showRisks = false,
   allowParcels = false,
   buildingsLimit = 200,
-  initial3D = true,
+  initial3D = false,
   fitZoom = 16.5,
   points,
 }: UnifiedMapProps) {
@@ -690,27 +690,47 @@ export function UnifiedMap({
               features: merged.map((f) => ({ ...f, properties: { ...(f.properties || {}), niveau: a.niveau } })),
             };
             map.addSource(sourceId, { type: 'geojson', data });
-            map.addLayer({
-              id: layerId, type: 'fill', source: sourceId,
-              layout: { visibility: visible ? 'visible' : 'none' },
-              paint: {
-                'fill-color': color,
-                'fill-opacity': 0.5,
-                'fill-outline-color': '#263238',
-              },
-            });
             const outlineId = `${layerId}-outline`;
-            map.addLayer({
-              id: outlineId, type: 'line', source: sourceId,
-              layout: { visibility: visible ? 'visible' : 'none' },
-              paint: {
-                'line-color': color,
-                'line-width': a.niveau === 'critique' ? 3 : a.niveau === 'eleve' ? 2 : 1.2,
-                'line-opacity': 0.6,
-              },
-            });
-            track(layerId);
-            track(outlineId);
+            if (a.code === 'ppr') {
+              /* Périmètres PPR : CONTOUR RÉGLEMENTAIRE uniquement, pas d'aplat.
+                 Un périmètre PPR couvre toute la zone du plan ; le remplir avec
+                 la bande D03 de l'adresse produisait des aplats orange trompeurs
+                 sur des zones entières. En tiretés, il se lit comme une
+                 délimitation (comme sur le portail Géorisques), pas comme une
+                 intensité homogène. */
+              map.addLayer({
+                id: outlineId, type: 'line', source: sourceId,
+                layout: { visibility: visible ? 'visible' : 'none' },
+                paint: {
+                  'line-color': color,
+                  'line-width': a.niveau === 'critique' ? 2.5 : 1.8,
+                  'line-opacity': 0.9,
+                  'line-dasharray': [4, 3],
+                },
+              });
+              track(outlineId);
+            } else {
+              map.addLayer({
+                id: layerId, type: 'fill', source: sourceId,
+                layout: { visibility: visible ? 'visible' : 'none' },
+                paint: {
+                  'fill-color': color,
+                  'fill-opacity': 0.5,
+                  'fill-outline-color': '#263238',
+                },
+              });
+              map.addLayer({
+                id: outlineId, type: 'line', source: sourceId,
+                layout: { visibility: visible ? 'visible' : 'none' },
+                paint: {
+                  'line-color': color,
+                  'line-width': a.niveau === 'critique' ? 3 : a.niveau === 'eleve' ? 2 : 1.2,
+                  'line-opacity': 0.6,
+                },
+              });
+              track(layerId);
+              track(outlineId);
+            }
             wfsRendered = true;
           }
         }
