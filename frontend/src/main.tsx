@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { AuthProvider } from './typhoon/auth';
 import './styles/material-theme.css';
 import './styles/app.css';
 
@@ -18,6 +19,7 @@ import '@material/web/list/list-item.js';
 import '@material/web/menu/menu.js';
 import '@material/web/menu/menu-item.js';
 import '@material/web/progress/linear-progress.js';
+import '@material/web/progress/circular-progress.js';
 import '@material/web/switch/switch.js';
 import '@material/web/tabs/tabs.js';
 import '@material/web/tabs/primary-tab.js';
@@ -26,7 +28,7 @@ import '@material/web/textfield/outlined-text-field.js';
 /* ── Nettoyage des cibles tactiles Material Web ────────────────────────────
    Les composants @material/web (md-icon-button, md-switch…) insèrent dans
    leur shadow DOM un <span class="touch"></span> : une zone d'emphase
-   invisible de 48 px (accessibilité tactile). L'UI Typhoon est pilotée au
+   invisible de 48 px (accessibilité tactile). L'UI Typhon est pilotée au
    pointeur/clavier — on retire ces spans du DOM. Seuls les spans sont
    visés (le <input class="touch"> du md-switch est fonctionnel : on le
    garde). Un MutationObserver couvre les composants ajoutés dynamiquement
@@ -64,7 +66,9 @@ document.querySelectorAll('*').forEach(watchShadowRoot);
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

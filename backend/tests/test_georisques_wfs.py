@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import pytest
 
+from app.connectors import georisques_wfs
 from app.connectors.georisques_wfs import (
     geometry_intersects_point,
     parse_gml_features,
     point_in_polygon,
+    resolve_per_building,
 )
 
 
@@ -156,3 +158,49 @@ def test_line_proximity():
     assert geometry_intersects_point(line, (7.2705, 43.6925)) is True
     # Point très loin de la ligne → absent
     assert geometry_intersects_point(line, (8.0, 44.0)) is False
+
+
+# ---------------------------------------------------------------------------
+# resolve_per_building — ventilation "ppr_par_type" (correction de la
+# conflation : un PPR sismique ne doit pas faire passer l'inondation en
+# "per-building présent").
+# ---------------------------------------------------------------------------
+
+async def test_resolve_per_building_splits_ppr_by_type(monkeypatch):
+    """Le point est dans un périmètre PPR sismique mais hors de tout périmètre
+    PPR inondation. L'agrégat "ppr" (n'importe quel PPR) doit rester présent —
+    comportement historique conservé pour la carte générale — mais la
+    ventilation "ppr_par_type" doit distinguer les deux types, correctement.
+    """
+    seisme_ring = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
+    inond_ring = [(50.0, 50.0), (60.0, 50.0), (60.0, 60.0), (50.0, 60.0), (50.0, 50.0)]
+
+    async def fake_fetch_wfs_layer(client, type_name, lon, lat, margin_deg=0.02, count=200):
+        if type_name == "ms:PPRN_PERIMETRE_SEISME":
+            return [{"type": "Polygon", "coordinates": [seisme_ring], "properties": {}}]
+        if type_name in ("ms:PPRN_PERIMETRE_INOND", "ms:PPRN_PERIMETRE_SUBMAR"):
+            return [{"type": "Polygon", "coordinates": [inond_ring], "properties": {}}]
+        return []
+
+    monkeypatch.setattr(georisques_wfs, "fetch_wfs_layer", fake_fetch_wfs_layer)
+
+    # Point (5, 5) : dans le carré séisme, hors du carré inondation.
+    resultat = await resolve_per_building(client=None, lon=5.0, lat=5.0)
+
+    assert resultat["ppr"]["present"] is True
+    assert resultat["ppr_par_type"]["seisme"]["present"] is True
+    assert resultat["ppr_par_type"]["seisme"]["resolution"] == "per-building"
+    assert resultat["ppr_par_type"]["inondation"]["present"] is False
+    assert resultat["ppr_par_type"]["inondation"]["resolution"] == "per-building"
+    assert resultat["ppr_par_type"]["mouvement_terrain"]["present"] is False
+
+
+async def test_resolve_per_building_ppr_type_falls_back_when_wfs_unavailable(monkeypatch):
+    async def failing_fetch_wfs_layer(client, type_name, lon, lat, margin_deg=0.02, count=200):
+        return None
+
+    monkeypatch.setattr(georisques_wfs, "fetch_wfs_layer", failing_fetch_wfs_layer)
+
+    resultat = await resolve_per_building(client=None, lon=5.0, lat=5.0)
+
+    assert resultat["ppr_par_type"]["inondation"] == {"present": None, "count": 0, "resolution": "commune-level"}

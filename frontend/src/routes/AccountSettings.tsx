@@ -13,13 +13,7 @@ import type { CSSProperties } from 'react';
 import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { SettingsPanel, type SettingsTabKey } from '../components/SettingsPanel';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
-import {
-  loadConversations,
-  removeConversation,
-  saveConversations,
-  type Conversation,
-} from '../zone/conversations';
-import { removeCachedDiagnostic } from '../zone/diagnosticCache';
+import { useAuth } from '../typhoon/auth';
 import '../styles/zone.css';
 
 /* /settings/<onglet> → ouvre directement l'onglet (Compte, Sécurité,
@@ -37,24 +31,13 @@ export function AccountSettings() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, accent, mode, setThemeMode } = useTyphoonTheme();
+  const { signOut } = useAuth();
   const isMobile = useIsMobile();
 
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const sidenavRef = useRef<HTMLElement | null>(null);
 
-  /* Historique « Récent » partagé (localStorage) — mêmes données que /zone. */
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations());
-
-  const handleDeleteConversation = (id: string) => {
-    setConversations((prev) => {
-      const victim = prev.find((c) => c.id === id);
-      const next = removeConversation(prev, id);
-      saveConversations(next);
-      if (victim) removeCachedDiagnostic(victim.address);
-      return next;
-    });
-  };
 
   const tabKey = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const activeTab: SettingsTabKey = TAB_BY_PATH[tabKey] ?? 'account';
@@ -87,6 +70,7 @@ export function AccountSettings() {
           navigate(`/settings/${tab}`);
         }}
         onSignOut={() => {
+          void signOut();
           setDrawerOpen(false);
           navigate('/');
         }}
@@ -95,13 +79,6 @@ export function AccountSettings() {
           setDrawerOpen(false);
           navigate('/zone');
         }}
-        conversations={conversations}
-        activeAddress={null}
-        onOpenConversation={(address) => {
-          setDrawerOpen(false);
-          navigate(`/zone?q=${encodeURIComponent(address)}`);
-        }}
-        onDeleteConversation={handleDeleteConversation}
       />
 
       {/* ===== COLONNE PRINCIPALE : en-tête + corps de page ===== */}

@@ -9,9 +9,8 @@ Les chemins de cache/lookup (Copernicus, DVF) sont ancres sur l'emplacement
 du projet (BASE_DIR), pas sur le repertoire courant : ils pointent donc
 toujours vers backend/data/... quel que soit l'endroit d'ou la commande est
 lancee. Comme ce projet vit sous D:\\Talan\\Typhoon-2, ces telechargements
-se font sous D:, pas sous C:. Voir docs/GUIDE_ORCHESTRATEUR_API.md, section
-"Espace disque" si vous voulez aussi deplacer le venv Python et le cache
-pip sous D: (ce sont eux qui consomment le plus d'espace sur C: sinon).
+se font sous D:, pas sous C: (deplacez aussi le venv Python et le cache pip
+sous D: si l'espace sur C: est limite - ce sont eux qui en consomment le plus).
 """
 
 from __future__ import annotations
@@ -90,6 +89,20 @@ class Settings(BaseSettings):
     # reseau. Aucune option RapidAPI ici : un essai reel a facture des la
     # premiere requete meme avec une cle valide, ce chemin a ete retire du
     # code entierement plutot que juste desactive.
+
+    # CORS — origines autorisées, séparées par des virgules. Par défaut,
+    # seulement le frontend Vite en dev local (port 5173) : un joker "*"
+    # fonctionnait tant qu'aucun vrai frontend n'était déployé derrière un
+    # domaine, mais laisse n'importe quel site tiers appeler l'API une fois
+    # en ligne. Positionner CORS_ALLOWED_ORIGINS (liste séparée par des
+    # virgules) avec le(s) domaine(s) réel(s) du frontend en production.
+    cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    # Limitation de débit (app/core/rate_limit.py) sur les routes qui
+    # déclenchent une vraie collecte (BDNB/Géorisques/Mistral/Copernicus) —
+    # protège la facture des APIs externes autant que le service lui-même.
+    rate_limit_requests: int = 30
+    rate_limit_window_seconds: float = 60.0
 
     # Divers
     http_timeout_seconds: float = 15.0

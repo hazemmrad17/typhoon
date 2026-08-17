@@ -325,20 +325,28 @@ def _argile_subscore(
     return _clamp(base), source, tracking
 
 
-def _batiment_status_ppr(georisques: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Statut WFS au bâtiment pour le péril PPR (`georisques["batiment"]["ppr"]`).
+def _batiment_status_ppr_type(georisques: dict[str, Any] | None, ppr_type: str) -> dict[str, Any] | None:
+    """Statut WFS au bâtiment pour un TYPE de PPR précis
+    (`georisques["batiment"]["ppr_par_type"][ppr_type]`) — cf.
+    `georisques_wfs.PPR_TYPE_LAYERS`. Ventilé par type (et non l'agrégat "ppr")
+    car un bâtiment peut être dans un périmètre PPR sismique sans être dans un
+    périmètre PPR inondation : le score d'un péril donné ne doit se fier qu'à
+    son propre type, jamais à "un PPR quelconque touche ce point".
 
     Retourne `{"present": bool|None, "resolution": str}` si la résolution au
-    bâtiment a été tentée, sinon None (WFS jamais appelé / pas de couche).
+    bâtiment a été tentée pour ce type, sinon None (WFS jamais appelé).
     present=False signifie que le WFS a répondu et que le point de l'adresse
-    n'est dans AUCUN périmètre PPR — même si la commune en a un.
+    n'est dans AUCUN périmètre de ce type — même si la commune en a un.
     """
     if not isinstance(georisques, dict):
         return None
     batiment = georisques.get("batiment")
     if not isinstance(batiment, dict):
         return None
-    info = batiment.get("ppr")
+    par_type = batiment.get("ppr_par_type")
+    if not isinstance(par_type, dict):
+        return None
+    info = par_type.get(ppr_type)
     if not isinstance(info, dict):
         return None
     return info
@@ -347,7 +355,9 @@ def _batiment_status_ppr(georisques: dict[str, Any] | None) -> dict[str, Any] | 
 def _ppr_inondation(georisques: dict[str, Any] | None) -> tuple[bool, float | None, str | None, str]:
     """(ppri_present, hauteur_eau_m, zone_ppr, resolution) depuis les PPR.
 
-    Résolution au bâtiment d'abord (WFS, `georisques["batiment"]["ppr"]`) :
+    Résolution au bâtiment d'abord (WFS, type "inondation" de
+    `georisques["batiment"]["ppr_par_type"]` — jamais l'agrégat "ppr", qui
+    mélangerait un périmètre sismique/minier/etc. avec le périmètre inondation) :
     si le point de l'adresse a été testé contre les périmètres réels et n'est
     dans aucun, le bâtiment n'est pas exposé — `ppri=False` même si la commune
     a un PPRI prescrit (c'est tout l'intérêt du per-building). Si le point EST
@@ -358,7 +368,7 @@ def _ppr_inondation(georisques: dict[str, Any] | None) -> tuple[bool, float | No
     Phase 6 : hauteur reelle derivee du zonage reglementaire du PPRI
     (rouge = interdiction -> bande 1.5-3 m, bleue = prescriptions -> 0.5-1.5 m).
     """
-    bat = _batiment_status_ppr(georisques)
+    bat = _batiment_status_ppr_type(georisques, "inondation")
     if bat is not None and bat.get("resolution") == "per-building":
         if bat.get("present") is False:
             return False, None, None, "per-building"
@@ -462,7 +472,26 @@ def _mouvement_terrain_subscore(georisques: dict[str, Any] | None) -> tuple[int,
     n_cavites, n_mvt = len(cavites), len(mvt)
     base = 15 + min(n_cavites, 3) * 12 + min(n_mvt, 3) * 10 + min(mvt_catnat, 3) * 8
     source = f"{n_cavites} cavité(s), {n_mvt} mouvement(s) de terrain, {mvt_catnat} arrêté(s) CATNAT"
-    tracking = {"source": "georisques.mouvement_terrain", "statut": SourceStatus.AVAILABLE.value, "nb_cavites": n_cavites, "nb_mouvements": n_mvt}
+
+    # Résolution au bâtiment via le type PPR "mouvement_terrain" (WFS
+    # PPRN_PERIMETRE_MVT) — même schéma que _ppr_inondation.
+    resolution = "commune-level"
+    bat = _batiment_status_ppr_type(georisques, "mouvement_terrain")
+    if bat is not None and bat.get("resolution") == "per-building":
+        resolution = "per-building"
+        if bat.get("present") is True:
+            base = max(base, 45)
+            source += " ; point dans un périmètre PPR mouvement de terrain (vérification WFS au bâtiment)"
+        elif bat.get("present") is False:
+            source += " ; point hors périmètre PPR mouvement de terrain (vérification WFS au bâtiment)"
+
+    tracking = {
+        "source": "georisques.mouvement_terrain",
+        "statut": SourceStatus.AVAILABLE.value,
+        "nb_cavites": n_cavites,
+        "nb_mouvements": n_mvt,
+        "resolution": resolution,
+    }
     return _clamp(base), source, tracking
 
 
@@ -482,12 +511,25 @@ def _sismique_subscore(georisques: dict[str, Any] | None) -> tuple[int, str, dic
     mapping = {0: 5, 1: 15, 2: 30, 3: 50, 4: 70, 5: 88}
     zone_int = _parse_zone_sismicite(zone)
     tracking = {"source": "georisques.zonage_sismique", "statut": SourceStatus.AVAILABLE.value if zone_int is not None else SourceStatus.NO_FEATURE_FOUND.value, "zone": zone_int}
+    # Le zonage sismique national est fixé par DÉCRET, par COMMUNE, sans
+    # résolution plus fine possible — la résolution reste "commune-level" (repli
+    # par défaut de _resolution_flag) même quand un PPRS (plan de prévention des
+    # risques sismiques, site-spécifique, cf. PPR_TYPE_LAYERS) existe à
+    # proximité : ce sont deux instruments juridiques distincts. Le PPRS n'est
+    # donc qu'un signal annexe ici, jamais une requalification "per-building" du
+    # zonage national.
+    bat_pprs = _batiment_status_ppr_type(georisques, "seisme")
+    if bat_pprs is not None and bat_pprs.get("resolution") == "per-building":
+        tracking["pprs_present"] = bat_pprs.get("present")
     if zone_int is not None and zone_int in mapping:
         return mapping[zone_int], f"zone de sismicité {zone_int} (Géorisques)", tracking
     return 20, "zone de sismicité non déterminée (valeur de repli faible)", tracking
 
 
 def _radon_subscore(georisques: dict[str, Any] | None) -> tuple[int, str, dict[str, Any]]:
+    # Le potentiel radon (IRSN) est une classification COMMUNALE par nature —
+    # aucune couche WFS bâtiment n'existe pour cet aléa (contrainte de la
+    # source, pas un gap technique ; cf. PPR_TYPE_LAYERS).
     radon = _data_list(georisques, "radon")
     potentiel = radon[0].get("classe_potentiel") if radon and isinstance(radon[0], dict) else None
     try:
@@ -502,11 +544,32 @@ def _radon_subscore(georisques: dict[str, Any] | None) -> tuple[int, str, dict[s
 
 
 def _feu_foret_subscore(georisques: dict[str, Any] | None) -> tuple[int, str, dict[str, Any]]:
-    present = _has_hazard(georisques, "feu de forêt") or _has_hazard(georisques, "feu de foret")
-    tracking = {"source": "georisques.feu_foret", "statut": SourceStatus.AVAILABLE.value if present else SourceStatus.NO_FEATURE_FOUND.value}
-    if present:
-        return 55, "aléa feu de forêt présent dans le référentiel Géorisques communal", tracking
-    return 10, "aucun aléa feu de forêt recensé par Géorisques", tracking
+    present_commune = _has_hazard(georisques, "feu de forêt") or _has_hazard(georisques, "feu de foret")
+    base = 55 if present_commune else 10
+    source = (
+        "aléa feu de forêt présent dans le référentiel Géorisques communal"
+        if present_commune
+        else "aucun aléa feu de forêt recensé par Géorisques"
+    )
+
+    # Résolution au bâtiment via le type PPR "feu_foret" (WFS
+    # PPRN_PERIMETRE_FEU) — même schéma que _ppr_inondation.
+    resolution = "commune-level"
+    bat = _batiment_status_ppr_type(georisques, "feu_foret")
+    if bat is not None and bat.get("resolution") == "per-building":
+        resolution = "per-building"
+        if bat.get("present") is True:
+            base = max(base, 55)
+            source += " ; point dans un périmètre PPR feu de forêt (vérification WFS au bâtiment)"
+        elif bat.get("present") is False:
+            source += " ; point hors périmètre PPR feu de forêt (vérification WFS au bâtiment)"
+
+    tracking = {
+        "source": "georisques.feu_foret",
+        "statut": SourceStatus.AVAILABLE.value if present_commune else SourceStatus.NO_FEATURE_FOUND.value,
+        "resolution": resolution,
+    }
+    return base, source, tracking
 
 
 def _canicule_subscore(climat_block: dict[str, Any] | None, source: str = "open_meteo.canicule") -> tuple[int, str, dict[str, Any]]:

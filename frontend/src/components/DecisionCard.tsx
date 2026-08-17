@@ -130,7 +130,7 @@ export function DecisionCard({
   /* ── Copier la synthèse : texte brut (verdict + score + top périls + horizon) ── */
   async function handleCopySynthese() {
     const lines = [
-      `Typhoon — Synthèse souscription — ${new Date().toLocaleDateString('fr-FR')}`,
+      `Typhon — Synthèse souscription — ${new Date().toLocaleDateString('fr-FR')}`,
       `Verdict : ${verdict.label}${band ? ` (bande ${band.label})` : ''}`,
       `Score global : ${scoreGlobal ?? maxScore ?? '—'} / 100`,
       `Horizon : ${horizon}`,

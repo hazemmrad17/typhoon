@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
 
 MESSAGE = [
@@ -41,12 +42,16 @@ CONTEXTE = {
 
 def test_chat_appelle_mistral_avec_le_contexte():
     with TestClient(app) as client:
-        # Patch au point d'usage (app.api.routes.chat.chat_text) : la route fait
-        # `from app.recommandations.mistral_client import chat_text`, donc la
-        # reference vit dans le module route, pas dans mistral_client (meme
-        # convention que test_api_diagnostic_offline.py, qui patche
-        # app.recommandations.service.chat_json).
-        with patch(
+        # settings.mistral_api_key peut être vide (CI/sandbox, cf. docstring
+        # du module) : la route renverrait 503 avant même d'appeler chat_text
+        # si on ne force pas une clé factice ici — chat_text est mocké de
+        # toute façon, aucun vrai appel Mistral n'est fait.
+        with patch.object(settings, "mistral_api_key", "test-key"), patch(
+            # Patch au point d'usage (app.api.routes.chat.chat_text) : la route fait
+            # `from app.recommandations.mistral_client import chat_text`, donc la
+            # reference vit dans le module route, pas dans mistral_client (meme
+            # convention que test_api_diagnostic_offline.py, qui patche
+            # app.recommandations.service.chat_json).
             "app.api.routes.chat.chat_text",
             return_value="Je vous recommande l'isolation thermique renforcée de la toiture.",
         ) as mock_chat:
@@ -93,7 +98,7 @@ def test_chat_sans_cle_api_renvoie_503():
 
 def test_chat_erreur_mistral_renvoie_502():
     with TestClient(app) as client:
-        with patch(
+        with patch.object(settings, "mistral_api_key", "test-key"), patch(
             "app.api.routes.chat.chat_text",
             side_effect=RuntimeError("timeout"),
         ):

@@ -47,6 +47,14 @@ function setProfile(next: UserProfile) {
 }
 
 /**
+ * Setter module-level exposé pour synchroniser le profil depuis une source
+ * externe (ex. Supabase user_metadata après restauration de session).
+ */
+export function setUserProfile(next: UserProfile) {
+  setProfile(next);
+}
+
+/**
  * Profil métier de l'utilisateur (Phase A multi-profils). Persisté en
  * localStorage comme le thème ; retombe sur MOCK_USER.profile par défaut
  * (le promoteur reste la vue par défaut — rien ne change pour lui).

@@ -205,7 +205,7 @@ export function BdnbMap({ batiment, report }: BdnbMapProps) {
       // on le résout donc via getComputedStyle (suit le sélecteur de couleur).
       style: () => {
         const accent =
-          getComputedStyle(container).getPropertyValue('--accent').trim() || '#4386b1';
+          getComputedStyle(container).getPropertyValue('--accent').trim() || '#4c3f91';
         return new Style({
           fill: new Fill({ color: accent + '55' }),
           stroke: new Stroke({ color: accent, width: 2.5 }),

@@ -23,6 +23,7 @@ def _building_data_factice(
     jours_chaleur: float | None = 5.0,
     precip_proj: float | None = 700.0,
     batiment_ppr: dict | None = None,
+    batiment_ppr_par_type: dict[str, dict] | None = None,
     ppr_commune: bool = False,
 ) -> dict:
     # Le champ reel du collecteur est `libelle_risque_jo` (cf.
@@ -39,6 +40,16 @@ def _building_data_factice(
     # pas un champ Georisques communal — cf. _argile_subscore.
     if alerte_argiles:
         bdnb_base["alea_argile"] = alerte_argiles
+
+    # Ventilation WFS par type de PPR (georisques_wfs.PPR_TYPE_LAYERS) : chaque
+    # peril lit son propre type (inondation, mouvement_terrain, feu_foret, ...),
+    # jamais l'agrégat "ppr" (cf. _batiment_status_ppr_type). `batiment_ppr`
+    # reste le raccourci historique pour le type "inondation", le seul utilisé
+    # avant la scission par type ; `batiment_ppr_par_type` permet de fixer
+    # plusieurs types à la fois pour les nouveaux tests par péril.
+    ppr_par_type: dict[str, dict] = dict(batiment_ppr_par_type or {})
+    if batiment_ppr is not None:
+        ppr_par_type.setdefault("inondation", batiment_ppr)
 
     return {
         "adresse": {
@@ -58,12 +69,13 @@ def _building_data_factice(
             "catnat": {"data": catnat_data},
             "zonage_sismique": None,
             "cavites": None,
-            # Résolution WFS au bâtiment (georisques["batiment"]["ppr"]) :
-            # present=False = le point de l'adresse n'est dans AUCUN périmètre
-            # PPR, même si la commune en a un.
+            # Résolution WFS au bâtiment, ventilée par type
+            # (georisques["batiment"]["ppr_par_type"][type]) : present=False =
+            # le point de l'adresse n'est dans AUCUN périmètre de CE type, même
+            # si la commune en a un (pour ce type ou un autre).
             **(
-                {"batiment": {"ppr": batiment_ppr}}
-                if batiment_ppr is not None
+                {"batiment": {"ppr_par_type": ppr_par_type}}
+                if ppr_par_type
                 else {}
             ),
             # PPRI prescrit au niveau commune (liste REST gaspar/pprn) — la
@@ -322,3 +334,74 @@ def test_trajectoire_inondation_resolution_batiment():
     # La résolution per-building est conservée à l'horizon 2050 aussi
     # (le bâtiment ne bouge pas : la vérification WFS reste valide).
     assert scores["trajectoire"]["perils"]["inondation"]["points"][1]["resolution"] == "per-building"
+
+
+def test_trajectoire_mouvement_terrain_resolution_batiment():
+    """Même schéma que l'inondation, pour le type PPR "mouvement_terrain" —
+    la scission par type (Part 1) doit se propager à ce péril aussi."""
+    # WFS : bâtiment hors périmètre PPR mouvement de terrain.
+    data_hors = _building_data_factice(
+        batiment_ppr_par_type={"mouvement_terrain": {"present": False, "resolution": "per-building"}},
+    )
+    scores_hors = compute_risk_scores(data_hors)
+    pt_hors = scores_hors["trajectoire"]["perils"]["mouvement_terrain"]["points"][0]
+    assert pt_hors["resolution"] == "per-building"
+    assert pt_hors["valeur"] == 15  # base seule, aucune cavité/mvt/catnat
+    assert "hors périmètre PPR mouvement de terrain" in scores_hors["risques_par_alea"]["mouvement_terrain"]["justification"]
+
+    # Sans résultat WFS : repli commune-level (comportement historique).
+    data_sans = _building_data_factice()
+    scores_sans = compute_risk_scores(data_sans)
+    pt_sans = scores_sans["trajectoire"]["perils"]["mouvement_terrain"]["points"][0]
+    assert pt_sans["resolution"] == "commune-level"
+
+    # WFS : bâtiment dans un périmètre PPR mouvement de terrain -> plancher.
+    data_dans = _building_data_factice(
+        batiment_ppr_par_type={"mouvement_terrain": {"present": True, "resolution": "per-building"}},
+    )
+    scores_dans = compute_risk_scores(data_dans)
+    pt_dans = scores_dans["trajectoire"]["perils"]["mouvement_terrain"]["points"][0]
+    assert pt_dans["resolution"] == "per-building"
+    assert pt_dans["valeur"] == 45  # plancher PPR mouvement de terrain
+    assert "dans un périmètre PPR mouvement de terrain" in scores_dans["risques_par_alea"]["mouvement_terrain"]["justification"]
+
+
+def test_trajectoire_feu_foret_resolution_batiment():
+    """Même schéma, pour le type PPR "feu_foret"."""
+    data_hors = _building_data_factice(
+        batiment_ppr_par_type={"feu_foret": {"present": False, "resolution": "per-building"}},
+    )
+    scores_hors = compute_risk_scores(data_hors)
+    pt_hors = scores_hors["trajectoire"]["perils"]["feu_foret"]["points"][0]
+    assert pt_hors["resolution"] == "per-building"
+    assert pt_hors["valeur"] == 10  # aucun aléa communal, hors périmètre PPR
+    assert "hors périmètre PPR feu de forêt" in scores_hors["risques_par_alea"]["feu_foret"]["justification"]
+
+    data_sans = _building_data_factice()
+    scores_sans = compute_risk_scores(data_sans)
+    pt_sans = scores_sans["trajectoire"]["perils"]["feu_foret"]["points"][0]
+    assert pt_sans["resolution"] == "commune-level"
+
+    data_dans = _building_data_factice(
+        batiment_ppr_par_type={"feu_foret": {"present": True, "resolution": "per-building"}},
+    )
+    scores_dans = compute_risk_scores(data_dans)
+    pt_dans = scores_dans["trajectoire"]["perils"]["feu_foret"]["points"][0]
+    assert pt_dans["resolution"] == "per-building"
+    assert pt_dans["valeur"] == 55
+    assert "dans un périmètre PPR feu de forêt" in scores_dans["risques_par_alea"]["feu_foret"]["justification"]
+
+
+def test_trajectoire_sismique_stays_commune_level_despite_pprs():
+    """Décision délibérée (Part 1) : le zonage sismique national reste
+    "commune-level" même quand un PPRS (site-spécifique) touche le point — ce
+    sont deux instruments juridiques distincts, cf. PPR_TYPE_LAYERS. Un PPRS
+    présent ne doit JAMAIS faire passer ce péril en "per-building"."""
+    data = _building_data_factice(
+        zone_sismique="3",
+        batiment_ppr_par_type={"seisme": {"present": True, "resolution": "per-building"}},
+    )
+    scores = compute_risk_scores(data)
+    pt = scores["trajectoire"]["perils"]["sismique"]["points"][0]
+    assert pt["resolution"] == "commune-level"
+    assert pt["valeur"] == 50  # zone 3 (mapping {0:5,1:15,2:30,3:50,...}), inchangé par le PPRS

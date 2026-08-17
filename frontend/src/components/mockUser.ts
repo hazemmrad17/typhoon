@@ -17,7 +17,7 @@ export const MOCK_USER = {
   name: 'Julien Martin',
   initials: 'JM',
   email: 'julien.martin@typhoon.fr',
-  organization: 'Typhoon SARL',
+  organization: 'Typhon SARL',
   tier: 'Pro',
   profile: 'promoteur' as UserProfile,
 };

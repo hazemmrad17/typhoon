@@ -5,6 +5,10 @@
 //   résolution · flag « à expertiser »), histogramme des bandes, heatmap
 //   (UnifiedMap en mode points) et exports CSV + PDF de synthèse.
 //
+//   Interface refaite sur le langage Material Web des pages assureur
+//   (dashboard / watchlist) : cartes de stats, zone de dépôt CSV, tableau
+//   avec pastilles D03 et badges de statut.
+//
 //   Les résultats de lot vivent en sessionStorage (pas diagnosticCache, qui
 //   est plafonné à 30 entrées pour un historique mono-adresse).
 // =============================================================================
@@ -16,14 +20,8 @@ import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { UnifiedMap, type PortfolioPoint } from '../components/UnifiedMap';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
+import { useAuth } from '../typhoon/auth';
 import { API, D03, bandForKey } from '../zone/config';
-import {
-  loadConversations,
-  removeConversation,
-  saveConversations,
-  type Conversation,
-} from '../zone/conversations';
-import { removeCachedDiagnostic } from '../zone/diagnosticCache';
 import '../styles/zone.css';
 
 /* ── Types du contrat batch interne (même forme que la Partner API) ── */
@@ -99,22 +97,12 @@ export function Portfolio() {
   const location = useLocation();
   const { theme, accent, mode, setThemeMode } = useTyphoonTheme();
   const { profile } = useUserProfile();
+  const { signOut } = useAuth();
   const isMobile = useIsMobile();
 
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const sidenavRef = useRef<HTMLElement | null>(null);
-
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations());
-  const handleDeleteConversation = (id: string) => {
-    setConversations((prev) => {
-      const victim = prev.find((c) => c.id === id);
-      const next = removeConversation(prev, id);
-      saveConversations(next);
-      if (victim) removeCachedDiagnostic(victim.address);
-      return next;
-    });
-  };
 
   /* ── État du lot ── */
   const [csvText, setCsvText] = useState('');
@@ -122,6 +110,7 @@ export function Portfolio() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<BatchPoll | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const pollTimer = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -308,6 +297,8 @@ export function Portfolio() {
      version, la heatmap affiche les adresses résolues par bande. */
   const showHeatmap = points.length > 0;
 
+  const progressPct = batch && batch.total > 0 ? Math.round(((batch.completed + batch.failed) / batch.total) * 100) : 0;
+
   return (
     <main
       className={`zone-app portfolio-page${theme === 'light' ? ' theme-light' : ''}${
@@ -328,14 +319,10 @@ export function Portfolio() {
         onToggleCollapse={() => (isMobile ? setDrawerOpen(false) : setNavCollapsed((c) => !c))}
         onOpenAccount={() => { setDrawerOpen(false); navigate('/settings/account'); }}
         onNavigateSettings={(tab) => { setDrawerOpen(false); navigate(`/settings/${tab}`); }}
-        onSignOut={() => { setDrawerOpen(false); navigate('/'); }}
+        onSignOut={() => { void signOut(); setDrawerOpen(false); navigate('/'); }}
         onCloseDrawer={() => setDrawerOpen(false)}
         onNewDiagnostic={() => { setDrawerOpen(false); navigate('/zone'); }}
         onNavigate={(path) => { setDrawerOpen(false); navigate(path); }}
-        conversations={conversations}
-        activeAddress={null}
-        onOpenConversation={(address) => { setDrawerOpen(false); navigate(`/zone?q=${encodeURIComponent(address)}`); }}
-        onDeleteConversation={handleDeleteConversation}
       />
 
       <div className="zone-main">
@@ -361,8 +348,22 @@ export function Portfolio() {
             </md-filled-button>
           </header>
 
-          {/* ── Import CSV ── */}
-          <section className="portfolio-import">
+          {/* ── Import CSV (zone de dépôt) ── */}
+          <section
+            className={`portfolio-dropzone${dragOver ? ' drag-over' : ''}${csvFileName ? ' has-file' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const f = e.dataTransfer.files?.[0];
+              if (f) void handleFile(f);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            aria-label="Importer un fichier CSV d'adresses"
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -373,18 +374,28 @@ export function Portfolio() {
                 if (f) void handleFile(f);
               }}
             />
-            <div className="portfolio-import-copy">
-              <h2>1. Importer un livre d'adresses</h2>
-              <p>Fichier CSV avec une colonne <strong>adresse</strong> (une adresse par ligne).</p>
+            <div className="portfolio-dropzone-icon">
+              <md-icon>{submitting ? 'hourglass_top' : 'cloud_upload'}</md-icon>
             </div>
-            <md-filled-button
-              className="portfolio-upload-btn"
-              disabled={submitting}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <md-icon slot="icon">{submitting ? 'hourglass_top' : 'upload_file'}</md-icon>
-              {submitting ? 'Soumission…' : csvFileName ? `Re-import : ${csvFileName}` : 'Choisir un CSV'}
-            </md-filled-button>
+            <div className="portfolio-dropzone-copy">
+              <h2>
+                {submitting
+                  ? 'Soumission du lot…'
+                  : csvFileName
+                    ? `Fichier chargé : ${csvFileName}`
+                    : 'Déposer un fichier CSV'}
+              </h2>
+              <p>
+                {submitting
+                  ? "Le lot est en cours d'envoi au moteur de diagnostic."
+                  : csvFileName
+                    ? 'Cliquez pour remplacer le fichier — un CSV, une colonne « adresse » par ligne.'
+                    : 'Ou cliquez pour parcourir — CSV avec une colonne « adresse » (une adresse par ligne).'}
+              </p>
+            </div>
+            {submitting && (
+              <md-circular-progress indeterminate aria-label="Soumission en cours" />
+            )}
           </section>
 
           {error && (
@@ -397,37 +408,70 @@ export function Portfolio() {
           {/* ── Résultats ── */}
           {batch && (
             <>
-              <section className="portfolio-summary">
-                <div className="portfolio-summary-stat">
-                  <span className="portfolio-summary-num">{batch.total}</span>
-                  <span className="portfolio-summary-label">adresses</span>
+              {/* Cartes de stats */}
+              <section className="dash-stats" aria-label="Résumé du lot">
+                <div className="dash-stat-card">
+                  <span className="dash-stat-icon dash-icon-blue"><md-icon>inbox</md-icon></span>
+                  <span className="dash-stat-label">Adresses</span>
+                  <span className="dash-stat-value">{batch.total}</span>
+                  <span className="dash-stat-sub">dans le lot</span>
                 </div>
-                <div className="portfolio-summary-stat">
-                  <span className="portfolio-summary-num">{batch.completed}</span>
-                  <span className="portfolio-summary-label">terminées</span>
+                <div className="dash-stat-card">
+                  <span className="dash-stat-icon dash-icon-green"><md-icon>check_circle</md-icon></span>
+                  <span className="dash-stat-label">Terminées</span>
+                  <span className="dash-stat-value">{batch.completed}</span>
+                  <span className="dash-stat-sub">analysées</span>
                 </div>
-                <div className="portfolio-summary-stat">
-                  <span className="portfolio-summary-num portfolio-summary-failed">{batch.failed}</span>
-                  <span className="portfolio-summary-label">en erreur</span>
+                <div className="dash-stat-card">
+                  <span className="dash-stat-icon dash-icon-orange"><md-icon>warning</md-icon></span>
+                  <span className="dash-stat-label">À expertiser</span>
+                  <span className="dash-stat-value">{needsReview}</span>
+                  <span className="dash-stat-sub">bande Élevé / Critique</span>
                 </div>
-                <div className="portfolio-summary-stat">
-                  <span className="portfolio-summary-num portfolio-summary-review">{needsReview}</span>
-                  <span className="portfolio-summary-label">à expertiser</span>
+                <div className="dash-stat-card">
+                  <span className="dash-stat-icon dash-icon-red"><md-icon>error</md-icon></span>
+                  <span className="dash-stat-label">En erreur</span>
+                  <span className="dash-stat-value">{batch.failed}</span>
+                  <span className="dash-stat-sub">adresse non reconnue</span>
                 </div>
-                <span className={`portfolio-status ${batch.status}`}>
-                  {batch.status === 'completed' ? (
-                    <><md-icon>check_circle</md-icon> Terminé</>
-                  ) : batch.status === 'failed' ? (
-                    <><md-icon>error</md-icon> Échec partiel</>
-                  ) : (
-                    <><md-icon>sync</md-icon> Traitement en cours…</>
-                  )}
-                </span>
               </section>
+
+              {/* Progression */}
+              {(batch.status === 'processing' || batch.status === 'queued' || batch.status === 'pending') && (
+                <div className="portfolio-progress">
+                  <div className="portfolio-progress-row">
+                    <span><md-icon>sync</md-icon> Traitement du lot en cours…</span>
+                    <strong>{progressPct}%</strong>
+                  </div>
+                  <div className="portfolio-progress-track">
+                    <div className="portfolio-progress-fill" style={{ width: `${progressPct}%` }} />
+                  </div>
+                </div>
+              )}
+              {batch.status === 'completed' && (
+                <div className="portfolio-progress done">
+                  <div className="portfolio-progress-row">
+                    <span><md-icon>check_circle</md-icon> Lot terminé</span>
+                    <strong>{batch.completed}/{batch.total}</strong>
+                  </div>
+                </div>
+              )}
 
               {/* ── Histogramme D03 ── */}
               <section className="portfolio-histogram" aria-label="Histogramme des bandes D03">
-                <h2>2. Répartition par bande D03</h2>
+                <div className="dash-panel-head">
+                  <h2>Répartition par bande D03</h2>
+                  <div className="portfolio-export-actions">
+                    <md-text-button onClick={exportCsv}>
+                      <md-icon slot="icon">file_download</md-icon>
+                      Exporter CSV
+                    </md-text-button>
+                    <md-filled-button onClick={() => void exportPdf()}>
+                      <md-icon slot="icon">picture_as_pdf</md-icon>
+                      Synthèse PDF
+                    </md-filled-button>
+                  </div>
+                </div>
                 <div className="portfolio-hist-bars">
                   {histogram.map(({ band, count }) => (
                     <div className="portfolio-hist-col" key={band.key}>
@@ -449,7 +493,7 @@ export function Portfolio() {
               {/* ── Heatmap ── */}
               {showHeatmap && (
                 <section className="portfolio-map">
-                  <h2>3. Cartographie des risques</h2>
+                  <h2>Cartographie des risques</h2>
                   <div className="portfolio-map-wrap">
                     <UnifiedMap report={null} points={points} initial3D={false} />
                   </div>
@@ -459,17 +503,16 @@ export function Portfolio() {
               {/* ── Tableau ── */}
               <section className="portfolio-table-section">
                 <div className="portfolio-table-head">
-                  <h2>4. Détail par adresse</h2>
-                  <div className="portfolio-export-actions">
-                    <md-text-button onClick={exportCsv}>
-                      <md-icon slot="icon">file_download</md-icon>
-                      Exporter CSV
-                    </md-text-button>
-                    <md-filled-button onClick={() => void exportPdf()}>
-                      <md-icon slot="icon">picture_as_pdf</md-icon>
-                      Synthèse PDF
-                    </md-filled-button>
-                  </div>
+                  <h2>Détail par adresse</h2>
+                  <span className={`portfolio-status ${batch.status}`}>
+                    {batch.status === 'completed' ? (
+                      <><md-icon>check_circle</md-icon> Terminé</>
+                    ) : batch.status === 'failed' ? (
+                      <><md-icon>error</md-icon> Échec partiel</>
+                    ) : (
+                      <><md-icon>sync</md-icon> En cours…</>
+                    )}
+                  </span>
                 </div>
                 <div className="portfolio-table-scroll">
                   <table className="portfolio-table">
@@ -503,7 +546,7 @@ export function Portfolio() {
                             <td className="portfolio-cell-addr" title={r?.adresse?.label ?? it.address}>
                               {r?.adresse?.label ?? it.address}
                             </td>
-                            <td>{r?.score_global ?? '—'}</td>
+                            <td className="portfolio-cell-score">{r?.score_global ?? '—'}</td>
                             <td>
                               {band ? (
                                 <span className={`d03-pill ${band.cls}`}>{band.label}</span>
@@ -512,7 +555,7 @@ export function Portfolio() {
                               )}
                             </td>
                             <td>{resolution === 'per-building' ? 'Par bâtiment' : resolution === 'commune-level' ? 'Communale' : resolution === 'grid-cell' ? 'Grille' : resolution}</td>
-                            <td>{review ? <span className="portfolio-review-flag">OUI</span> : ''}</td>
+                            <td>{review ? <span className="portfolio-review-flag">À expertiser</span> : ''}</td>
                             <td>
                               <span className={`portfolio-item-status ${it.status}`}>
                                 {it.status === 'completed' ? 'OK' : it.status === 'failed' ? 'Erreur' : it.status}
@@ -539,7 +582,7 @@ export function Portfolio() {
               <md-icon>dashboard</md-icon>
               <h2>Aucun lot chargé</h2>
               <p>
-                Importez un fichier CSV d'adresses pour lancer l'analyse du livre.
+                Déposez un fichier CSV d'adresses pour lancer l'analyse du livre.
               </p>
             </section>
           )}

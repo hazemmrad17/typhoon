@@ -34,8 +34,9 @@ Thumbs.db
 
 .freebuff/
 
-# R\u00e9f\u00e9rence design / artefacts hors d\u00e9p\u00f4t (Nolla, builds)
+# R\u00e9f\u00e9rence design / artefacts hors d\u00e9p\u00f4t (Nolla, EVpin, builds)
 nollahealth-clone/
+evpin-clone/
 frontend/dist/
 frontend/_next/
 frontend/public/nolla-mirror/

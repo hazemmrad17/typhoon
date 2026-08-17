@@ -47,6 +47,29 @@ WFS_LAYER_MAP: dict[str, list[str]] = {
     "canalisations": ["ms:C_GAZ", "ms:C_HYDROCARBURES", "ms:C_PRODUITS_CHIM"],
 }
 
+# Ventilation des 8 couches PPR de WFS_LAYER_MAP["ppr"] par type de péril.
+# L'agrégat "ppr" ci-dessus répond « un PPR quelconque touche-t-il ce point ? » —
+# utile pour une carte générale, mais pas pour un péril précis : un bâtiment
+# peut être dans un périmètre PPR sismique sans être dans un périmètre PPR
+# inondation, et l'agrégat ne fait pas la différence.
+#
+# Cas particulier "seisme" : `PPRN_PERIMETRE_SEISME` est un PPRS (plan de
+# prévention des risques sismiques, site-spécifique, prescrit dans une poignée
+# de communes) — un instrument juridiquement distinct du zonage sismique
+# national (5 zones, fixées par décret par commune, sans résolution plus fine
+# possible). Le score sismique national ne doit donc PAS se fier à ce type pour
+# sa résolution "per-building" — cf. `risk_model._sismique_subscore`, qui garde
+# volontairement `commune-level` et n'utilise ce type que comme signal annexe.
+PPR_TYPE_LAYERS: dict[str, list[str]] = {
+    "inondation": ["ms:PPRN_PERIMETRE_INOND", "ms:PPRN_PERIMETRE_SUBMAR"],
+    "mouvement_terrain": ["ms:PPRN_PERIMETRE_MVT"],
+    "seisme": ["ms:PPRN_PERIMETRE_SEISME"],
+    "avalanche": ["ms:PPRN_PERIMETRE_AVALANCHE"],
+    "feu_foret": ["ms:PPRN_PERIMETRE_FEU"],
+    "risque_industriel": ["ms:PPRT_PERIMETRE_RISQIND"],
+    "minier": ["ms:PPRM_PERIMETRE_MINIER"],
+}
+
 # Rayon de tolérance (mètres) pour les couches non-polygonales (points/lignes) :
 # un site pollué à 50 m du bâtiment, ou une canalisation qui passe à 30 m, reste
 # pertinent pour le diagnostic. Les polygones, eux, sont testés par point-in-polygon.
@@ -368,7 +391,10 @@ async def resolve_per_building(
 ) -> dict[str, dict[str, Any]]:
     """Teste le point de l'adresse contre chaque couche vecteur Géorisques.
 
-    Retourne `{alea_code: {"present": bool|None, "count": int, "resolution": str}}`.
+    Retourne `{alea_code: {"present": bool|None, "count": int, "resolution": str}}`,
+    plus une clé `"ppr_par_type"` : `{type: {"present": ..., "count": ...,
+    "resolution": ...}}`, une résolution indépendante par type de PPR (inondation,
+    mouvement de terrain, séisme, ...) — cf. `PPR_TYPE_LAYERS`.
 
     - `present=True`  → au moins une zone contient le point (ou est à proximité
       pour les couches points/lignes).
@@ -377,13 +403,22 @@ async def resolve_per_building(
     - `present=None`  → WFS indisponible : on ne sait pas, retombe au niveau
       commune (`resolution="commune-level"`).
     """
-    resultat: dict[str, dict[str, Any]] = {}
-    for code, layers in WFS_LAYER_MAP.items():
+    # Cache des features par couche : les 8 couches PPR sont réutilisées telles
+    # quelles entre l'agrégat "ppr" et la ventilation "ppr_par_type" — un seul
+    # appel réseau par couche, jamais deux.
+    layer_cache: dict[str, list[dict[str, Any]] | None] = {}
+
+    async def _fetch(type_name: str) -> list[dict[str, Any]] | None:
+        if type_name not in layer_cache:
+            layer_cache[type_name] = await fetch_wfs_layer(client, type_name, lon, lat)
+        return layer_cache[type_name]
+
+    async def _resolve(layers: list[str]) -> dict[str, Any]:
         present: bool = False
         wfs_ok = True
         total = 0
         for type_name in layers:
-            features = await fetch_wfs_layer(client, type_name, lon, lat)
+            features = await _fetch(type_name)
             if features is None:
                 wfs_ok = False
                 break
@@ -393,11 +428,14 @@ async def resolve_per_building(
         if not wfs_ok:
             # WFS indisponible : on ne peut pas trancher au bâtiment, on retombe
             # au niveau commune (le statut communal reste la source de vérité).
-            resultat[code] = {"present": None, "count": 0, "resolution": "commune-level"}
-        else:
-            resultat[code] = {
-                "present": present,
-                "count": total,
-                "resolution": "per-building",
-            }
+            return {"present": None, "count": 0, "resolution": "commune-level"}
+        return {"present": present, "count": total, "resolution": "per-building"}
+
+    resultat: dict[str, dict[str, Any]] = {}
+    for code, layers in WFS_LAYER_MAP.items():
+        resultat[code] = await _resolve(layers)
+
+    resultat["ppr_par_type"] = {
+        ppr_type: await _resolve(layers) for ppr_type, layers in PPR_TYPE_LAYERS.items()
+    }
     return resultat

@@ -51,8 +51,12 @@
   --black: #090909;
   --white: #f4f4f4;
   --light-grey: #888;
-  --orange: #4386b1;
-  --orange-tint: #4386b12e;
+  --orange: #4c3f91;
+  --orange-tint: #4c3f912e;
+  /* Variante dérivée pour le premier plan (texte/icônes) sur fond sombre :
+     l'accent brut #4C3F91 sur #090909 tombe à 2.04:1, cette version éclaircie
+     remonte à ~6:1. Sert aux textes/bords accent sur les pages sombres. */
+  --orange-fg: color-mix(in srgb, var(--orange) 52%, #ffffff);
   --dark-grey: #151515;
   --standard-grey: #212121;
 
@@ -184,9 +188,10 @@
   align-items: center;
 }
 
-.typhoon-page .logo {
+.typhoon-page .navbar .logo {
   object-fit: contain;
-  width: 2.25rem;
+  width: 7.5rem;
+  height: auto;
   margin-top: 2px;
 }
 
@@ -250,7 +255,7 @@
 
 .typhoon-page .primary-btn {
   background-color: var(--orange);
-  color: #101112;
+  color: #ffffff;
   letter-spacing: -0.03rem;
   border-radius: 12px;
   padding: 0.9rem 1.5rem 0.75rem;
@@ -431,7 +436,7 @@
 
 .typhoon-page .accent-swatch.active {
   border-color: var(--white);
-  box-shadow: 0 0 0 2px var(--orange, #4386b1);
+  box-shadow: 0 0 0 2px var(--orange, #4c3f91);
 }
 
 .typhoon-page .accent-reset {
@@ -757,7 +762,7 @@
 .typhoon-page .input-field:active,
 .typhoon-page .input-field:focus {
   outline: none;
-  border-color: var(--orange);
+  border-color: var(--orange-fg);
 }
 
 .typhoon-page .input-field::placeholder {
@@ -774,13 +779,13 @@
 }
 
 .typhoon-page .inline-url {
-  color: var(--orange);
+  color: var(--orange-fg);
   text-decoration: underline;
 }
 
 .typhoon-page .submit-button {
   background-color: var(--orange);
-  color: #101112;
+  color: #ffffff;
   text-align: center;
   text-transform: none;
   border-radius: 12px;
@@ -1008,7 +1013,7 @@
 
 .typhoon-page.theme-light .accent-swatch.active {
   border-color: var(--black);
-  box-shadow: 0 0 0 2px var(--orange, #4386b1);
+  box-shadow: 0 0 0 2px var(--orange, #4c3f91);
 }
 
 .typhoon-page.theme-light .accent-reset {

@@ -34,7 +34,7 @@ export function Contact() {
                   srcSet="/vetter-consulting/assets/img/acteur-assureurs-p-500.jpg 500w, /vetter-consulting/assets/img/acteur-assureurs.jpg 1400w"
                   sizes="100vw"
                   loading="eager"
-                  alt="Expert Typhoon"
+                  alt="Expert Typhon"
                   className="grid-img is-relative in-contact"
                 />
               </div>

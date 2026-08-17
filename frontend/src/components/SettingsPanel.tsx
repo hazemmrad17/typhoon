@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { MOCK_USER } from './mockUser';
 import { PROFILE_LABELS, useUserProfile, type UserProfile } from '../typhoon/useUserProfile';
+import { useAuth, supabase } from '../typhoon/auth';
 import { BrandIcon, type BrandName } from './BrandIcon';
 
 export type SettingsTabKey = 'account' | 'security' | 'billing' | 'notifications' | 'connections';
@@ -206,13 +207,20 @@ function SaveBar({ onSave, onReset }: { onSave: () => void; onReset?: () => void
 
 function AccountTab() {
   const { profile, changeProfile } = useUserProfile();
+  const { user } = useAuth();
   const [avatar, setAvatar] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [firstName, setFirstName] = useState('Julien');
-  const [lastName, setLastName] = useState('Martin');
-  const [email, setEmail] = useState(MOCK_USER.email);
-  const [organization, setOrganization] = useState(MOCK_USER.organization);
+  const [firstName, setFirstName] = useState(() => {
+    const n = user?.name.split(' ')[0];
+    return n || 'Julien';
+  });
+  const [lastName, setLastName] = useState(() => {
+    const parts = user?.name.split(' ');
+    return parts && parts.length > 1 ? parts.slice(1).join(' ') : 'Martin';
+  });
+  const [email, setEmail] = useState(user?.email || MOCK_USER.email);
+  const [organization, setOrganization] = useState(user?.organization || MOCK_USER.organization);
   const [phone, setPhone] = useState('+33 6 12 34 56 78');
   const [address, setAddress] = useState('14 Avenue des Palmiers');
   const [state, setState] = useState('Provence-Alpes-Côte d’Azur');
@@ -226,10 +234,10 @@ function AccountTab() {
   const [deleted, setDeleted] = useState(false);
 
   const reset = () => {
-    setFirstName('Julien');
-    setLastName('Martin');
-    setEmail(MOCK_USER.email);
-    setOrganization(MOCK_USER.organization);
+    setFirstName(user?.name.split(' ')[0] || 'Julien');
+    setLastName(user?.name.split(' ').slice(1).join(' ') || 'Martin');
+    setEmail(user?.email || MOCK_USER.email);
+    setOrganization(user?.organization || MOCK_USER.organization);
     setPhone('+33 6 12 34 56 78');
     setAddress('14 Avenue des Palmiers');
     setState('Provence-Alpes-Côte d’Azur');
@@ -366,7 +374,13 @@ function AccountTab() {
             <SelectField
               label="Profil métier"
               value={profile}
-              onChange={(v) => changeProfile(v as UserProfile)}
+              onChange={(v) => {
+                const next = v as UserProfile;
+                changeProfile(next);
+                /* Persiste aussi le profil dans Supabase user_metadata pour
+                   qu'il suive l'utilisateur sur tous ses appareils. */
+                void supabase?.auth.updateUser({ data: { profile: next } });
+              }}
             >
               {(Object.keys(PROFILE_LABELS) as UserProfile[]).map((p) => (
                 <option key={p} value={p}>{PROFILE_LABELS[p]}</option>
@@ -436,9 +450,11 @@ const PASSWORD_REQS = [
 ];
 
 function SecurityTab() {
+  const { updatePassword } = useAuth();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [pwdMsg, setPwdMsg] = useState<string | null>(null);
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
   const [keyType, setKeyType] = useState('full');
   const [keyName, setKeyName] = useState('Clé Serveur 1');
@@ -448,6 +464,21 @@ function SecurityTab() {
     setCurrent('');
     setNext('');
     setConfirm('');
+    setPwdMsg(null);
+  };
+
+  const savePassword = async () => {
+    if (next !== confirm) {
+      setPwdMsg('Les deux mots de passe ne correspondent pas.');
+      return;
+    }
+    if (next.length < 6) {
+      setPwdMsg('Le nouveau mot de passe doit contenir au moins 6 caractères.');
+      return;
+    }
+    const { error } = await updatePassword(next);
+    setPwdMsg(error ? `Erreur : ${error}` : 'Mot de passe mis à jour.');
+    if (!error) resetPassword();
   };
 
   return (
@@ -472,7 +503,12 @@ function SecurityTab() {
             ))}
           </ul>
         </div>
-        <SaveBar onSave={() => undefined} onReset={resetPassword} />
+        {pwdMsg && (
+          <p className={`password-msg${pwdMsg.startsWith('Erreur') ? ' password-msg--error' : ''}`}>
+            {pwdMsg}
+          </p>
+        )}
+        <SaveBar onSave={() => void savePassword()} onReset={resetPassword} />
       </SectionCard>
 
       <SectionCard title="Vérification en deux étapes">
@@ -505,7 +541,7 @@ function SecurityTab() {
         )}
       </SectionCard>
 
-      <SectionCard title="Créer une clé API" description="Générez des clés pour intégrer Typhoon à vos outils et scripts.">
+      <SectionCard title="Créer une clé API" description="Générez des clés pour intégrer Typhon à vos outils et scripts.">
         <div className="api-key-layout">
           <div className="api-key-form">
             <SelectField label="Choisissez le type de clé API à créer" value={keyType} onChange={setKeyType}>
@@ -779,7 +815,7 @@ function NotificationsTab() {
           />
           <SwitchRow
             title="Nouveautés produit"
-            description="Annonces de nouvelles fonctionnalités et améliorations de Typhoon."
+            description="Annonces de nouvelles fonctionnalités et améliorations de Typhon."
             selected={emailNews}
             onChange={setEmailNews}
           />
@@ -826,7 +862,7 @@ function ConnectionsTab() {
 
   return (
     <>
-      <SectionCard title="Applications connectées" description="Gérez les services tiers liés à votre compte Typhoon.">
+      <SectionCard title="Applications connectées" description="Gérez les services tiers liés à votre compte Typhon.">
         <ul className="conn-list">
           {apps.map((app, i) => (
             <li key={app.name} className="conn-row">

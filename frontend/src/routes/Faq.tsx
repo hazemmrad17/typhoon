@@ -41,7 +41,7 @@ const FAQ_CELLS: FaqCell[] = [
     question: "Dois-je changer d'assureur ?",
     answer: (
       <>
-        Non, ce n'est pas nécessaire. Vous pouvez conserver vos contrats actuels et utiliser Typhoon sur un{' '}
+        Non, ce n'est pas nécessaire. Vous pouvez conserver vos contrats actuels et utiliser Typhon sur un{' '}
         <span className="is-white">périmètre précis</span> (un portefeuille, une zone, un bien) ou sur l'ensemble de
         votre activité.
       </>

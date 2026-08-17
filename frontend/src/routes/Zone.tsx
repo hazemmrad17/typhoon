@@ -21,6 +21,7 @@ import { ZoneArtisans } from '../components/ZoneArtisans';
 import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
+import { useAuth } from '../typhoon/auth';
 import { DecisionCard } from '../components/DecisionCard';
 import { ProvenancePanel } from '../components/ProvenancePanel';
 import { CopernicusStatusBanner } from '../components/CopernicusStatusBanner';
@@ -52,7 +53,6 @@ import type { RecommendationZone } from '../jumeau/recommendations';
 import {
   addConversation,
   loadConversations,
-  removeConversation,
   saveConversations,
   type Conversation,
 } from '../zone/conversations';
@@ -61,7 +61,6 @@ import {
   putCachedDiagnostic,
   putCachedRapport,
   putCachedTrajectoire,
-  removeCachedDiagnostic,
 } from '../zone/diagnosticCache';
 import '../styles/zone.css';
 
@@ -118,6 +117,7 @@ export function Zone() {
   const [searchParams] = useSearchParams();
   const { theme, accent, mode, setThemeMode } = useTyphoonTheme();
   const { profile } = useUserProfile();
+  const { signOut } = useAuth();
   const isMobile = useIsMobile();
   /* Sidenav repliée par défaut : dépliée uniquement quand elle est épinglée
      (toggle) ou pendant le survol (peek, voir ZoneSidenav). */
@@ -454,7 +454,7 @@ export function Zone() {
       setRapportError({
         code: 'reseau',
         message: 'Impossible de joindre le serveur pour générer le rapport IA.',
-        hint: 'Vérifiez que le backend Typhoon est démarré (port 8765) puis réessayez.',
+        hint: 'Vérifiez que le backend Typhon est démarré (port 8000) puis réessayez.',
         cause: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -544,23 +544,6 @@ export function Zone() {
     });
   }
 
-  /* ── Historique « Récent » (sidenav) ── */
-  function handleOpenConversation(address: string) {
-    setDrawerOpen(false);
-    void runDiagnosis(address);
-  }
-
-  function handleDeleteConversation(id: string) {
-    setConversations((prev) => {
-      const victim = prev.find((c) => c.id === id);
-      const next = removeConversation(prev, id);
-      saveConversations(next);
-      /* L'entrée du cache suit l'historique : suppression associée. */
-      if (victim) removeCachedDiagnostic(victim.address);
-      return next;
-    });
-  }
-
   function setAllVisible(visible: boolean) {
     if (!report) return;
     /* Tous les aléas à source disponible (présents ou absents) ont une couche
@@ -645,6 +628,7 @@ export function Zone() {
           navigate(`/settings/${tab}`);
         }}
         onSignOut={() => {
+          void signOut();
           setDrawerOpen(false);
           navigate('/');
         }}
@@ -659,10 +643,6 @@ export function Zone() {
         }}
         profile={profile}
         activePath={location.pathname}
-        conversations={conversations}
-        activeAddress={report?.adresse_normalisee ?? null}
-        onOpenConversation={handleOpenConversation}
-        onDeleteConversation={handleDeleteConversation}
       />
 
       {/* ===== COLONNE PRINCIPALE ===== */}
@@ -1007,6 +987,7 @@ export function Zone() {
                 <UnifiedMap
                   report={report}
                   visibleLayerKeys={visibleLayerKeys}
+                  batimentRisques={batimentRisques}
                   showRisks={step === 1}
                   allowParcels={step === 2}
                   buildingsLimit={step === 1 ? 500 : 200}

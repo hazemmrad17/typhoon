@@ -117,11 +117,11 @@ export function TyphoonNavbar({ current }: { current?: 'home' | 'faq' | 'contact
               className="navbar-logo-div visible-on-desktop w-nav-brand"
               aria-label="home"
             >
-              <img src="/vetter-consulting/assets/img/typhoon-logo.svg" loading="eager" alt="Typhoon" className="logo" />
+              <img src="/bastion/wordmark-light.svg" loading="eager" alt="Typhon" className="logo" />
             </Link>
             <div className="nav-static-item">
               <div className="nav-arrow-div">
-                <img src="/vetter-consulting/assets/img/typhoon-logo.svg" loading="lazy" alt="Typhoon" className="nav-arrow" />
+                <img src="/bastion/wordmark-light.svg" loading="lazy" alt="Typhon" className="nav-arrow" />
               </div>
               <div className="nav-link-static">Menü</div>
             </div>
@@ -190,7 +190,7 @@ export function TyphoonFooter() {
         <div className="footer-inner">
           <div className="footer-row mid">
             <div className="footer-column bottom-aligned">
-              <img src="/vetter-consulting/assets/img/typhoon-wordmark.svg" alt="Typhoon" className="footer-logo" />
+              <img src="/bastion/wordmark-light.svg" alt="Typhon" className="footer-logo" />
             </div>
             <div className="footer-column _2nd">
               <div className="align-vertically-2 is-right-aligned-desktop-only">

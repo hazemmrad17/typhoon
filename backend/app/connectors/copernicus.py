@@ -78,8 +78,11 @@ _download_state_lock = threading.Lock()
 
 DATASET_ID = "sis-ecde-climate-indicators"
 
-# Requete exacte fournie via le formulaire CDS ("Show API request code").
-# Ne pas modifier sans repasser par le formulaire officiel du dataset.
+# Requete de base fournie via le formulaire CDS ("Show API request code") —
+# ne pas modifier les champs autres que "area" sans repasser par le
+# formulaire officiel du dataset. "area" a été ajouté et vérifié en direct
+# (2026-08-17, voir docstring du module) : c'est un paramètre standard de
+# subsetting spatial CDS, accepté par ce dataset.
 _REQUEST: dict[str, Any] = {
     "origin": "projections",
     "gcm": ["ipsl_cm5a_mr"],
@@ -99,6 +102,13 @@ _REQUEST: dict[str, Any] = {
         "magnitude_of_meteorological_droughts",
     ],
     "other_parameters": ["30_c", "35_c", "40_c"],
+    # France métropolitaine + Corse, avec marge ([North, West, South, East]) —
+    # confirmé accepté par le vrai service CDS le 2026-08-17 (voir docstring
+    # du module) : réduit un téléchargement qui portait sur l'Europe entière
+    # (plusieurs Go) à quelques centaines de Mo. Typhoon ne diagnostique que
+    # des adresses françaises ; élargir cette zone si le périmètre géographique
+    # du produit change.
+    "area": [51.5, -5.5, 41.0, 10.0],
 }
 
 
@@ -272,6 +282,24 @@ _VAR_EXTREME_PRECIP_FREQ = "frequency_of_extreme_precipitation"
 SCENARIOS_CDS: tuple[str, ...] = ("rcp4_5", "rcp8_5")
 
 
+def _normalize_scenario_token(s: str) -> str:
+    """Normalise un jeton de scénario pour la comparaison par sous-chaîne.
+
+    Vérifié sur un vrai fichier téléchargé (2026-08-17) : les noms de
+    fichiers NetCDF que renvoie réellement CDS pour cette requête utilisent
+    un underscore entre le chiffre et la décimale — `rcp_8_5`, pas `rcp8_5`
+    comme le laisserait supposer le paramètre `experiment: "rcp8_5"` de la
+    requête. Sans cette normalisation, `scenario in nom_fichier.lower()`
+    est toujours faux : `scenario_available()` renvoie systématiquement
+    False (le point de code qu'elle est censée protéger — éviter qu'un
+    AUTRE scénario soit choisi par le repli de `_pick_key` sous la mauvaise
+    étiquette — ne se déclenche jamais). On compare donc sans underscore ni
+    tiret des deux côtés plutôt que de coder en dur un format précis qui
+    pourrait encore varier.
+    """
+    return s.lower().replace("_", "").replace("-", "")
+
+
 def scenario_available(climat_copernicus: dict[str, Any] | None, scenario: str) -> bool:
     """True si des indicateurs du scénario demandé sont présents dans les
     données téléchargées (jeton du scénario dans une clé `{stem}__{variable}`).
@@ -283,7 +311,8 @@ def scenario_available(climat_copernicus: dict[str, Any] | None, scenario: str) 
     """
     if not climat_copernicus:
         return False
-    return any(scenario in str(k).lower() for k in climat_copernicus)
+    token = _normalize_scenario_token(scenario)
+    return any(token in _normalize_scenario_token(str(k)) for k in climat_copernicus)
 
 # Fenêtre « 2100 » : moyenne des N dernières années de la série (le dataset
 # s'arrête en 2100 ; on prend la décennie finale 2090-2100).
@@ -318,8 +347,9 @@ def _pick_key(data: dict[str, Any], variable: str, scenario: str | None = None) 
     if not candidates:
         return None
     if scenario:
+        token = _normalize_scenario_token(scenario)
         for c in candidates:
-            if scenario in c.lower():
+            if token in _normalize_scenario_token(c):
                 return c
     for c in candidates:
         if "yearly" in c.lower():

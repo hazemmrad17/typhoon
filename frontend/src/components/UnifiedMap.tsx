@@ -22,7 +22,9 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 
 import {
   API,
+  type BatimentRisques,
   type BdnbBatiment,
+  type D03Band,
   type RisqueReport,
   WMS_LAYER_MAP,
   WFS_LAYER_MAP,
@@ -87,7 +89,35 @@ function currentAccent(): string {
       getComputedStyle(app ?? document.documentElement).getPropertyValue('--accent').trim() ||
       getComputedStyle(document.documentElement).getPropertyValue('--orange').trim();
   } catch { /* ignore */ }
-  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#4386B1';
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#4C3F91';
+}
+
+/* Mode « Risques bâtiment » (P5/P8) : mappe les champs BDNB bruts vers un
+ * score 0-100 puis une bande D03, avec exactement les mêmes seuils que le
+ * backend (risk_model._argile_subscore / _radon_subscore / _sismique_subscore)
+ * — la couleur sur la carte doit raconter la même histoire que le score du
+ * diagnostic, pas une échelle inventée côté client. On ne dispose de ces
+ * champs que pour le bâtiment cible (fiche BDNB dédiée) : seul lui est
+ * recoloré par ce mode, pas ses voisins. */
+const ARGILE_SCORE: Record<string, number> = { faible: 15, moyen: 50, fort: 82 };
+const RADON_SCORE: Record<string, number> = { '1': 10, '2': 35, '3': 65 };
+const SISMIQUE_SCORE: Record<string, number> = { '0': 5, '1': 15, '2': 30, '3': 50, '4': 70, '5': 88 };
+
+function bandForBatimentScore(score: number): D03Band {
+  return D03.find((b) => score <= b.max) || D03[D03.length - 1];
+}
+
+function batimentRiskBand(risques: BatimentRisques | null | undefined): D03Band | null {
+  if (!risques) return null;
+  const scores: number[] = [];
+  const argile = risques.alea_argile?.toLowerCase().trim();
+  if (argile && ARGILE_SCORE[argile] != null) scores.push(ARGILE_SCORE[argile]);
+  const radon = risques.alea_radon != null ? String(risques.alea_radon).trim() : null;
+  if (radon && RADON_SCORE[radon] != null) scores.push(RADON_SCORE[radon]);
+  const sismique = risques.alea_sismique != null ? String(risques.alea_sismique).trim() : null;
+  if (sismique && SISMIQUE_SCORE[sismique] != null) scores.push(SISMIQUE_SCORE[sismique]);
+  if (!scores.length) return null;
+  return bandForBatimentScore(Math.max(...scores));
 }
 
 /* ── Props ── */
@@ -108,6 +138,11 @@ interface UnifiedMapProps {
   visibleLayerKeys?: ReadonlySet<string>;
   /** Bâtiment de l'adresse diagnostiquée — surligné. */
   batiment?: BdnbBatiment | null;
+  /** Niveaux de risque BDNB du bâtiment cible (argile/radon/sismique) — pilote
+   *  le mode « Risques bâtiment » (P5/P8) : colore le bâtiment par D03 au lieu
+   *  de la teinte accent neutre. Pas de fetch supplémentaire : réutilise la
+   *  fiche déjà chargée pour le panneau latéral (Zone.tsx). */
+  batimentRisques?: BatimentRisques | null;
   /** Afficher le popup aléas + couches WMS/WFS (étape Cartographie uniquement). */
   showRisks?: boolean;
   /** Afficher le toggle « Parcelles cadastrales » (étape Analyse uniquement). */
@@ -129,6 +164,7 @@ export function UnifiedMap({
   report,
   visibleLayerKeys = new Set<string>(),
   batiment,
+  batimentRisques,
   showRisks = false,
   allowParcels = false,
   buildingsLimit = 200,
@@ -150,6 +186,9 @@ export function UnifiedMap({
   pointsRef.current = points;
   const batimentRef = useRef(batiment);
   batimentRef.current = batiment;
+  const batimentRisquesRef = useRef(batimentRisques);
+  batimentRisquesRef.current = batimentRisques;
+  const riskBuildingModeRef = useRef(false);
   const visibleKeysRef = useRef(visibleLayerKeys);
   visibleKeysRef.current = visibleLayerKeys;
   const buildingsLimitRef = useRef(buildingsLimit);
@@ -167,6 +206,7 @@ export function UnifiedMap({
 
   const [is3d, setIs3d] = useState(initial3D);
   const [showParcels, setShowParcels] = useState(false);
+  const [riskBuildingMode, setRiskBuildingMode] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   /* Éclairage du style Standard : « crépuscule » (dusk, coucher de soleil)
    * par défaut — toggle vers « jour » (day) via setConfigProperty. */
@@ -178,6 +218,16 @@ export function UnifiedMap({
 
   function highlightId(): string | null | undefined {
     return currentBatiment()?.batiment_groupe_id ?? null;
+  }
+
+  /** Couleur de remplissage du bâtiment cible : bande D03 (risque bâtiment) en
+   *  mode « Risques bâtiment », sinon la teinte accent neutre habituelle. */
+  function targetFillColor(): string {
+    if (riskBuildingModeRef.current) {
+      const band = batimentRiskBand(batimentRisquesRef.current);
+      if (band) return band.color;
+    }
+    return currentAccent();
   }
 
   /* ── Init carte (une fois) ── */
@@ -317,7 +367,7 @@ export function UnifiedMap({
     }
     if (is3dRef.current) void loadBuildings(map);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batiment, report]);
+  }, [batiment, batimentRisques, report]);
 
   /* ── Mode points (Portfolio) : re-rendu quand la liste change ── */
   useEffect(() => {
@@ -355,13 +405,14 @@ export function UnifiedMap({
   }, [visibleLayerKeys]);
 
   /** Applique la visibilité des couches de risque selon le toggle par aléa
-   *  du panneau latéral (`visibleLayerKeys`) — et uniquement en 2D : ce sont
-   *  des aplats au sol (pas d'extrusion), qui en caméra inclinée (3D) se
-   *  lisent comme des volumes au milieu des bâtiments extrudés, ce qui n'est
-   *  pas l'effet voulu. Repassent visibles dès le retour en 2D. */
+   *  du panneau latéral (`visibleLayerKeys`). Restent visibles en 3D aussi
+   *  (P6/P3 provisoire) : ce sont des aplats au sol sans extrusion propre, ce
+   *  qui est moins lisible en caméra inclinée qu'un futur relief par bande
+   *  D03, mais les masquer entièrement cachait de l'information réelle sans
+   *  raison — mieux vaut un aplat plat visible qu'une couche invisible. */
   function applyRiskLayersVisibility(map: mapboxgl.Map) {
     for (const [key, ids] of layerIdsByKeyRef.current) {
-      const visible = visibleKeysRef.current.has(key) && !is3dRef.current;
+      const visible = visibleKeysRef.current.has(key);
       for (const id of ids) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
       }
@@ -450,7 +501,7 @@ export function UnifiedMap({
       paint: {
         'fill-extrusion-height': ['case', ['>', ['coalesce', ['get', 'hauteur_mean'], 0], 0], ['get', 'hauteur_mean'], 9],
         'fill-extrusion-base': 0,
-        'fill-extrusion-color': buildingColorExpr(highlightId(), currentAccent()),
+        'fill-extrusion-color': buildingColorExpr(highlightId(), targetFillColor()),
         'fill-extrusion-opacity': 0.95,
         'fill-extrusion-vertical-gradient': true,
       },
@@ -473,7 +524,7 @@ export function UnifiedMap({
       filter: targetId ? ['==', ['get', 'batiment_groupe_id'], targetId] : ['==', ['get', 'batiment_groupe_id'], ''],
       layout: { visibility: is3dRef.current ? 'none' : 'visible' },
       paint: {
-        'fill-color': currentAccent(),
+        'fill-color': targetFillColor(),
         'fill-opacity': 0.4,
         'fill-outline-color': currentAccent(),
       },
@@ -505,9 +556,10 @@ export function UnifiedMap({
   function updateBuildingsTarget(map: mapboxgl.Map) {
     const targetId = highlightId() ?? null;
     const accent = currentAccent();
+    const fillColor = targetFillColor();
     const filterExpr: any = targetId ? ['==', ['get', 'batiment_groupe_id'], targetId] : ['==', ['get', 'batiment_groupe_id'], ''];
     if (map.getLayer(BUILDINGS_LAYER)) {
-      map.setPaintProperty(BUILDINGS_LAYER, 'fill-extrusion-color', buildingColorExpr(targetId, accent));
+      map.setPaintProperty(BUILDINGS_LAYER, 'fill-extrusion-color', buildingColorExpr(targetId, fillColor));
       // En 3D, la ville est rendue par les bâtiments natifs Mapbox : la couche
       // BDNB ne garde que le bâtiment cible (surligné) pour éviter la double
       // extrusion sur les mêmes empreintes.
@@ -515,11 +567,14 @@ export function UnifiedMap({
     }
     if (map.getLayer(BUILDINGS_OUTLINE_LAYER)) {
       map.setFilter(BUILDINGS_OUTLINE_LAYER, filterExpr);
+      // Le contour reste accent (pas la bande de risque) : le bâtiment cible
+      // doit rester identifiable même quand son remplissage change de couleur
+      // selon le péril affiché (cf. principe P9 « le bâtiment reste le héros »).
       map.setPaintProperty(BUILDINGS_OUTLINE_LAYER, 'line-color', accent);
     }
     if (map.getLayer(BUILDINGS_2D_LAYER)) {
       map.setFilter(BUILDINGS_2D_LAYER, filterExpr);
-      map.setPaintProperty(BUILDINGS_2D_LAYER, 'fill-color', accent);
+      map.setPaintProperty(BUILDINGS_2D_LAYER, 'fill-color', fillColor);
       map.setPaintProperty(BUILDINGS_2D_LAYER, 'fill-outline-color', accent);
     }
     if (map.getLayer(TARGET_LABEL_LAYER)) {
@@ -608,9 +663,10 @@ export function UnifiedMap({
         if (a.present === null) continue;
         const band = a.niveau ? bandForKey(a.niveau) : undefined;
         const color = band?.color || '#7A9187';
-        // Aplats au sol, pas d'extrusion : masqués en 3D (caméra inclinée),
-        // sinon ils se lisent comme des volumes parmi les bâtiments extrudés.
-        const visible = visibleKeysRef.current.has(a.code) && !is3dRef.current;
+        // Aplats au sol, pas d'extrusion — restent visibles en 3D (cf.
+        // applyRiskLayersVisibility) même si moins lisibles en caméra inclinée
+        // qu'un futur relief par bande D03 (P6).
+        const visible = visibleKeysRef.current.has(a.code);
         const layerId = `alea-${a.code}`;
         const sourceId = `src-${layerId}`;
         const track = (id: string) => {
@@ -903,6 +959,18 @@ export function UnifiedMap({
     }
   }
 
+  /** Mode « Risques bâtiment » (P5/P8) : le bâtiment cible se colore par bande
+   *  D03 (pire des aléas argile/radon/sismique BDNB) au lieu de la teinte
+   *  accent neutre — passe de « la commune est exposée » à « ce bâtiment
+   *  l'est ». Repeint immédiatement les couches déjà en place. */
+  function toggleRiskBuildingMode(enabled: boolean) {
+    const map = mapRef.current;
+    if (!map) return;
+    riskBuildingModeRef.current = enabled;
+    setRiskBuildingMode(enabled);
+    updateBuildingsTarget(map);
+  }
+
   /** Toggle éclairage du style Standard : crépuscule (dusk) ↔ jour (day). */
   function toggleLight() {
     const map = mapRef.current;
@@ -916,12 +984,35 @@ export function UnifiedMap({
     }
   }
 
+  /* Légende bas-gauche (P4) : bandes D03 réellement affichées sur la carte en
+   * ce moment (couches œil actives dans le panneau latéral + aléa présent),
+   * pas la liste fixe des 5 bandes — l'utilisateur comprend la carte sans
+   * ouvrir le panneau. */
+  const visibleAleas = showRisks && report ? (report.aleas || []).filter((a) => visibleLayerKeys.has(a.code) && a.present) : [];
+  const activeLegendBands: D03Band[] = D03.filter((b) => visibleAleas.some((a) => a.niveau === b.key));
+
   return (
     <div className="mb-demo-wrap">
       {mapError ? (
         <div className="mb-demo-error"><md-icon>error</md-icon><p>{mapError}</p></div>
       ) : (
         <div ref={containerRef} className="mb-demo-map" />
+      )}
+      {!mapError && !(points?.length) && activeLegendBands.length > 0 && (
+        <div className="mb-map-legend" aria-hidden="true">
+          <div className="mb-map-legend-head">
+            <md-icon>layers</md-icon>
+            <span>{visibleAleas.length} couche{visibleAleas.length > 1 ? 's' : ''} active{visibleAleas.length > 1 ? 's' : ''}</span>
+          </div>
+          <div className="mb-map-legend-bands">
+            {activeLegendBands.map((b) => (
+              <div className="mb-map-legend-row" key={b.key}>
+                <span className="mb-map-legend-dot" style={{ background: b.color }} />
+                <span>{b.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       {!mapError && !(points?.length) && (
         <div className="mb-demo-tools" role="group" aria-label="Options de la carte">
@@ -943,6 +1034,18 @@ export function UnifiedMap({
             <md-icon>view_in_ar</md-icon>
             <span>{is3d ? '2D' : '3D'}</span>
           </button>
+          {batimentRiskBand(batimentRisques) && (
+            <button type="button"
+              className={`map-3d-toggle analyse${riskBuildingMode ? ' active' : ''}`}
+              onClick={() => toggleRiskBuildingMode(!riskBuildingMode)} aria-pressed={riskBuildingMode}
+              title={riskBuildingMode
+                ? 'Revenir à la teinte neutre du bâtiment'
+                : 'Colorer le bâtiment cible par son niveau de risque (argile/radon/sismique BDNB)'}
+              aria-label={riskBuildingMode ? 'Désactiver le mode risques bâtiment' : 'Activer le mode risques bâtiment'}>
+              <md-icon>home_work</md-icon>
+              <span>Bâtiment</span>
+            </button>
+          )}
           {IS_STANDARD_STYLE && (
             <button type="button"
               className={`map-3d-toggle analyse${lightPreset === 'dusk' ? ' active' : ''}`}

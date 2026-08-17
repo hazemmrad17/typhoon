@@ -11,10 +11,12 @@
   color-scheme: light;
 
   /* ---- Couleurs : thème clair ---- */
-  --md-sys-color-primary: #316f96;
-  --md-sys-color-on-primary: #ffffff;
-  --md-sys-color-primary-container: #dceef4;
-  --md-sys-color-on-primary-container: #0d3147;
+  /* Accent marque (purple Typhon) — tokens M3 dérivés via color-mix. */
+  --accent: #4c3f91;
+  --md-sys-color-primary: color-mix(in srgb, var(--accent) 78%, #0a0e12);
+  --md-sys-color-on-primary: color-mix(in srgb, var(--accent) 30%, #ffffff);
+  --md-sys-color-primary-container: color-mix(in srgb, var(--accent) 22%, #ffffff);
+  --md-sys-color-on-primary-container: color-mix(in srgb, var(--accent) 70%, #000000);
   --md-sys-color-secondary: #5a6470;
   --md-sys-color-on-secondary: #ffffff;
   --md-sys-color-secondary-container: #dde3ea;
@@ -148,10 +150,11 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --md-sys-color-primary: #9fc8e1;
-    --md-sys-color-on-primary: #0d3147;
-    --md-sys-color-primary-container: #204e6d;
-    --md-sys-color-on-primary-container: #dceef4;
+    --accent: #4c3f91;
+    --md-sys-color-primary: color-mix(in srgb, var(--accent) 55%, #ffffff);
+    --md-sys-color-on-primary: color-mix(in srgb, var(--accent) 30%, #000000);
+    --md-sys-color-primary-container: color-mix(in srgb, var(--accent) 46%, #0e1216);
+    --md-sys-color-on-primary-container: color-mix(in srgb, var(--accent) 30%, #ffffff);
     --md-sys-color-secondary: #c1c8cf;
     --md-sys-color-surface: #111418;
     --md-sys-color-surface-container-low: #171b20;

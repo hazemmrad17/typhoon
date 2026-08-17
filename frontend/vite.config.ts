@@ -1,11 +1,124 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * Jeton Mapbox du miroir (landing EVpin) : les chunks du miroir embarquaient
+ * un jeton Mapbox en dur, ce qui déclenche la protection push de GitHub
+ * (secret-scanning). Le jeton est remplacé par un marqueur dans le repo et
+ * injecté au moment du serve (dev) / du build (prod) depuis VITE_MAPBOX_TOKEN
+ * (racine .env — envDir: '..'). Aucun jeton n'est jamais committé.
+ */
+const MAPBOX_MARKER = '__TYPHOON_MAPBOX_TOKEN__';
+
+function mapboxTokenPlugin(): Plugin {
+  let token = '';
+  const rewrite = (buf: Buffer): Buffer | null => {
+    if (!buf.includes(Buffer.from(MAPBOX_MARKER))) return null;
+    return Buffer.from(buf.toString('utf-8').split(MAPBOX_MARKER).join(token));
+  };
+  const rewriteDir = (dir: string) => {
+    if (!fs.existsSync(dir)) return;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith('.js')) continue;
+      const p = path.join(dir, name);
+      const out = rewrite(fs.readFileSync(p));
+      if (out) fs.writeFileSync(p, out);
+    }
+  };
+  return {
+    name: 'typhoon-mapbox-token',
+    configResolved(cfg) {
+      const env = loadEnv(cfg.mode, path.resolve(ROOT, '..'), '');
+      token = env.VITE_MAPBOX_TOKEN || '';
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = new URL(req.url || '/', 'http://localhost');
+        const p = url.pathname;
+        if (p !== '/landing.html' && !p.startsWith('/_next/static/chunks/')) return next();
+        const rel = p.replace(/^\/+/, '');
+        const file = path.resolve(PUBLIC_DIR, rel);
+        if (file !== PUBLIC_DIR && !file.startsWith(PUBLIC_DIR + path.sep)) return next();
+        if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return next();
+        const out = rewrite(fs.readFileSync(file));
+        if (!out) return next();
+        res.setHeader('Content-Type', BIM_MIME[path.extname(file)] || 'application/octet-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.end(out);
+      });
+    },
+    closeBundle() {
+      // Production : injecter le jeton dans les copies du dist
+      const outDir = path.resolve(ROOT, 'dist');
+      rewriteDir(path.join(outDir, '_next', 'static', 'chunks'));
+      const lp = path.join(outDir, 'landing.html');
+      if (fs.existsSync(lp)) {
+        const out = rewrite(fs.readFileSync(lp));
+        if (out) fs.writeFileSync(lp, out);
+      }
+    },
+  };
+}
+
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const BIM_VIEWER_DIST = path.join(ROOT, 'bim-viewer', 'dist');
+const PUBLIC_DIR = path.join(ROOT, 'public');
+
+/**
+ * Sert les images des pages miroir (landing EVpin) : le composant next/image
+ * du miroir réécrit les <img> vers /_next/image?url=...&w=...&q=... — une
+ * route API Next absente de Vite. Ce middleware décode le paramètre `url`
+ * (chemin local, ex. /partners/bdnb.png ou /cdn/...) et sert le fichier
+ * depuis public/ avec le bon type MIME (comme le faisait serve.mjs).
+ */
+function nextImagePlugin(): Plugin {
+  return {
+    name: 'typhoon-next-image-static',
+    configureServer(server) {
+      server.middlewares.use('/_next/image', (req, res, next) => {
+        const url = new URL(req.url || '/', 'http://localhost');
+        const target = url.searchParams.get('url');
+        if (!target) {
+          res.statusCode = 400;
+          res.end('Bad Request');
+          return;
+        }
+        let rel: string;
+        try {
+          rel = decodeURIComponent(target.replace(/^\/+/, ''));
+        } catch {
+          res.statusCode = 400;
+          res.end('Bad Request');
+          return;
+        }
+        // Sécurité : le chemin résolu doit rester DANS public/
+        // Ordre de résolution (règle du miroir) : d'abord le chemin tel quel,
+        // puis sous www/ (images de www.evpin.com) puis sous cdn/ (assets.evpin.com).
+        const candidates = [rel, `www/${rel}`, `cdn/${rel}`];
+        let resolved: string | null = null;
+        for (const cand of candidates) {
+          const p = path.resolve(PUBLIC_DIR, cand);
+          if ((p === PUBLIC_DIR || p.startsWith(PUBLIC_DIR + path.sep)) && fs.existsSync(p) && fs.statSync(p).isFile()) {
+            resolved = p;
+            break;
+          }
+        }
+        if (!resolved) {
+          res.statusCode = 404;
+          res.end('Not Found');
+          return;
+        }
+        res.setHeader('Content-Type', BIM_MIME[path.extname(resolved).toLowerCase()] || 'application/octet-stream');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        fs.createReadStream(resolved).pipe(res);
+      });
+    },
+  };
+}
+
 
 const BIM_MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -94,7 +207,7 @@ function bimViewerPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), bimViewerPlugin()],
+  plugins: [react(), bimViewerPlugin(), nextImagePlugin(), mapboxTokenPlugin()],
   // Un seul .env à la racine du dépôt pour le front ET le back : Vite charge
   // les variables (préfixe VITE_*) depuis ../.env (racine du projet).
   envDir: '..',

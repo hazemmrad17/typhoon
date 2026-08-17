@@ -10,18 +10,22 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { RefObject } from 'react';
 import { MOCK_USER } from './mockUser';
-import type { Conversation } from '../zone/conversations';
+import { useAuth, type AuthUser } from '../typhoon/auth';
 import type { ThemeMode } from '../typhoon/useTyphoonTheme';
 import type { UserProfile } from '../typhoon/useUserProfile';
 
-/* ── Entrées de navigation par profil — le promoteur/banque ne voient QUE
-   « Nouveau diagnostic » (comportement inchangé) ; l'assurance a en plus
-   Portfolio et Watchlist (Tickets 4 & 5 du plan insurerpagesplan). */
+/* ── Entrées de navigation par profil. Le Dashboard est commun à tous les
+   profils (le promoteur/banque avaient perdu toute entrée quand « Nouveau
+   diagnostic » a été retiré — sidebar vide). L'assurance a en plus Portfolio
+   et Watchlist (Tickets 4 & 5 du plan insurerpagesplan). */
 const PROFILE_NAV: Record<string, Array<{ path: string; label: string; icon: string }>> = {
+  promoteur: [{ path: '/dashboard', label: 'Dashboard', icon: 'space_dashboard' }],
   assurance: [
+    { path: '/dashboard', label: 'Dashboard', icon: 'space_dashboard' },
     { path: '/portfolio', label: 'Portfolio', icon: 'dashboard' },
     { path: '/watchlist', label: 'Watchlist', icon: 'bookmarks' },
   ],
+  banque: [{ path: '/dashboard', label: 'Dashboard', icon: 'space_dashboard' }],
 };
 
 /* ── Menu utilisateur : onglets navigables du panneau Paramètres + déconnexion ── */
@@ -76,10 +80,6 @@ export type ZoneSidenavProps = {
   onNewDiagnostic: () => void;
   /** Navigation interne (Portfolio / Watchlist…). */
   onNavigate?: (path: string) => void;
-  conversations: Conversation[];
-  activeAddress: string | null;
-  onOpenConversation: (address: string) => void;
-  onDeleteConversation: (id: string) => void;
 };
 
 /* ── Sidenav rétractable (navigation façon Gemini) ──
@@ -100,13 +100,22 @@ export function ZoneSidenav({
   onNavigateSettings,
   onSignOut,
   onCloseDrawer,
-  onNewDiagnostic,
   onNavigate,
-  conversations,
-  activeAddress,
-  onOpenConversation,
-  onDeleteConversation,
 }: ZoneSidenavProps) {
+  /* Utilisateur réel (Supabase) — retombe sur MOCK_USER si non connecté
+     (mode démo ou tests sans provider). */
+  const { user } = useAuth();
+  const currentUser: AuthUser | null = user;
+  const displayUser = currentUser ?? {
+    name: MOCK_USER.name,
+    initials: MOCK_USER.initials,
+    email: MOCK_USER.email,
+    organization: MOCK_USER.organization,
+    tier: MOCK_USER.tier,
+    profile: MOCK_USER.profile,
+    id: 'mock',
+  };
+
   const profileNav = (profile ? PROFILE_NAV[profile] : undefined) || [];
   /* Survol (desktop, replié) : dépliage temporaire « peek » — la sidenav
      n'est dépliée durablement que si elle est épinglée (toggle) ; sinon elle
@@ -195,7 +204,7 @@ export function ZoneSidenav({
         <Link
           to="/"
           className="sidenav-brand"
-          aria-label="Typhoon — accueil"
+          aria-label="Typhon — accueil"
           onClick={onCloseDrawer}
         >
           {/* Wordmark teinté par l'accent : le SVG blanc sert de masque
@@ -239,9 +248,6 @@ export function ZoneSidenav({
       {effectiveCollapsed ? (
         /* ── Mode replié : colonne d'icônes ── */
         <nav className="sidenav-rail" aria-label="Raccourcis">
-          <md-icon-button title="Nouveau diagnostic" aria-label="Nouveau diagnostic" onClick={onNewDiagnostic}>
-            <md-icon>add_circle</md-icon>
-          </md-icon-button>
           {profileNav.map((item) => (
             <md-icon-button
               key={item.path}
@@ -255,17 +261,9 @@ export function ZoneSidenav({
           ))}
         </nav>
       ) : (
-        /* ── Mode déplié : liste M3 + historique « Récent » ── */
+        /* ── Mode déplié : liste M3, centrée verticalement ── */
         <div className="sidenav-body">
           <md-list className="sidenav-nav">
-            <md-list-item
-              className={`sidenav-new${activePath === '/zone' || !activePath ? ' active' : ''}`}
-              type="button"
-              onClick={onNewDiagnostic}
-            >
-              <md-icon slot="start">add_circle</md-icon>
-              <span slot="headline">Nouveau diagnostic</span>
-            </md-list-item>
             {profileNav.map((item) => (
               <md-list-item
                 key={item.path}
@@ -278,13 +276,6 @@ export function ZoneSidenav({
               </md-list-item>
             ))}
           </md-list>
-
-          <ConversationHistory
-            conversations={conversations}
-            activeAddress={activeAddress}
-            onOpen={onOpenConversation}
-            onDelete={onDeleteConversation}
-          />
         </div>
       )}
 
@@ -346,18 +337,18 @@ export function ZoneSidenav({
             type="button"
             className="sidenav-user"
             ref={userBtnRef}
-            title={`Compte : ${MOCK_USER.name} (${MOCK_USER.email})`}
-            aria-label={`Ouvrir le menu utilisateur (${MOCK_USER.name})`}
+            title={`Compte : ${displayUser.name} (${displayUser.email})`}
+            aria-label={`Ouvrir le menu utilisateur (${displayUser.name})`}
             aria-haspopup="menu"
             aria-expanded={userMenuOpen}
             onClick={() => setUserMenuOpen((o) => !o)}
           >
             <span className="sidenav-user-avatar" aria-hidden="true">
-              {MOCK_USER.initials}
+              {displayUser.initials}
             </span>
             <span className="sidenav-user-info">
-              <span className="sidenav-user-name">{MOCK_USER.name}</span>
-              <span className="sidenav-user-tier">{MOCK_USER.tier}</span>
+              <span className="sidenav-user-name">{displayUser.name}</span>
+              <span className="sidenav-user-tier">{displayUser.tier}</span>
             </span>
           </button>
           <md-icon-button
@@ -380,12 +371,12 @@ export function ZoneSidenav({
           >
           <div className="sidenav-user-menu-head">
             <span className="sidenav-user-avatar" aria-hidden="true">
-              {MOCK_USER.initials}
+              {displayUser.initials}
             </span>
             <span className="sidenav-user-menu-copy">
-              <span className="sidenav-user-menu-name">{MOCK_USER.name}</span>
+              <span className="sidenav-user-menu-name">{displayUser.name}</span>
               <span className="sidenav-user-menu-tier">
-                {MOCK_USER.tier} · {MOCK_USER.organization}
+                {displayUser.tier} · {displayUser.organization}
               </span>
             </span>
           </div>
@@ -424,73 +415,5 @@ export function ZoneSidenav({
         )}
       </footer>
     </aside>
-  );
-}
-
-/* ── Historique « Récent » de la sidenav (façon Gemini) ──
-   Section repliable : liste des adresses diagnostiquées (localStorage),
-   clic → relance le diagnostic, survol → bouton de suppression. */
-export function ConversationHistory({
-  conversations,
-  activeAddress,
-  onOpen,
-  onDelete,
-}: {
-  conversations: Conversation[];
-  activeAddress: string | null;
-  onOpen: (address: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(true);
-
-  if (conversations.length === 0) {
-    return (
-      <div className="sidenav-recent-empty">
-        <md-icon>history</md-icon>
-        <span>Pas encore de diagnostic</span>
-      </div>
-    );
-  }
-
-  return (
-    <details
-      className="sidenav-recent"
-      open={open}
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary className="sidenav-recent-header" aria-label="Historique des adresses diagnostiquées">
-        <span className="sidenav-recent-title">Récent</span>
-        <md-icon>expand_more</md-icon>
-      </summary>
-      <div className="sidenav-recent-list">
-        {conversations.map((c) => {
-          const active = activeAddress !== null && c.address === activeAddress;
-          return (
-            <div
-              className={`sidenav-recent-item${active ? ' active' : ''}`}
-              key={c.id}
-            >
-              <button
-                type="button"
-                className="sidenav-recent-btn"
-                title={c.address}
-                onClick={() => onOpen(c.address)}
-              >
-                <md-icon>history</md-icon>
-                <span className="sidenav-recent-label">{c.address}</span>
-              </button>
-              <md-icon-button
-                className="sidenav-recent-del"
-                aria-label={`Supprimer ${c.address} de l'historique`}
-                title="Supprimer de l'historique"
-                onClick={() => onDelete(c.id)}
-              >
-                <md-icon>close</md-icon>
-              </md-icon-button>
-            </div>
-          );
-        })}
-      </div>
-    </details>
   );
 }

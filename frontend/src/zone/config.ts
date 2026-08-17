@@ -1,12 +1,12 @@
 // =============================================================================
 //   TYPHOON — /zone : configuration partagée (API, bandes D03, couches)
-//   Reprend le contrat du legacy zone.html (backend port 8765).
+//   Reprend le contrat du legacy zone.html (backend port 8000).
 // =============================================================================
 
 export const API: string =
   (import.meta as any).env?.VITE_API_BASE ||
   (window as any).TYPHOON_API ||
-  'http://127.0.0.1:8765';
+  'http://127.0.0.1:8000';
 
 // ---------------------------------------------------------------------------
 // Bandes D03 (5 niveaux — mêmes clés que le backend risque_report.py)

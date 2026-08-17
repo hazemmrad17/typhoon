@@ -1,9 +1,9 @@
 import { useCallback, useState, useSyncExternalStore, type CSSProperties } from 'react';
 
-export const BRAND_ACCENT = '#4386B1';
+export const BRAND_ACCENT = '#4C3F91';
 
 export const ACCENTS = [
-  '#4386B1',
+  '#4C3F91',
   '#7b2cbf',
   '#e63946',
   '#f97316',
@@ -34,7 +34,7 @@ function readStorage() {
     const m = localStorage.getItem('typhoon-theme');
     if (m === 'light' || m === 'dark' || m === 'system') mode = m;
     const a = localStorage.getItem('typhoon-accent');
-    if (a && hexRe.test(a)) accent = a;
+    if (a && hexRe.test(a)) accent = a.toLowerCase() === '#4386b1' ? BRAND_ACCENT : a;
   } catch {
     /* localStorage unavailable */
   }
