@@ -22,17 +22,11 @@ import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
 import { useAuth } from '../typhoon/auth';
-import { DecisionCard } from '../components/DecisionCard';
-import { ProvenancePanel } from '../components/ProvenancePanel';
-import { CopernicusStatusBanner } from '../components/CopernicusStatusBanner';
+import { CopernicusPanel } from '../components/CopernicusPanel';
 import {
-  addToWatchlist as addToWatchlistStore,
   loadCatNatLatest,
-  loadWatchlist,
   recordCatNatLatest,
   saveCatNatLatest,
-  saveWatchlist,
-  type WatchlistEntry,
 } from '../zone/watchlist';
 import {
   API,
@@ -64,29 +58,23 @@ import {
 } from '../zone/diagnosticCache';
 import '../styles/zone.css';
 
-const LEGEND_RANGES = ['<20', '20–39', '40–59', '60–79', '≥80'];
 
-/* ── Multi-profils (Phase A) : ordre du stepper + features par profil.
+/* ── Multi-profils (Phase A) : ordre du stepper par profil.
    Le promoteur reste la vue par défaut et ne voit AUCUNE différence — seul
    l'ordre/la visibilité des étapes change pour l'assurance et la banque. */
 const STEP_ORDER: Record<string, string[]> = {
   promoteur: ['adresse', 'carto', 'analyse', 'recommandations', 'artisans', 'rapport'],
-  assurance: ['adresse', 'decision', 'analyse', 'recommandations', 'rapport'],
+  assurance: ['adresse', 'analyse', 'decision', 'copernicus', 'rapport'],
   banque: ['adresse', 'carto', 'analyse', 'rapport'],
-};
-
-const FEATURES: Record<string, { decision: boolean; artisans: boolean }> = {
-  promoteur: { decision: false, artisans: true },
-  assurance: { decision: true, artisans: false },
-  banque: { decision: false, artisans: false },
 };
 
 /* Libellés du stepper par étape logique (le promoteur garde ses libellés actuels). */
 const STEP_LABELS: Record<string, string> = {
   adresse: 'Adresse',
-  decision: 'Décision',
   carto: 'Cartographie',
-  analyse: 'Analyse',
+  decision: 'Synthèse',
+  analyse: 'Bien & contexte',
+  copernicus: 'Projection climatique',
   recommandations: 'Recommandations',
   artisans: 'Artisans',
   rapport: 'Rapport IA',
@@ -101,15 +89,6 @@ interface RapportError {
   hint?: string; // conseil actionnable (facultatif)
   cause?: string; // détail technique (affiché dans <details>)
 }
-
-const STEPS = [
-  { id: 'adresse', label: 'Adresse' },
-  { id: 'carto', label: 'Cartographie' },
-  { id: 'analyse', label: 'Analyse' },
-  { id: 'recommandations', label: 'Recommandations' },
-  { id: 'artisans', label: 'Artisans' },
-  { id: 'rapport', label: 'Rapport IA' },
-] as const;
 
 export function Zone() {
   const navigate = useNavigate();
@@ -156,7 +135,7 @@ export function Zone() {
   const [detailedRecommendationsLoading, setDetailedRecommendationsLoading] = useState(false);
   const [detailedRecommendationsError, setDetailedRecommendationsError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations());
+  const [, setConversations] = useState<Conversation[]>(() => loadConversations());
   const [rapport, setRapport] = useState<RapportNarratif | null>(null);
   const [rapportLoading, setRapportLoading] = useState(false);
   const [rapportError, setRapportError] = useState<RapportError | null>(null);
@@ -175,14 +154,7 @@ export function Zone() {
      capturée depuis la réponse /diagnostic/fast (digital_twin.trajectoire),
      la même requête qui alimente déjà les recommandations. Vue « Assurance ». */
   const [trajectoire, setTrajectoire] = useState<Trajectoire | null>(null);
-  /* Panneau « Sources & provenance » (Ticket 1 — vue Assurance) : ouvert par
-     le bouton de la carte de décision, rend les données déjà dans la réponse. */
-  const [provenanceOpen, setProvenanceOpen] = useState(false);
-  /* Watchlist (Ticket 5) : liste suivie + toast de confirmation d'ajout. */
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => loadWatchlist());
-  const [catNatLatest, setCatNatLatest] = useState<Record<string, number>>(() => loadCatNatLatest());
-  const [watchlistToast, setWatchlistToast] = useState(false);
-  const watchlistToastTimer = useRef<number | null>(null);
+  const [, setCatNatLatest] = useState<Record<string, number>>(() => loadCatNatLatest());
 
   useEffect(() => {
     const id = report?.bdnb?.batiment?.batiment_groupe_id;
@@ -545,29 +517,6 @@ export function Zone() {
     }
   }
 
-  /* ── Export PDF assurance (Ticket 2) : trajectoire par horizon + disclaimer.
-     Rejoue la logique de la carte de décision (verdict + tableau) dans le
-     template jsPDF dédié — les profils promoteur/banque gardent l'export
-     générique ci-dessus, inchangé. */
-  async function handleExportInsurerPdf() {
-    if (!report || exportingPdf) return;
-    setExportingPdf(true);
-    setExportPdfError(null);
-    try {
-      const { exportInsurerPdf } = await import('../zone/pdf-export');
-      await exportInsurerPdf({
-        report,
-        trajectoire,
-        aleas: report.aleas || [],
-      });
-    } catch (err) {
-      console.error('Export PDF assurance échoué :', err);
-      setExportPdfError("L'export PDF a échoué dans le navigateur. Réessayez.");
-    } finally {
-      setExportingPdf(false);
-    }
-  }
-
   /* ── Visibilité des couches ── */
   function toggleLayer(code: string) {
     setVisibleLayerKeys((prev) => {
@@ -589,23 +538,19 @@ export function Zone() {
   }
 
   /* ── Multi-profils : étapes visibles pour le profil courant ──
-     Chaque étape logique garde son index numérique historique (les rendus
-     `step === N` ci-dessous en dépendent) ; seul l'ordre/les libellés changent. */
-  const STEP_INDEX: Record<string, number> = {
-    adresse: 0,
-    decision: 1,
-    carto: 1,
-    analyse: 2,
-    recommandations: 3,
-    artisans: 4,
-    rapport: 5,
-  };
-  const profileSteps = (STEP_ORDER[profile] || STEP_ORDER.promoteur).map((id) => ({
+     L'index d'une étape est sa POSITION dans l'ordre du profil ; les rendus
+     ci-dessous testent l'ID de l'étape courante (currentStepId), jamais la
+     position brute — chaque profil peut donc réordonner librement ses étapes
+     (l'assurance est volontairement Adresse → Bien & contexte →
+     Synthèse → Projection climatique → Rapport IA). */
+  const profileSteps = (STEP_ORDER[profile] || STEP_ORDER.promoteur).map((id, i) => ({
     id,
     label: STEP_LABELS[id] ?? id,
-    index: STEP_INDEX[id] ?? 0,
+    index: i,
   }));
-  const features = FEATURES[profile] || FEATURES.promoteur;
+  const currentStepId = profileSteps[step]?.id ?? 'adresse';
+  /* Étapes qui embarquent la carte unifiée (panneau latéral + carte). */
+  const isMapStep = ['carto', 'analyse', 'decision', 'copernicus'].includes(currentStepId);
 
   /* ── Dérivés du rapport ── */
   const presentAleas = (report?.aleas || []).filter((a) => a.present === true);
@@ -629,6 +574,36 @@ export function Zone() {
     report !== null &&
     togglableAleas.length > 0 &&
     togglableAleas.every((a) => visibleLayerKeys.has(a.code));
+
+  /* ── Cartographie & Synthèse : couches visibles dès l'arrivée ──
+     Sur les onglets qui affichent les aléas Géorisques (Cartographie et
+     Synthèse), toutes les couches disponibles passent visibles
+     automatiquement, une seule fois par rapport — y compris celles où
+     l'adresse n'est PAS concernée (les couches communales WMS/WFS se voient
+     ainsi sans avoir à cliquer chaque œil). Les toggles manuels du panneau
+     restent ensuite le contrôle : quitter puis revenir à l'onglet ne
+     réinitialise pas le choix de l'utilisateur. */
+  const autoShownReportRef = useRef<string | null>(null);
+  useEffect(() => {
+    if ((currentStepId !== 'carto' && currentStepId !== 'decision') || !report) return;
+    const key = `${report.adresse_normalisee}::${report.date_generation}`;
+    if (autoShownReportRef.current === key) return;
+    autoShownReportRef.current = key;
+    const codes = (report.aleas || [])
+      .filter((a) => a.present !== null)
+      .map((a) => a.code);
+    if (codes.length) setVisibleLayerKeys(new Set(codes));
+  }, [currentStepId, report]);
+
+  /* ── Projection climatique : rattrapage auto-réparant ──
+     Si on arrive sur l'onglet sans trajectoire (diagnostic servi du cache
+     avant Copernicus, ou backfill initial échoué — backend momentanément
+     injoignable), on retente le rattrapage /diagnostic/fast. L'onglet se
+     remplit dès que le backend répond, sans re-diagnostiquer l'adresse. */
+  useEffect(() => {
+    if (currentStepId !== 'copernicus' || !report || trajectoire) return;
+    void backfillTrajectoire(report.adresse_normalisee || report.adresse_saisie);
+  }, [currentStepId, report, trajectoire]);
 
   const pdfUrl = report
     ? `${API}/diagnostic/adresse/rapport-pdf?lat=${report.lat}&lon=${report.lon}`
@@ -805,9 +780,9 @@ export function Zone() {
             </div>
           </header>
 
-          <div className={`zone-stage${step === 1 ? ' workspace' : ' flat'}`}>
-            {/* ÉTAPES 2-3 — CARTOGRAPHIE & ANALYSE : panneau latéral + carte unifiée */}
-            <div className="zone-merge" hidden={step !== 1 && step !== 2}>
+          <div className={`zone-stage${isMapStep ? ' workspace' : ' flat'}`}>
+            {/* ÉTAPES AVEC CARTE — panneau latéral + carte unifiée */}
+            <div className="zone-merge" hidden={!isMapStep}>
               {/* PANNEAU LATÉRAL (rétractable) — contenu selon l'étape */}
               <aside className="zone-merge-left">
                 <md-icon-button
@@ -820,7 +795,11 @@ export function Zone() {
                 </md-icon-button>
                 <div className="zone-panel-body">
                   {report ? (
-                    step === 1 ? (
+                    currentStepId === 'analyse' ? (
+                      <BuildingFiche report={report} risques={batimentRisques} />
+                    ) : currentStepId === 'copernicus' ? (
+                      <CopernicusPanel trajectoire={trajectoire} />
+                    ) : currentStepId === 'decision' || currentStepId === 'carto' ? (
                   <section className="zone-results">
                     <div className="addr-heading">
                       <div className="addr-title-row">
@@ -848,65 +827,6 @@ export function Zone() {
                         {report.code_insee} · Généré le {report.date_generation}
                       </div>
                     </div>
-
-                    <details className="legend-section" open>
-                      <summary className="section-heading legend-summary">
-                        <span>Bandes D03 — Risque</span>
-                        <md-icon>expand_more</md-icon>
-                      </summary>
-                      <div className="legend-box">
-                        {D03.map((b, i) => (
-                          <div className="legend-row" key={b.key}>
-                            <span className="legend-sw" style={{ background: b.color }} />
-                            <span>{b.label}</span>
-                            <span className="legend-range">{LEGEND_RANGES[i]}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                    {features.decision ? (
-                      /* Vue Assurance (Phase 4A) : la carte de décision remplace
-                         le score global mis en avant — la décomposition par aléa
-                         et la trajectoire climatique priment, le score global est
-                         rétrogradé en petite ligne (roadmap item 20). */
-                      <>
-                      <CopernicusStatusBanner />
-                      <DecisionCard
-                        aleas={report.aleas || []}
-                        trajectoire={trajectoire}
-                        scoreGlobal={maxScore}
-                        onOpenProvenance={() => setProvenanceOpen(true)}
-                        onExportPdf={features.decision ? () => void handleExportInsurerPdf() : undefined}
-                        onAddWatchlist={
-                          features.decision
-                            ? () => {
-                                const addr = report.adresse_normalisee || report.adresse_saisie;
-                                const next = addToWatchlistStore(watchlist, addr, report.code_insee);
-                                setWatchlist(next);
-                                saveWatchlist(next);
-                                if (watchlistToastTimer.current) window.clearTimeout(watchlistToastTimer.current);
-                                setWatchlistToast(true);
-                                watchlistToastTimer.current = window.setTimeout(() => setWatchlistToast(false), 2600);
-                              }
-                            : undefined
-                        }
-                      />
-                      </>
-                    ) : (
-                      <div className="score-block">
-                        <div className="score-row">
-                          <span className="score-num" style={{ color: band?.color }}>
-                            {maxScore ?? '—'}
-                          </span>
-                          <div className="score-meta">
-                            <span className="score-label">Score de risque global /100</span>
-                            <span className={`d03-pill ${band ? band.cls : ''}`}>
-                              {band ? band.label : 'Indéterminé'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
 
                     <div className="aleas-section">
                       <div className="section-heading">
@@ -995,9 +915,7 @@ export function Zone() {
                       </span>
                     </div>
                   </section>
-                    ) : (
-                      <BuildingFiche report={report} risques={batimentRisques} />
-                    )
+                    ) : null
                   ) : (
                     <div className="sidebar-empty">
                       <md-icon>gps_fixed</md-icon>
@@ -1022,16 +940,21 @@ export function Zone() {
                   report={report}
                   visibleLayerKeys={visibleLayerKeys}
                   batimentRisques={batimentRisques}
-                  showRisks={step === 1}
-                  allowParcels={step === 2}
-                  buildingsLimit={step === 1 ? 500 : 200}
+                  showRisks={currentStepId === 'carto' || currentStepId === 'decision'}
+                  allowParcels={currentStepId === 'analyse'}
+                  /* Parcelles ON + éclairage « jour » à l'arrivée sur « Bien &
+                     contexte » ; Parcelles OFF dès qu'on passe à « Synthèse »
+                     (et aux étapes suivantes). */
+                  defaultParcels={currentStepId === 'analyse'}
+                  defaultLightPreset={currentStepId === 'analyse' ? 'day' : undefined}
+                  buildingsLimit={currentStepId === 'carto' || currentStepId === 'decision' ? 500 : 200}
                   fitZoom={16.5}
                 />
               </section>
             </div>
 
-            {/* ÉTAPE 4 — RECOMMANDATIONS (détaillées, RAG Mistral) */}
-            <section className="zone-recommendations" hidden={step !== 3}>
+            {/* ÉTAPE — RECOMMANDATIONS (détaillées, RAG Mistral) */}
+            <section className="zone-recommendations" hidden={currentStepId !== 'recommandations'}>
               <ZoneRecommendations
                 report={report}
                 zones={detailedRecommendationZones}
@@ -1041,7 +964,7 @@ export function Zone() {
             </section>
 
             {/* ÉTAPE 5 — ARTISANS (associés aux travaux recommandés) */}
-            <section className="zone-artisans-step" hidden={step !== 4}>
+            <section className="zone-artisans-step" hidden={currentStepId !== 'artisans'}>
               <ZoneArtisans
                 report={report}
                 zones={detailedRecommendationZones}
@@ -1051,7 +974,7 @@ export function Zone() {
             </section>
 
             {/* ÉTAPE 6 — RAPPORT IA (narratif Mistral + export PDF) */}
-            <section className="zone-report" hidden={step !== 5}>
+            <section className="zone-report" hidden={currentStepId !== 'rapport'}>
               {!report ? (
                 <div className="report-empty">
                   <md-icon>description</md-icon>
@@ -1203,22 +1126,6 @@ export function Zone() {
         onClick={() => setDrawerOpen(false)}
       />
 
-      {/* Toast « ajouté à la watchlist » */}
-      {watchlistToast && (
-        <div className="watchlist-toast" role="status" aria-live="polite">
-          <md-icon>bookmark_added</md-icon>
-          <span>Adresse ajoutée à la watchlist</span>
-        </div>
-      )}
-
-      {/* Panneau « Sources & provenance » (vue Assurance) */}
-      {provenanceOpen && (
-        <ProvenancePanel
-          aleas={report?.aleas || []}
-          trajectoire={trajectoire}
-          onClose={() => setProvenanceOpen(false)}
-        />
-      )}
     </main>
   );
 }
@@ -1444,10 +1351,28 @@ function AleaCard({
   const band = alea.niveau ? bandForKey(alea.niveau) : undefined;
   const icon = ALEA_ICONS[alea.code] || ALEA_ICON_FALLBACK;
   const isError = alea.present === null;
-  const isAbsent = alea.present === false;
 
   const addrPresent = alea.present === true;
-  const communePresent = alea.present_commune !== false;
+  const communePresent = alea.present_commune === true;
+  /* « Tous les risques par défaut » : dès qu'un recensement existe (à
+     l'adresse OU dans la commune), la carte présente le péril comme un
+     risque — « Pas de risque » n'est plus l'état principal quand la commune
+     recense l'aléa. La portée exacte (adresse vs commune) reste en chip
+     secondaire, et seule l'absence totale de recensement atténue la carte. */
+  const isAbsent = !addrPresent && !communePresent;
+
+  const primaryStatus = addrPresent
+    ? { label: 'Concerné', cls: 'chip-on' }
+    : communePresent
+      ? { label: 'Commune : risque existant', cls: 'chip-mid' }
+      : { label: 'Pas de risque', cls: 'chip-none' };
+  const secondaryStatus = addrPresent
+    ? communePresent
+      ? null
+      : { label: 'Commune : non concerné', cls: 'chip-none' }
+    : communePresent
+      ? { label: "Pas de risque à l'adresse", cls: 'chip-none' }
+      : null;
   /* L'œil est actif dès que la source est disponible (présent OU absent) :
      un aléa non présent reste visualisable via la couche communale WMS/WFS.
      Seule une source indisponible (present=null) n'a rien à montrer. */
@@ -1460,7 +1385,7 @@ function AleaCard({
           <md-icon>{icon}</md-icon>
         </span>
         <span className="alea-name">{alea.libelle}</span>
-        {band && alea.present === true ? (
+        {band && (alea.present === true || alea.present_commune === true) ? (
           <span className={`d03-pill ${band.cls}`}>{band.label}</span>
         ) : null}
         <md-icon-button
@@ -1499,14 +1424,14 @@ function AleaCard({
             </span>
           ) : (
             <>
-              <span className={`status-chip ${addrPresent ? 'chip-on' : 'chip-none'}`}>
+              <span className={`status-chip ${primaryStatus.cls}`}>
                 <span className="status-dot" aria-hidden="true" />
-                {addrPresent ? 'Concerné' : 'Pas de risque'}
+                {primaryStatus.label}
               </span>
-              {communePresent !== addrPresent && (
-                <span className={`status-chip ${communePresent ? 'chip-mid' : 'chip-none'}`}>
+              {secondaryStatus && (
+                <span className={`status-chip ${secondaryStatus.cls}`}>
                   <span className="status-dot" aria-hidden="true" />
-                  {communePresent ? 'Commune : risque existant' : 'Commune : non concerné'}
+                  {secondaryStatus.label}
                 </span>
               )}
             </>

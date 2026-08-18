@@ -1,0 +1,208 @@
+/* =============================================================================
+   TYPHOON — Styles pour le CopernicusPanel amélioré
+   ============================================================================= */
+
+.cds-panel-enhanced {
+  padding: 20px;
+}
+
+.cds-panel-head {
+  margin-bottom: 20px;
+}
+
+.cds-panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.cds-panel-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--on-surface, #fff);
+}
+
+.cds-panel-subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--on-surface-variant, #aaa);
+  line-height: 1.5;
+}
+
+/* ── Charts ── */
+
+.cds-charts-enhanced {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.cds-chart-enhanced {
+  background: var(--surface-container-high, #2a2a2a);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.cds-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.cds-chart-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cds-chart-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+}
+
+.cds-chart-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--on-surface, #fff);
+}
+
+.cds-chart-meta {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Confidence Badge ── */
+
+.cds-confidence {
+  font-size: 0.625rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.cds-confidence-high {
+  background: rgba(58, 122, 108, 0.2);
+  color: #3A7A6C;
+}
+
+.cds-confidence-medium {
+  background: rgba(212, 172, 62, 0.2);
+  color: #D4AC3E;
+}
+
+.cds-confidence-low {
+  background: rgba(208, 112, 48, 0.2);
+  color: #D07030;
+}
+
+.cds-confidence-na {
+  background: rgba(136, 136, 136, 0.2);
+  color: #888;
+}
+
+/* ── Resolution Badge ── */
+
+.cds-resolution {
+  font-size: 0.625rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.cds-res-building {
+  background: rgba(99, 102, 241, 0.2);
+  color: #6366f1;
+}
+
+.cds-res-other {
+  background: rgba(136, 136, 136, 0.2);
+  color: #888;
+}
+
+/* ── Enhanced Table ── */
+
+.cds-table-enhanced {
+  margin-top: 20px;
+}
+
+.cds-table-enhanced .traj-row {
+  display: grid;
+  grid-template-columns: 180px repeat(3, 60px) 80px 80px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.cds-table-enhanced .traj-head {
+  font-size: 0.75rem;
+  color: var(--on-surface-variant, #aaa);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--outline-variant, #333);
+}
+
+.cds-table-enhanced .traj-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--on-surface, #fff);
+}
+
+.cds-table-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.cds-source {
+  font-size: 0.75rem;
+  color: var(--on-surface-variant, #aaa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Show All Button ── */
+
+.cds-show-all-btn {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 16px;
+  background: transparent;
+  border: 1px dashed var(--outline, #444);
+  color: var(--on-surface-variant, #aaa);
+  font-size: 0.875rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cds-show-all-btn:hover {
+  border-color: var(--primary, #6366f1);
+  color: var(--on-surface, #fff);
+  background: var(--surface-container-high, #2a2a2a);
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 768px) {
+  .cds-charts-enhanced {
+    grid-template-columns: 1fr;
+  }
+
+  .cds-table-enhanced .traj-row {
+    grid-template-columns: 120px repeat(3, 50px) 60px 60px;
+  }
+
+  .cds-source {
+    display: none;
+  }
+}

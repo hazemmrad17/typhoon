@@ -147,6 +147,13 @@ interface UnifiedMapProps {
   showRisks?: boolean;
   /** Afficher le toggle « Parcelles cadastrales » (étape Analyse uniquement). */
   allowParcels?: boolean;
+  /** Défaut des parcelles cadastrales à l'arrivée sur l'étape (pilote depuis
+   *  Zone.tsx : ON en « Bien & contexte », OFF dès qu'on la quitte). Le toggle
+   *  manuel reste actif tant que l'étape ne change pas. */
+  defaultParcels?: boolean;
+  /** Défaut d'éclairage du style Standard à l'arrivée sur l'étape — « jour »
+   *  (day) demandé pour « Bien & contexte » ; undefined = ne rien forcer. */
+  defaultLightPreset?: 'day' | 'dusk';
   /** Nombre max de bâtiments chargés par bbox (0 = tous, jusqu'à épuisement).
    *  Cartographie : tous. Analyse : 200 (la carte y est secondaire). */
   buildingsLimit?: number;
@@ -167,6 +174,8 @@ export function UnifiedMap({
   batimentRisques,
   showRisks = false,
   allowParcels = false,
+  defaultParcels = false,
+  defaultLightPreset,
   buildingsLimit = 200,
   initial3D = false,
   fitZoom = 16.5,
@@ -205,12 +214,18 @@ export function UnifiedMap({
   const buildingPinRef = useRef<mapboxgl.Marker | null>(null);
 
   const [is3d, setIs3d] = useState(initial3D);
-  const [showParcels, setShowParcels] = useState(false);
+  const [showParcels, setShowParcels] = useState(defaultParcels);
   const [riskBuildingMode, setRiskBuildingMode] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  /* Éclairage du style Standard : « crépuscule » (dusk, coucher de soleil)
-   * par défaut — toggle vers « jour » (day) via setConfigProperty. */
-  const [lightPreset, setLightPreset] = useState<'day' | 'dusk'>('dusk');
+  /* Éclairage du style Standard : « crépuscule » (dusk) par défaut, forcé en
+   * « jour » (day) sur l'étape « Bien & contexte » via `defaultLightPreset`
+   * — toggle manuel via setConfigProperty. Le ref sert à la création de la
+   * carte (le handler de load est une fermeture du premier rendu). */
+  const [lightPreset, setLightPreset] = useState<'day' | 'dusk'>(defaultLightPreset ?? 'dusk');
+  const lightPresetRef = useRef(lightPreset);
+  lightPresetRef.current = lightPreset;
+  const showParcelsRef = useRef(showParcels);
+  showParcelsRef.current = showParcels;
 
   function currentBatiment(): BdnbBatiment | null {
     return batimentRef.current ?? latestReportRef.current?.bdnb?.batiment ?? null;
@@ -248,7 +263,12 @@ export function UnifiedMap({
     const map = new mapboxgl.Map({
       container,
       style: MAPBOX_STYLE,
-      config: STANDARD_CONFIG,
+      config: {
+        basemap: {
+          ...STANDARD_CONFIG.basemap,
+          lightPreset: lightPresetRef.current,
+        },
+      },
       center,
       zoom: rep ? fitZoom : 5,
       pitch: is3dRef.current ? 55 : 0,
@@ -376,7 +396,6 @@ export function UnifiedMap({
     if (points?.length) {
       renderPortfolioPoints(map, points);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points]);
 
   /* ── Gros plan (step Cartographie : marqueur + popup + calques aléas) ── */
@@ -397,12 +416,44 @@ export function UnifiedMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRisks, report]);
 
-  /* ── visibleLayerKeys → masquer/afficher les couches WMS/WFS ── */
+  /* ── visibleLayerKeys → masquer/afficher les couches WMS/WFS ──
+     Ne s'applique que quand showRisks est vrai (étape Cartographie/Synthèse).
+     En Analyse (allowParcels), on ne veut jamais de couches de risque —
+     seulement les parcelles cadastrales. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReadyRef.current) return;
-    applyRiskLayersVisibility(map);
-  }, [visibleLayerKeys]);
+    if (showRisks) {
+      applyRiskLayersVisibility(map);
+    } else {
+      // Étape sans couches de risque (Analyse) : tout masquer.
+      hideLayersModeLayers(map);
+    }
+  }, [visibleLayerKeys, showRisks]);
+
+  /* ── Défauts d'étape (pilotés par Zone.tsx) : parcelles + éclairage ──
+     Chaque changement d'étape change la prop et ré-applique son défaut ; le
+     toggle manuel reste ensuite le maître jusqu'à la prochaine étape. */
+  useEffect(() => {
+    setShowParcels(defaultParcels);
+    showParcelsRef.current = defaultParcels;
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current || !map.getLayer(CADASTRE_LAYER)) return;
+    map.setLayoutProperty(CADASTRE_LAYER, 'visibility', defaultParcels ? 'visible' : 'none');
+  }, [defaultParcels]);
+
+  useEffect(() => {
+    if (defaultLightPreset == null) return;
+    setLightPreset(defaultLightPreset);
+    lightPresetRef.current = defaultLightPreset;
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current || !IS_STANDARD_STYLE) return;
+    try {
+      map.setConfigProperty('basemap', 'lightPreset', defaultLightPreset);
+    } catch {
+      // Style non-Standard : la config est ignorée, rien à faire.
+    }
+  }, [defaultLightPreset]);
 
   /** Applique la visibilité des couches de risque selon le toggle par aléa
    *  du panneau latéral (`visibleLayerKeys`). Restent visibles en 3D aussi
@@ -482,7 +533,9 @@ export function UnifiedMap({
       id: CADASTRE_LAYER,
       type: 'raster',
       source: CADASTRE_SOURCE,
-      layout: { visibility: 'none' },
+      /* Visibilité initiale selon le défaut d'étape (le handler de load est
+         une fermeture du premier rendu — on lit donc le ref, pas l'état). */
+      layout: { visibility: showParcelsRef.current ? 'visible' : 'none' },
       paint: { 'raster-opacity': 1 },
     });
   }
@@ -751,7 +804,7 @@ export function UnifiedMap({
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [rep.lon, rep.lat] }, properties: {} }] },
         });
-        let circle: any = { 'circle-radius': 10, 'circle-color': color, 'circle-opacity': 0.65 };
+        const circle: any = { 'circle-radius': 10, 'circle-color': color, 'circle-opacity': 0.65 };
         if (a.niveau && D03.find((d) => d.key === a.niveau)) {
           circle['circle-stroke-color'] = color;
           circle['circle-stroke-width'] = a.niveau === 'critique' ? 3 : 1;
@@ -1005,10 +1058,10 @@ export function UnifiedMap({
   }
 
   /* Légende bas-gauche (P4) : bandes D03 réellement affichées sur la carte en
-   * ce moment (couches œil actives dans le panneau latéral + aléa présent),
-   * pas la liste fixe des 5 bandes — l'utilisateur comprend la carte sans
-   * ouvrir le panneau. */
-  const visibleAleas = showRisks && report ? (report.aleas || []).filter((a) => visibleLayerKeys.has(a.code) && a.present) : [];
+   * ce moment (couches œil actives dans le panneau latéral, présents OU
+   * absents — un aléa absent activé montre sa couche communale WMS/WFS et
+   * compte donc dans la légende), pas la liste fixe des 5 bandes. */
+  const visibleAleas = showRisks && report ? (report.aleas || []).filter((a) => visibleLayerKeys.has(a.code)) : [];
   const activeLegendBands: D03Band[] = D03.filter((b) => visibleAleas.some((a) => a.niveau === b.key));
 
   return (

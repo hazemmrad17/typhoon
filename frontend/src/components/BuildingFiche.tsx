@@ -28,10 +28,6 @@ const DPE_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 function fmtNum(v: number, digits = 0): string {
   return v.toLocaleString('fr-FR', { maximumFractionDigits: digits });
 }
-function val(v: string | number | null | undefined, suffix = ''): string {
-  if (v == null || v === '') return NA;
-  return `${v}${suffix}`;
-}
 function boolVal(v: boolean | null | undefined): string {
   if (v == null) return NA;
   return v ? 'Oui' : 'Non';
@@ -217,7 +213,7 @@ function WarningBanner() {
 //   Section : Identification du bâtiment
 // =============================================================================
 
-function IdentificationSection({ b, report }: { b: BdnbBatiment; report: RisqueReport }) {
+function IdentificationSection({ b }: { b: BdnbBatiment; report: RisqueReport }) {
   const parcelles = b.l_parcelle_id?.length
     ? b.l_parcelle_id.join(', ')
     : null;
@@ -661,43 +657,17 @@ function RisquesSection({
   b: BdnbBatiment;
   risques?: BatimentRisques | null;
 }) {
-  const riskRows: { label: string; value: string | null | undefined; icon: string }[] = [
-    { label: 'Risque Argiles', value: risques?.alea_argile ?? b.alea_argile, icon: 'grass' },
-    { label: 'Risque Radon', value: risques?.alea_radon ?? null, icon: 'science' },
-    { label: 'Risque Sismique', value: risques?.alea_sismique ?? null, icon: 'crisis_alert' },
-  ].filter((r) => r.value != null && r.value !== '');
+  // Les niveaux de risque (argile, radon, sismique) sont supprimés de cette
+  // section car ils sont déjà affichés dans la Synthèse Géorisques (DecisionCard)
+  // — les dupliquer ici créerait une contradiction visuelle.
+  // On conserve uniquement le confort thermique et les points d'attention.
 
   return (
     <GrSection
-      title="Risques & confort des occupants"
-      icon="warning"
-      source="BDNB · Géorisques · Cerema"
+      title="Confort & dispositions du bien"
+      icon="home"
+      source="BDNB · Cerema"
     >
-      {/* Niveaux de risque bâtiment BDNB (argile / radon / sismique) */}
-      {riskRows.length > 0 && (
-        <div className="gr-risk-banners">
-          {riskRows.map((r) => (              <div className="gr-risk-banner" key={r.label}>
-                <md-icon>{r.icon}</md-icon>
-                <div>
-                  <span className="gr-risk-label">{r.label}</span>
-                  <span className="gr-risk-value">{capFirst(r.value ?? '')}</span>
-                </div>
-              </div>
-          ))}
-        </div>
-      )}
-
-      {b.alea_argile && b.alea_argile.toLowerCase() !== 'nul' && b.arrete_2021 != null && (
-        <div className={`gr-risk-elig${b.arrete_2021 ? '' : ' gr-risk-elig--no'}`}>
-          <md-icon>{b.arrete_2021 ? 'verified_user' : 'info'}</md-icon>
-          <span>
-            {b.arrete_2021
-              ? `Zone argile éligible au dispositif d'indemnisation (arrêté du 5 février 2021).`
-              : `Bâtiment concerné par l'aléa argile mais hors périmètre d'éligibilité de l'arrêté du 5 février 2021.`}
-          </span>
-        </div>
-      )}
-
       {/* Confort thermique & dispositions (BDNB) */}
       {(b.classe_inertie || b.traversant || b.presence_balcon != null) && (
         <div className="gr-comfort-grid">
