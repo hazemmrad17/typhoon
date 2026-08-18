@@ -38,7 +38,7 @@ function PaletteIcon() {
 }
 
 export function TyphoonControls() {
-  const { theme, accent, panelOpen, setPanelOpen, toggleTheme, resetAccent, pickAccent } = useTyphoonTheme();
+  const { accent, panelOpen, setPanelOpen, toggleTheme, resetAccent, pickAccent } = useTyphoonTheme();
 
   return (
     <>

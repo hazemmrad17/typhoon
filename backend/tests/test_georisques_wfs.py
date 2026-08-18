@@ -8,7 +8,6 @@ proximité — la partie qui décide « ce bâtiment est-il dans la zone ? ».
 
 from __future__ import annotations
 
-import pytest
 
 from app.connectors import georisques_wfs
 from app.connectors.georisques_wfs import (

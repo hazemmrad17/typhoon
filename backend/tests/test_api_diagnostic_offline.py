@@ -310,7 +310,7 @@ def test_gltf_builder_utilise_lemprise_bdnb_reelle():
     json_len, _ = struct.unpack("<II", glb[12:20])
     doc = json.loads(glb[20 : 20 + json_len].decode("utf-8"))
     positions = next(a for a in doc["accessors"] if a["type"] == "VEC3")
-    pos_min, pos_max = positions["min"], positions["max"]
+    _pos_min, pos_max = positions["min"], positions["max"]
 
     # Emprise reelle : depasse +/- 5 m (pas la boite 10x10x6 de repli)
     assert pos_max[2] > 5.0, f"emprise non reelle (max z={pos_max[2]}) — repli boite ?"

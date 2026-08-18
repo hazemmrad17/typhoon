@@ -1,4 +1,6 @@
-import openpyxl, hashlib, os
+import openpyxl
+import hashlib
+import os
 files = {
  "v2  (Referentiel_indicateurs_risk_engine_2.xlsx)":  "/mnt/user-data/uploads/Referentiel_indicateurs_risk_engine_2.xlsx",
  "v2_1(Referentiel_indicateurs_risk_engine_2_1.xlsx)":"/mnt/user-data/uploads/Referentiel_indicateurs_risk_engine_2_1.xlsx",

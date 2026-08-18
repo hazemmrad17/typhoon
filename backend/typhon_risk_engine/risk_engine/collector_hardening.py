@@ -7,7 +7,6 @@ inertes par defaut et testables via fixtures, sans acces reseau.
 from __future__ import annotations
 
 import random
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 

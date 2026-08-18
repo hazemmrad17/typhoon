@@ -30,12 +30,10 @@ import {
 } from '../zone/watchlist';
 import {
   API,
-  D03,
   ALEA_ICONS,
   ALEA_ICON_FALLBACK,
   bandForKey,
   escHtml,
-  aleaScore,
   type AleaDetail,
   type BatimentRisques,
   type RisqueReport,
@@ -57,6 +55,7 @@ import {
   putCachedTrajectoire,
 } from '../zone/diagnosticCache';
 import '../styles/zone.css';
+import '../styles/copernicus.css';
 
 
 /* ── Multi-profils (Phase A) : ordre du stepper par profil.
@@ -182,43 +181,16 @@ export function Zone() {
   const banTimeout = useRef<number | null>(null);
   const recommendationsRequestId = useRef(0);
 
-  async function loadDetailedRecommendations(address: string) {
+  async function loadDetailedRecommendations(_address: string) {
     const requestId = ++recommendationsRequestId.current;
     setDetailedRecommendationsLoading(true);
     setDetailedRecommendationsError(null);
     setDetailedRecommendationZones({});
     try {
-      const fastResponse = await fetch(`${API}/diagnostic/fast`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        /* Copernicus activé (fail-soft si la licence CDS n'est pas encore
-           acceptée) + scénario RCP par défaut : les points 2100 projetés
-           portent alors la comparaison rcp4_5 / rcp8_5 pour la carte de
-           décision (sélecteur instantané, sans relancer le diagnostic). */
-        body: JSON.stringify({ adresse: address, copernicus: true, scenario: 'rcp8_5' }),
-      });
-      if (!fastResponse.ok) throw new Error(`Diagnostic détaillé HTTP ${fastResponse.status}`);
-      const fastContract = await fastResponse.json();
-      if (!fastContract?._resume) throw new Error('Contexte de recommandations absent');
-      /* Trajectoire climatique (vue Assurance) : le digital_twin porte la
-         trajectoire produite par risk_model.compute_trajectoire. On la met
-         aussi en cache pour qu'un re-diagnostic (servi depuis le cache) la
-         restitue sans appel réseau. */
-      if (fastContract.trajectoire && typeof fastContract.trajectoire === 'object') {
-        const traj = fastContract.trajectoire as Trajectoire;
-        setTrajectoire(traj);
-        putCachedTrajectoire(address, traj);
-      }
-
-      const recommendationsResponse = await fetch(`${API}/diagnostic/recommandations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fastContract._resume),
-      });
-      if (!recommendationsResponse.ok) throw new Error(`Recommandations HTTP ${recommendationsResponse.status}`);
-      const detailedContract = await recommendationsResponse.json();
-      if (requestId !== recommendationsRequestId.current) return;
-      setDetailedRecommendationZones(detailedContract?.zones || {});
+      /* Les recommandations détaillées dépendaient de /diagnostic/fast
+         (supprimé dans le rewrite backend). La trajectoire est désormais
+         extraite directement du contrat /diagnostic/adresse (copernicus.trajectoire). */
+      setDetailedRecommendationsError('Recommandations détaillées non disponibles (en cours de réécriture).');
     } catch (error) {
       if (requestId !== recommendationsRequestId.current) return;
       setDetailedRecommendationsError(error instanceof Error ? error.message : 'Recommandations détaillées indisponibles');
@@ -345,6 +317,13 @@ export function Zone() {
 
       const r = (await resp.json()) as RisqueReport;
       setReport(r);
+      /* Trajectoire climatique (vue Assurance) : extraite directement du contrat
+         copernicus renvoyé par GET /diagnostic/adresse. */
+      if (r.copernicus?.trajectoire && typeof r.copernicus.trajectoire === 'object') {
+        const traj = r.copernicus.trajectoire as Trajectoire;
+        setTrajectoire(traj);
+        putCachedTrajectoire(r.adresse_normalisee || value, traj);
+      }
       /* Watchlist : enregistre le dernier comptage CatNat observé pour cette
          adresse (données déjà fetchées — alimente le badge sans appel réseau). */
       const catnatCount = (r.aleas || []).reduce(
@@ -378,21 +357,16 @@ export function Zone() {
   }
 
   /* Rattrapage trajectoire pour les diagnostics en cache antérieurs à
-     Copernicus : relance uniquement /diagnostic/fast (léger, sans
-     recommandations) pour remplir la carte de décision sans re-diagnostiquer
-     l'adresse. Fail-soft : si le contrat ou la trajectoire manquent, on
-     laisse la restitution en cache telle quelle. */
+     Copernicus : relance GET /diagnostic/adresse pour obtenir la trajectoire
+     incluse dans le contrat copernicus. Fail-soft : si le contrat ou la
+     trajectoire manquent, on laisse la restitution en cache telle quelle. */
   async function backfillTrajectoire(address: string) {
     try {
-      const resp = await fetch(`${API}/diagnostic/fast`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adresse: address, copernicus: true, scenario: 'rcp8_5' }),
-      });
+      const resp = await fetch(`${API}/diagnostic/adresse?q=${encodeURIComponent(address)}`);
       if (!resp.ok) return;
-      const contract = await resp.json();
-      if (contract?.trajectoire && typeof contract.trajectoire === 'object') {
-        const traj = contract.trajectoire as Trajectoire;
+      const report = (await resp.json()) as RisqueReport;
+      if (report.copernicus?.trajectoire && typeof report.copernicus.trajectoire === 'object') {
+        const traj = report.copernicus.trajectoire as Trajectoire;
         setTrajectoire(traj);
         putCachedTrajectoire(address, traj);
       }
@@ -553,12 +527,9 @@ export function Zone() {
   const isMapStep = ['carto', 'analyse', 'decision', 'copernicus'].includes(currentStepId);
 
   /* ── Dérivés du rapport ── */
-  const presentAleas = (report?.aleas || []).filter((a) => a.present === true);
   /* Aléas dont la source est disponible (présents OU absents) : les absents
      restent visualisables sur la carte via les couches communales WMS/WFS. */
   const togglableAleas = (report?.aleas || []).filter((a) => a.present !== null);
-  const maxScore = presentAleas.length ? Math.max(...presentAleas.map((a) => aleaScore(a))) : null;
-  const band = maxScore != null ? D03.find((b) => (maxScore as number) < b.max) || D03[D03.length - 1] : null;
 
   const catnat = (report?.aleas || []).flatMap((a) =>
     (a.catnat_historique || []).map((ev) => ({

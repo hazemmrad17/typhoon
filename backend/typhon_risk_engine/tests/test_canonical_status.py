@@ -1,5 +1,5 @@
 """Statuts canoniques : les quatre situations ne sont jamais confondues."""
-from risk_engine.canonical import (CanonicalVariable, Domain, Scope, Status,
+from risk_engine.canonical import (CanonicalVariable, Domain, Status,
                                    TimeHorizon, VariableBag)
 from risk_engine.collector_hardening import classify_source
 

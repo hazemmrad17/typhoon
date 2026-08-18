@@ -1,6 +1,5 @@
 """Non-regression sur le cas reel de Nice (73 av. Simone Veil, 06088)."""
 import json
-import re
 from pathlib import Path
 
 import pytest

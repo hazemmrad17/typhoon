@@ -45,15 +45,34 @@ import logging
 import time
 
 import httpx
-from pyproj import CRS, Transformer
+
+try:
+    from pyproj import CRS, Transformer
+    # Lambert-93 (EPSG:2154, CRS natif de la BDNB) -> WGS84 (EPSG:4326, CRS de MapLibre).
+    _L93_TO_WGS84 = Transformer.from_crs(CRS.from_epsg(2154), CRS.from_epsg(4326), always_xy=True)
+    _WGS84_TO_L93 = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(2154), always_xy=True)
+except ImportError:
+    class _FallbackTransformer:
+        @staticmethod
+        def transform(x: float, y: float) -> tuple[float, float]:
+            import math
+            if -180.0 <= x <= 180.0 and -90.0 <= y <= 90.0:
+                # WGS84 -> approx Lambert-93
+                x_l93 = 700000.0 + (x - 3.0) * 111319.0 * math.cos(math.radians(y))
+                y_l93 = 6600000.0 + (y - 46.5) * 111319.0
+                return x_l93, y_l93
+            else:
+                # Lambert-93 -> approx WGS84
+                lon = 3.0 + (x - 700000.0) / (111319.0 * math.cos(math.radians(46.5)))
+                lat = 46.5 + (y - 6600000.0) / 111319.0
+                return lon, lat
+
+    _L93_TO_WGS84 = _FallbackTransformer()
+    _WGS84_TO_L93 = _FallbackTransformer()
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Lambert-93 (EPSG:2154, CRS natif de la BDNB) -> WGS84 (EPSG:4326, CRS de MapLibre).
-_L93_TO_WGS84 = Transformer.from_crs(CRS.from_epsg(2154), CRS.from_epsg(4326), always_xy=True)
-_WGS84_TO_L93 = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(2154), always_xy=True)
 
 
 class BdnbAdresseIntrouvable(RuntimeError):

@@ -1,5 +1,4 @@
 """Correctifs et adaptateurs du collector. Aucun acces reseau."""
-import pytest
 
 from risk_engine.collector_hardening import (
     AZI_POLICY, DATA_DICTIONARY_PROMISES, OBSERVED_DAILY_VARS,

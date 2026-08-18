@@ -24,7 +24,6 @@ from app.connectors.geocoding import (
     geocode_address,
 )
 from app.connectors.georisques import (
-    fetch_georisques_raw,
     get_risque_report,
     _score_to_niveau,
 )
@@ -164,13 +163,35 @@ def test_risque_report_nice():
     report = asyncio.run(_run())
     assert isinstance(report, RisqueReport)
     assert report.code_insee == "06088"
-    assert report.alea_count == 0
     assert report.erreurs_partielles == []
 
-    # Seuls les périls conservés (ICPE, canalisations, vents cycloniques, PPR, SSP)
-    # sont désormais normalisés — aucun n'est présent dans la fixture Nice.
+    # Le rapport couvre l'ensemble des aléas du référentiel Géorisques : les
+    # 5 périls « bâtiment » (ICPE, canalisations, vents cycloniques, PPR, SSP)
+    # + les aléas communaux/atlas (inondation, séisme, mouvements de terrain,
+    # radon, RGA, cavités, feux de forêt, avalanches).
     codes = {a.code for a in report.aleas}
-    assert codes == {"icpe", "canalisations", "vent_cyclonique", "ppr", "ssp"}
+    assert codes == {
+        "icpe", "canalisations", "vent_cyclonique", "ppr", "ssp",
+        "inondation", "sismicite", "mouvement_terrain", "radon", "rga",
+        "cavite", "feu_foret", "avalanche",
+    }
+
+    # Fixture Nice : séisme (zone 2), radon (classe 2), RGA, inondation et
+    # feux de forêt sont recensés — les périls « bâtiment » ne le sont pas.
+    assert report.alea_count == 5
+
+    # Détail des nouveaux aléas : zonage et niveau exploitables.
+    sism = next(a for a in report.aleas if a.code == "sismicite")
+    assert sism.present is True and sism.zone_sismique == "2"
+    assert "Zone sismique 2" in (sism.zonage or "")
+    assert sism.niveau == NiveauRisque.FAIBLE
+    rad = next(a for a in report.aleas if a.code == "radon")
+    assert rad.present is True and "classe 2/3" in (rad.zonage or "")
+    inond = next(a for a in report.aleas if a.code == "inondation")
+    assert inond.present is True
+    assert inond.niveau == NiveauRisque.MODERE
+    feu = next(a for a in report.aleas if a.code == "feu_foret")
+    assert feu.present is True and "commune" in (feu.zonage or "")
 
     # Aucun aléa ne doit avoir present=None (toutes les sources sont dispo dans la fixture)
     for alea in report.aleas:
@@ -272,7 +293,12 @@ def test_no_decommissioned_geocodage_connector_import():
 # ---------------------------------------------------------------------------
 
 def test_ppr_ssp_normalises():
-    """Vérifie la normalisation de PPR et SSP (périls conservés)."""
+    """Vérifie la normalisation de PPR et SSP (périls conservés).
+
+    Ici sans résolution WFS (pas de clé `batiment`) : le comptage REST
+    communal sert de repli — 1 PPR recensé → estimation communale MODERE,
+    jamais un faux "Dans un périmètre" (réservé au verdict WFS).
+    """
     raw_enriched = {
         **GEORISQUES_RAW_NICE,
         "ppr": [{"num_ppr": "PPR123", "type_ppr": "PPRN"}],
@@ -295,10 +321,56 @@ def test_ppr_ssp_normalises():
     ppr = next(a for a in report.aleas if a.code == "ppr")
     assert ppr.present is True
     assert ppr.niveau == NiveauRisque.MODERE
+    assert ppr.resolution == "commune-level estimate"
+    assert "recensé" in ppr.zonage and "périmètre" not in ppr.zonage
 
     ssp = next(a for a in report.aleas if a.code == "ssp")
     assert ssp.present is True
     assert ssp.niveau == NiveauRisque.MODERE
+
+
+def test_ppr_wfs_per_building_scores():
+    """Score piloté par le WFS quand il a tranché au bâtiment (point-in-polygon).
+
+    - dans un périmètre → signal fort (ELEVE), `resolution` per-building ;
+    - hors périmètre → faible (TRES_FAIBLE), même si la commune recense des PPR ;
+    - le repli REST communal (pas de WFS) garde son estimation MODERE (cf.
+      test_ppr_ssp_normalises) — régresse si quelqu'un rebranche le score
+      sur `present` (dérivé) au lieu de `present_bat` (verdict WFS).
+    """
+    def _report_with_batiment(ppr_info: dict):
+        raw_enriched = {
+            **GEORISQUES_RAW_NICE,
+            "ppr": [{"num_ppr": "PPR123", "type_ppr": "PPRN"}],
+            "batiment": {"ppr": ppr_info},
+        }
+
+        async def _run():
+            with patch("app.connectors.georisques.fetch_georisques_raw", return_value=raw_enriched):
+                mock_client = AsyncMock(spec=httpx.AsyncClient)
+                return await get_risque_report(
+                    client=mock_client,
+                    adresse_saisie="Nice",
+                    adresse_normalisee="14 Avenue des Palmiers 06000 Nice",
+                    lat=43.7102, lon=7.2620, code_insee="06088",
+                )
+
+        return asyncio.run(_run())
+
+    # Dans un périmètre : le WFS a tranché → signal fort, pas l'estimation communale.
+    report = _report_with_batiment({"present": True, "count": 1, "resolution": "per-building"})
+    ppr = next(a for a in report.aleas if a.code == "ppr")
+    assert ppr.present is True
+    assert ppr.niveau == NiveauRisque.ELEVE
+    assert ppr.resolution == "per-building, polygon-checked"
+    assert "Dans un périmètre" in ppr.zonage
+
+    # Hors périmètre : faible malgré des PPR recensés dans la commune.
+    report = _report_with_batiment({"present": False, "count": 2, "resolution": "per-building"})
+    ppr = next(a for a in report.aleas if a.code == "ppr")
+    assert ppr.present is False
+    assert ppr.niveau == NiveauRisque.TRES_FAIBLE
+    assert "Hors périmètre" in ppr.zonage
 
 
 

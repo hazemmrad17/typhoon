@@ -657,7 +657,7 @@ export async function exportInsurerPdf(input: InsurerPdfInput): Promise<void> {
     };
     drawHeader();
 
-    perilEntries.forEach(([code, p], idx) => {
+    perilEntries.forEach(([, p], idx) => {
       if (y + rowH > SAFE_BOTTOM) {
         doc.addPage();
         y = 18;
@@ -781,13 +781,6 @@ export async function exportPortfolioPdf(input: PortfolioPdfInput): Promise<void
   const FOOTER_Y = PH - 10;
   const SAFE_Y = PH - 14;
   let y = 0;
-
-  const ensureSpace = (h: number) => {
-    if (y + h > SAFE_Y) {
-      doc.addPage();
-      y = 16;
-    }
-  };
 
   doc.setFillColor(NAVY);
   doc.rect(0, 0, PW, 34, 'F');

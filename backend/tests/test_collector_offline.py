@@ -226,8 +226,15 @@ def test_copernicus_request_est_bien_celle_fournie():
     assert copernicus._REQUEST["gcm"] == ["ipsl_cm5a_mr"]
     assert copernicus._REQUEST["rcm"] == ["wrf381p"]
     assert set(copernicus._REQUEST["experiment"]) == {"rcp4_5", "rcp8_5"}
-    assert "hot_days" in copernicus._REQUEST["variable"]
-    assert "magnitude_of_meteorological_droughts" in copernicus._REQUEST["variable"]
+    # Requete volontairement minimale (taille du telechargement CDS) :
+    # uniquement les deux variables consommees par extract_climate_2100,
+    # agregation annuelle, France metropolitaine (cf. docstring du module).
+    assert copernicus._REQUEST["variable"] == [
+        "heatwave_days",
+        "frequency_of_extreme_precipitation",
+    ]
+    assert copernicus._REQUEST["temporal_aggregation"] == ["yearly"]
+    assert copernicus._REQUEST["area"] == [51.5, -5.5, 41.0, 10.0]
     print("test_copernicus_request_est_bien_celle_fournie OK")
 
 
@@ -238,7 +245,11 @@ def test_copernicus_extraction_point_fichier_unique():
     with tempfile.TemporaryDirectory() as tmp_dir:
         cache_dir = Path(tmp_dir)
         core_config.settings.copernicus_cache_dir = tmp_dir
-        (cache_dir / ".download_complete").write_text("ok")
+        # Marqueur signe par l'empreinte de _REQUEST (cf. _marker_valid) : un
+        # simple "ok" est invalide depuis la signature du cache.
+        (cache_dir / ".download_complete").write_text(
+            f"ok:{copernicus._request_signature()}", encoding="utf-8"
+        )
 
         lats = np.array([42.9, 43.2, 43.7, 45.5])
         lons = np.array([4.5, 6.0, 7.27, 7.7])
@@ -279,7 +290,9 @@ async def test_full_collect_pipeline():
     with tempfile.TemporaryDirectory() as tmp_dir:
         cache_dir = Path(tmp_dir)
         core_config.settings.copernicus_cache_dir = tmp_dir
-        (cache_dir / ".download_complete").write_text("ok")
+        (cache_dir / ".download_complete").write_text(
+            f"ok:{copernicus._request_signature()}", encoding="utf-8"
+        )
         lats = np.array([42.9, 45.5])
         lons = np.array([4.5, 7.7])
         fake_var = xr.DataArray(

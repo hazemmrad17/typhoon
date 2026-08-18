@@ -151,6 +151,10 @@ export interface RisqueReport {
   aleas: AleaDetail[];
   erreurs_partielles: string[];
   bdnb?: BdnbAsset | null;
+  copernicus?: {
+    donnees?: Record<string, unknown> | null;
+    trajectoire?: Trajectoire | null;
+  } | null;
   recommandations?: RecommandationsIA | null;
   avertissement?: string;
 }
@@ -184,6 +188,7 @@ export const SCENARIOS: { key: string; label: string; hint: string }[] = [
 
 export interface TrajectoirePeril {
   label: string;
+  category?: string;    // temperature | precipitation | drought | wind
   points: TrajectoirePoint[];
 }
 

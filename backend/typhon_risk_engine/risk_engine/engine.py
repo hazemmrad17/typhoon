@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .canonical import Scope, Status, TimeHorizon, VariableBag
+from .canonical import Status, VariableBag
 from .confidence import compute_confidence
 from .normalizer import normalize
 from .rules_loader import load_rules

@@ -226,6 +226,8 @@ export function UnifiedMap({
   lightPresetRef.current = lightPreset;
   const showParcelsRef = useRef(showParcels);
   showParcelsRef.current = showParcels;
+  const showRisksRef = useRef(showRisks);
+  showRisksRef.current = showRisks;
 
   function currentBatiment(): BdnbBatiment | null {
     return batimentRef.current ?? latestReportRef.current?.bdnb?.batiment ?? null;
@@ -398,7 +400,10 @@ export function UnifiedMap({
     }
   }, [points]);
 
-  /* ── Gros plan (step Cartographie : marqueur + popup + calques aléas) ── */
+  /* ── Gros plan (step Cartographie : marqueur + popup + calques aléas) ──
+     Se déclenche quand showRisks passe à true (onglet Cartographie/Synthèse)
+     OU quand le report change. Si showRisks est true mais le map n'est pas
+     encore prêt, le handler onload s'en charge (voir plus bas). */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReadyRef.current) return;
@@ -413,6 +418,24 @@ export function UnifiedMap({
       popupRef.current = null;
       if (report) placeMarker(map, report);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRisks, report]);
+
+  /* ── Rattrapage : si showRisks est vrai au montage du composant (reload,
+     retour depuis un autre onglet) et que le map est déjà prêt, on
+     force le rendu. Sans cet effet, un showRisks=true dès le premier
+     render ne déclenche pas renderReport (mapReadyRef encore false). */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current || !showRisks) return;
+    // Petit délai pour laisser le temps au style de finir de se charger
+    const timer = window.setTimeout(() => {
+      const m = mapRef.current;
+      if (m && showRisksRef.current) {
+        renderReport(m, latestReportRef.current);
+      }
+    }, 100);
+    return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRisks, report]);
 

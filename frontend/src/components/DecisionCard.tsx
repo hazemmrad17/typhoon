@@ -1,22 +1,26 @@
 // =============================================================================
-//   TYPHOON — Carte de décision souscription (vue « Assurance », Phase 4A)
+//   TYPHOON — Synthèse souscription (vue « Assurance »)
 //
-//   Ce que l'assureur veut voir pour trancher accept/refuse/expertise :
-//   la décomposition par aléa et la trajectoire climatique (horizons
-//   2026 → 2050 → 2100), PAS un score composite mis en avant. Le score global
-//   est volontairement rétrogradé en petite ligne de synthèse (roadmap
-//   production item 20 : « demote the global blended score, don't lead with
-//   it ») — la donnée brute par péril prime, avec sa provenance.
+//   Deux blocs distincts, deux domaines, jamais mélangés :
+//
+//   1. ÉTAT DES LIEUX (Géorisques) — « Quel est le risque aujourd'hui, selon
+//      la cartographie réglementaire ? » Le verdict (Acceptable / À expertiser /
+//      Refus possible) vient UNIQUEMENT de ce bloc : opposable, sans scénario,
+//      ERRIAL-compatible. On affiche les 2-3 périls qui pilotent le verdict
+//      (« Pourquoi ») — pas les 8 périls d'un coup.
+//
+//   2. PROJECTION CLIMATIQUE (Copernicus CDS) — « Comment l'exposition
+//      canicule/précipitations extrêmes évolue-t-elle en 2050/2100 ? »
+//      Indicatif, toujours étiqueté comme tel, scénario RCP 4.5/8.5 visible.
+//      Jamais un input du verdict : c'est un signal de tarification/vigilance.
 //
 //   La trajectoire vient de la réponse /diagnostic/fast (digital_twin.
-//   trajectoire, produite par risk_model.compute_trajectoire) : variables
-//   brutes F par péril et par horizon, jamais combinées.
+//   trajectoire, produite par risk_model.compute_trajectoire).
 // =============================================================================
 
 import { useState } from 'react';
 import {
   D03,
-  SCENARIOS,
   bandForKey,
   aleaScore,
   type AleaDetail,
@@ -42,30 +46,61 @@ function bandForValue(valeur: number | null) {
   return D03.find((b) => valeur < b.max) || D03[D03.length - 1];
 }
 
-function PointCell({ point, value }: { point: TrajectoirePoint; value: number | null }) {
-  if (point.type === 'indisponible') {
-    return (
-      <span className="traj-point traj-point-na" title={point.unite || 'Non simulé'}>
-        —
-      </span>
-    );
-  }
-  const band = bandForValue(value);
-  /* Comparaison de scénarios RCP dans l'infobulle, quand Copernicus la fournit. */
-  const scenarioInfo =
-    point.scenarios && Object.keys(point.scenarios).length
-      ? ` · RCP ${Object.entries(point.scenarios)
-          .map(([s, v]) => `${s.replace('rcp', 'RCP ').replace('_', '.')}=${v ?? '—'}`)
-          .join(' / ')}`
-      : '';
+/* Drill-down « un péril à la fois » : pour l'aléa sélectionné, l'état à
+   l'adresse vs la commune, le zonage, l'historique CatNat et la source.
+   Affiché déplié uniquement sur clic — le résumé ne devient jamais un blob. */
+function AleaDrillDown({ alea }: { alea: AleaDetail | null }) {
+  if (!alea) return null;
+  const aband = alea.niveau ? bandForKey(alea.niveau) : undefined;
+  const catnat = alea.catnat_historique ?? [];
+  const statut =
+    alea.present === true
+      ? { label: 'À votre adresse', cls: 'drill-status-ok' }
+      : alea.present_commune
+        ? { label: 'Dans la commune', cls: 'drill-status-commune' }
+        : alea.present === false
+          ? { label: 'Non recensé', cls: 'drill-status-none' }
+          : { label: 'Indisponible', cls: 'drill-status-none' };
   return (
-    <span
-      className={`traj-point ${band ? band.cls : ''}`}
-      style={band ? { background: band.color } : undefined}
-      title={`${value} · ${point.unite} · ${point.resolution ?? 'commune-level'} · ${point.source ?? ''}${scenarioInfo}`}
-    >
-      {value ?? '—'}
-    </span>
+    <div className="alea-drilldown">
+      <div className="drill-row">
+        <span className={`drill-status ${statut.cls}`}>{statut.label}</span>
+        {aband && <span className={`d03-pill ${aband.cls}`}>{aband.label}</span>}
+      </div>
+      {alea.zonage && <div className="drill-row"><span className="drill-k">Zonage</span><span className="drill-v">{alea.zonage}</span></div>}
+      {alea.present_commune === false && (
+        <div className="drill-row"><span className="drill-k">Commune</span><span className="drill-v">Aucun recensement au niveau communal</span></div>
+      )}
+      {catnat.length > 0 && (
+        <div className="drill-catnat">
+          <span className="drill-k">Historique CatNat ({catnat.length})</span>
+          <ul className="drill-catnat-list">
+            {catnat.slice(0, 5).map((ev, i) => (
+              <li key={i}>
+                <span>{ev.libelle_risque_jo || ev.libelle || 'Arrêté CatNat'}</span>
+                {ev.date_debut_evt ? (
+                  <span className="drill-date">{ev.date_debut_evt.slice(0, 10)}</span>
+                ) : null}
+              </li>
+            ))}
+            {catnat.length > 5 && <li className="drill-more">+ {catnat.length - 5} autre(s)…</li>}
+          </ul>
+        </div>
+      )}
+      {(alea.source || alea.url_detail) && (
+        <div className="drill-row drill-source">
+          <span className="drill-k">Source</span>
+          {alea.url_detail ? (
+            <a href={alea.url_detail} target="_blank" rel="noreferrer" className="drill-link">
+              {alea.source ?? 'Géorisques'}
+            </a>
+          ) : (
+            <span className="drill-v">{alea.source ?? 'Géorisques'}</span>
+          )}
+        </div>
+      )}
+      {alea.erreur && <div className="drill-row"><span className="drill-k">Source</span><span className="drill-v drill-err">{alea.erreur}</span></div>}
+    </div>
   );
 }
 
@@ -88,12 +123,9 @@ export function DecisionCard({
 }) {
   /* Copier la synthèse : état « copié » temporaire pour le retour visuel. */
   const [copied, setCopied] = useState(false);
-  /* Horizon sélectionné : 2026 (actuel) / 2050 / 2100 — la carte se recolore
-     selon la valeur brute du péril à cet horizon (donnée réelle, pas un stub). */
-  const [horizon, setHorizon] = useState<number>(2026);
-  /* Scénario RCP sélectionné : bascule la comparaison 2100 sans relancer le
-     diagnostic — les deux valeurs sont déjà dans la réponse (point.scenarios). */
-  const [scenario, setScenario] = useState<string>('rcp8_5');
+  /* Aléa ouvert dans le drill-down « un péril à la fois » (déplié sur clic,
+     un seul à la fois — jamais le blob complet à l'écran). */
+  const [openAlea, setOpenAlea] = useState<string | null>(null);
 
   const presentAleas = aleas.filter((a) => a.present === true);
   const maxScore =
@@ -102,49 +134,46 @@ export function DecisionCard({
   const verdict = verdictFor(band);
 
   const perils = trajectoire?.perils ?? {};
-  const perilEntries = Object.entries(perils).filter(([, p]) =>
-    p.points.some((pt) => pt.horizon === horizon && pt.type !== 'indisponible')
-  );
 
-  /* Scénarios réellement présents dans les données (points projetés avec un
-     détail par RCP) — le sélecteur ne propose que ceux-là, dans l'ordre CDS. */
-  const availableScenarios = Array.from(
-    new Set(
-      Object.values(perils).flatMap((p) =>
-        p.points
-          .filter((pt) => pt.scenarios && Object.keys(pt.scenarios).length > 0)
-          .flatMap((pt) => Object.keys(pt.scenarios ?? {}))
-      )
-    )
-  );
-  const scenarioOptions = SCENARIOS.filter((s) => availableScenarios.includes(s.key));
+  /* ── Bloc 1 · « Pourquoi ce verdict » : les 2-3 périls qui pilotent la
+     décision, à l'état actuel (horizon 2026, observé). Si la trajectoire
+     manque, repli sur les aléas Géorisques présents. ── */
+  const perilDrivers = Object.entries(perils)
+    .map(([code, p]) => {
+      const pt = p.points.find((x) => x.horizon === 2026) ?? null;
+      return { code, label: p.label, pt, value: valueForPoint(pt) };
+    })
+    .filter((d) => d.value != null)
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+    .slice(0, 3);
 
-  /* Valeur brute du péril à l'horizon courant : sous le scénario sélectionné
-     quand la comparaison RCP est disponible, sinon la valeur par défaut. */
+  const aleaDrivers = presentAleas
+    .map((a) => ({ code: a.code, label: a.libelle, value: aleaScore(a) }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 3);
+
+  const drivers = perilDrivers.length ? perilDrivers : aleaDrivers;
+
+  /* Valeur brute du péril à l'état actuel (2026) — les drivers du verdict
+     viennent TOUJOURS du présent (Géorisques), jamais d'une projection. */
   function valueForPoint(pt: TrajectoirePoint | null): number | null {
     if (!pt) return null;
-    if (pt.scenarios && scenario in pt.scenarios) return pt.scenarios[scenario] ?? null;
     return pt.valeur;
   }
 
-  /* ── Copier la synthèse : texte brut (verdict + score + top périls + horizon) ── */
+  /* ── Copier la synthèse : verdict + score + drivers + projection ── */
   async function handleCopySynthese() {
     const lines = [
       `Typhon — Synthèse souscription — ${new Date().toLocaleDateString('fr-FR')}`,
       `Verdict : ${verdict.label}${band ? ` (bande ${band.label})` : ''}`,
       `Score global : ${scoreGlobal ?? maxScore ?? '—'} / 100`,
-      `Horizon : ${horizon}`,
     ];
+    if (drivers.length) {
+      lines.push(`Pourquoi : ${drivers.map((d) => `${d.label} ${d.value ?? '—'}/100`).join(' · ')}`);
+    }
     if (presentAleas.length) {
       lines.push(`Aléas présents : ${presentAleas.map((a) => a.libelle).join(', ')}`);
     }
-    perilEntries.forEach(([code, p]) => {
-      const pt = p.points.find((x) => x.horizon === horizon) ?? null;
-      if (!pt || pt.type === 'indisponible') return;
-      const v = valueForPoint(pt);
-      const b = pt ? bandForValue(v) : null;
-      lines.push(`· ${p.label} : ${v ?? '—'} /100${b ? ` (${b.label})` : ''} — ${pt.resolution ?? 'commune-level'}`);
-    });
     const text = lines.join('\n');
     try {
       await navigator.clipboard.writeText(text);
@@ -157,8 +186,8 @@ export function DecisionCard({
   }
 
   return (
-    <section className="decision-card" aria-label="Carte de décision souscription">
-      {/* Verdict — le seul élément « synthèse » mis en avant (la décision, pas le score). */}
+    <section className="decision-card" aria-label="Synthèse de souscription">
+      {/* ═══ BLOC 1 — ÉTAT DES LIEUX (Géorisques) : le verdict ═══ */}
       <div className={`decision-verdict ${verdict.cls}`}>
         <div className="decision-verdict-main">
           <span className="decision-verdict-label">Verdict de souscription</span>
@@ -175,134 +204,86 @@ export function DecisionCard({
         </div>
       </div>
 
-      {/* Aléas présents — pills compactes (réutilise les couleurs D03). */}
-      <div className="decision-aleas">
-        <span className="decision-aleas-label">Aléas à cette adresse</span>
-        <div className="decision-pills">
-          {presentAleas.length === 0 && (
-            <span className="decision-pill decision-pill-none">Aucun aléa présent recensé</span>
-          )}
-          {presentAleas.map((a) => {
-            const aband = a.niveau ? bandForKey(a.niveau) : undefined;
-            return (
-              <span key={a.code} className="decision-pill" title={a.libelle}>
-                <span className="decision-pill-dot" style={{ background: aband?.color ?? '#888' }} />
-                {a.libelle}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Trajectoire climatique — horizons 2026 / 2050 / 2100, valeurs brutes F. */}
-      <div className="decision-trajectoire">
-        <div className="decision-trajectoire-head">
-          <span className="decision-trajectoire-label">Trajectoire climatique</span>
-          <div className="traj-controls">
-            <div className="horizon-toggle" role="group" aria-label="Horizon de projection">
-              {[2026, 2050, 2100].map((h) => (
-                <button
-                  key={h}
-                  type="button"
-                  className={`horizon-btn${horizon === h ? ' active' : ''}`}
-                  aria-pressed={horizon === h}
-                  onClick={() => setHorizon(h)}
-                >
-                  {h}
-                </button>
-              ))}
-            </div>
-            {/* Sélecteur de scénario RCP — visible dès que Copernicus fournit
-                des points projetés avec comparaison (2100). */}
-            {scenarioOptions.length > 0 && (
-              <div className="horizon-toggle scenario-toggle" role="group" aria-label="Scénario climatique (RCP)">
-                {scenarioOptions.map((s) => (
-                  <button
-                    key={s.key}
-                    type="button"
-                    className={`horizon-btn${scenario === s.key ? ' active' : ''}`}
-                    aria-pressed={scenario === s.key}
-                    title={s.hint}
-                    onClick={() => setScenario(s.key)}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {perilEntries.length === 0 ? (
-          <p className="decision-trajectoire-empty">
-            {trajectoire
-              ? `Aucune donnée projetée à l'horizon ${horizon} pour ce bien (les périls présents n'ont pas de couche projection).`
-              : 'Trajectoire indisponible pour ce diagnostic.'}
-          </p>
+      {/* Pourquoi — les périls qui pilotent la décision, pas les 8 d'un coup. */}
+      <div className="decision-drivers">
+        <span className="decision-drivers-label">Pourquoi</span>
+        {drivers.length === 0 ? (
+          <span className="decision-drivers-empty">Aucun péril prépondérant recensé à cette adresse.</span>
         ) : (
-          <div className="trajectoire-table">
-            <div className="traj-row traj-head">
-              <span>Péril</span>
-              <span>Valeur F ({horizon})</span>
-              <span>Niveau</span>
-            </div>
-            {perilEntries.map(([code, p]) => {
-              const pt = p.points.find((x) => x.horizon === horizon) ?? null;
-              const value = valueForPoint(pt);
-              const band = pt ? bandForValue(value) : null;
+          <div className="decision-drivers-list">
+            {drivers.map((d) => {
+              const db = bandForValue(d.value);
               return (
-                <div className="traj-row" key={code}>
-                  <span className="traj-name" title={p.label}>
-                    {p.label}
-                  </span>
-                  <PointCell
-                    point={pt ?? { horizon, type: 'indisponible', scenario: null, valeur: null, unite: '', resolution: null, confiance: null, source: null, date_source: null }}
-                    value={value}
-                  />
-                  <span className={`traj-niveau ${band ? band.cls : ''}`}>
-                    {band ? band.label : '—'}
-                  </span>
-                </div>
+                <span key={d.code} className="driver-row" title={`${d.label} — ${d.value ?? '—'} /100`}>
+                  <span className="driver-dot" style={{ background: db?.color ?? '#888' }} />
+                  <span className="driver-name">{d.label}</span>
+                  <span className="driver-value">{d.value ?? '—'}</span>
+                  {db && <span className={`d03-pill ${db.cls}`}>{db.label}</span>}
+                </span>
               );
             })}
           </div>
         )}
+      </div>
 
-        <div className="decision-trajectoire-meta">
-          <span>
-            {horizon === 2026
-              ? 'Valeur observée (données Géorisques actuelles).'
-              : horizon === 2050
-                ? 'Projection climatique Open-Meteo (2041-2050).'
-                : scenarioOptions.length > 0
-                  ? `Projeté (Copernicus CDS) — scénario ${scenarioOptions.find((s) => s.key === scenario)?.label ?? scenario}, comparaison RCP disponible (infobulle des cellules).`
-                  : 'Non simulé tant que Copernicus CDS est désactivé.'}
-          </span>
-          <div className="decision-actions">
-            {onOpenProvenance && (
-              <button type="button" className="decision-action" onClick={onOpenProvenance}>
-                <md-icon>database</md-icon>
-                Sources &amp; provenance
+      {/* Aléas — pills cliquables : un clic ouvre le détail de CE péril
+          (adresse vs commune, CatNat, source), jamais tous en même temps. */}
+      <div className="decision-aleas">
+        <span className="decision-aleas-label">Aléas à cette adresse</span>
+        <div className="decision-pills">
+          {aleas.length === 0 && (
+            <span className="decision-pill decision-pill-none">Aucun aléa présent recensé</span>
+          )}
+          {aleas.map((a) => {
+            const aband = a.niveau ? bandForKey(a.niveau) : undefined;
+            const isOpen = openAlea === a.code;
+            return (
+              <button
+                key={a.code}
+                type="button"
+                className={`decision-pill${isOpen ? ' decision-pill-open' : ''}`}
+                title={`${a.libelle} — cliquer pour le détail`}
+                aria-expanded={isOpen}
+                onClick={() => setOpenAlea(isOpen ? null : a.code)}
+              >
+                <span className="decision-pill-dot" style={{ background: aband?.color ?? '#888' }} />
+                {a.libelle}
+                <md-icon className="decision-pill-chevron">{isOpen ? 'expand_less' : 'expand_more'}</md-icon>
               </button>
-            )}
-            <button type="button" className="decision-action" onClick={() => void handleCopySynthese()}>
-              <md-icon>{copied ? 'check' : 'content_copy'}</md-icon>
-              {copied ? 'Copié !' : 'Copier la synthèse'}
-            </button>
-            {onExportPdf && (
-              <button type="button" className="decision-action" onClick={onExportPdf}>
-                <md-icon>picture_as_pdf</md-icon>
-                Exporter PDF
-              </button>
-            )}
-            {onAddWatchlist && (
-              <button type="button" className="decision-action" onClick={onAddWatchlist}>
-                <md-icon>bookmark_add</md-icon>
-                Ajouter à la watchlist
-              </button>
-            )}
-          </div>
+            );
+          })}
         </div>
+
+        {/* Détail du péril ouvert — un seul à la fois. */}
+        {openAlea && (
+          <AleaDrillDown alea={aleas.find((a) => a.code === openAlea) ?? null} />
+        )}
+      </div>
+
+      {/* Actions — toujours visibles, ce sont les seuls « sorties » du dossier. */}
+      <div className="decision-actions">
+        {onOpenProvenance && (
+          <button type="button" className="decision-action" onClick={onOpenProvenance}>
+            <md-icon>database</md-icon>
+            Sources &amp; provenance
+          </button>
+        )}
+        <button type="button" className="decision-action" onClick={() => void handleCopySynthese()}>
+          <md-icon>{copied ? 'check' : 'content_copy'}</md-icon>
+          {copied ? 'Copié !' : 'Copier la synthèse'}
+        </button>
+        {onExportPdf && (
+          <button type="button" className="decision-action" onClick={onExportPdf}>
+            <md-icon>picture_as_pdf</md-icon>
+            Exporter PDF
+          </button>
+        )}
+        {onAddWatchlist && (
+          <button type="button" className="decision-action" onClick={onAddWatchlist}>
+            <md-icon>bookmark_add</md-icon>
+            Ajouter à la watchlist
+          </button>
+        )}
       </div>
     </section>
   );

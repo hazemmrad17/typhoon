@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
-import pytest
 
 from app.agents.risques_principaux import (
     TOP_N,
@@ -199,7 +198,7 @@ def test_generer_fusion_reponse_llm_avec_mock():
                         "score": 1,  # doit être ignoré
                         "niveau": "faible",  # doit être ignoré
                         "explication": f"Explication croisée pour {code}.",
-                        "facteurs_aggravants": [f"Facteur A → conséquence", f"Facteur B"],
+                        "facteurs_aggravants": ["Facteur A → conséquence", "Facteur B"],
                         "zone_la_plus_exposee": "sous_sol" if code == "inondation" else "fondations",
                     }
                     for code in codes

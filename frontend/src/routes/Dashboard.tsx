@@ -52,19 +52,12 @@ export function Dashboard() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const sidenavRef = useRef<HTMLElement | null>(null);
 
-  const [entries, setEntries] = useState<WatchlistEntry[]>(() => loadWatchlist());
+  const [entries] = useState<WatchlistEntry[]>(() => loadWatchlist());
   const [catNatLatest] = useState<Record<string, number>>(() => loadCatNatLatest());
   const [cache] = useState(() => loadCache());
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'bande' | 'adresse'>('recent');
   const [bandAlertDismissed, setBandAlertDismissed] = useState(false);
-
-  const handleRemove = (id: string) => {
-    setEntries((prev) => {
-      const next = prev.filter((e) => e.id !== id);
-      return next;
-    });
-  };
 
   /* ── Statistiques ── */
   const diagnostics = cache.length;

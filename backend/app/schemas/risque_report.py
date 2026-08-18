@@ -98,6 +98,7 @@ class RisqueReport(BaseModel):
     erreurs_partielles: list[str] = []  # ex: ["sismicite: timeout Géorisques"]
     bdnb: dict | None = None          # fiche BDNB (batiment_groupe_complet) — None si indisponible
                                       # (alimente l'étape 3 « Analyse » du frontend)
+    copernicus: dict | None = None    # projections climatiques CDS (trajectoire brute en vraies unités)
     recommandations: RecommandationsIA | None = None  # None si Mistral absent/en erreur
     avertissement: str = (
         "Ce rapport agrège les données publiques Géorisques (BRGM / MTE). "

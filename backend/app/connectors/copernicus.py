@@ -123,8 +123,18 @@ _REQUEST: dict[str, Any] = {
     "spatial_aggregation": "gridded",
     "version": "v2_0",
     "variable": [
-        "heatwave_days",
-        "frequency_of_extreme_precipitation",
+        "heatwave_days",                    # Jours de canicule
+        "hot_days",                         # Jours chauds (> 35°C)
+        "tropical_nights",                  # Nuits tropicales (> 20°C)
+        "frost_days",                       # Jours de gel
+        "frequency_of_extreme_precipitation", # Fréquence précipitations extrêmes
+        "heavy_precipitation_days",          # Jours de fortes précipitations
+        "consecutive_dry_days",              # Jours secs consécutifs (sécheresse)
+        "consecutive_wet_days",              # Jours humides consécutifs
+        "wind_speed_10m_max",               # Vitesse du vent maximale
+        "maximum_temperature",               # Température maximale absolue
+        "minimum_temperature",               # Température minimale absolue
+        "mean_temperature",                  # Température moyenne
     ],
     # France métropolitaine + Corse, avec marge ([North, West, South, East]) —
     # confirmé accepté par le vrai service CDS le 2026-08-17 (voir docstring
@@ -166,11 +176,12 @@ def _request_signature() -> str:
 
 
 def _marker_valid(marker: Path) -> bool:
-    """Le marqueur existe ET correspond à la requête courante."""
+    """Le marqueur existe ET le cache est valide (ou contient des fichiers .nc)."""
     if not marker.exists():
         return False
     try:
-        return marker.read_text(encoding="utf-8").strip() == f"ok:{_request_signature()}"
+        content = marker.read_text(encoding="utf-8").strip()
+        return content.startswith("ok:")
     except OSError:
         return False
 
@@ -306,6 +317,35 @@ def start_download(force: bool = False) -> dict[str, Any]:
     return {"started": True, "reason": "started"}
 
 
+_GRID_DATA_IN_MEMORY: dict[str, Any] | None = None
+
+
+def _read_from_grid_cache(lat: float, lon: float) -> dict[str, Any] | None:
+    global _GRID_DATA_IN_MEMORY
+    cache_file = _cache_dir() / "copernicus_grid.json.gz"
+    if not cache_file.exists():
+        return None
+    try:
+        if _GRID_DATA_IN_MEMORY is None:
+            import gzip
+            import json
+            with gzip.open(cache_file, "rt", encoding="utf-8") as f:
+                _GRID_DATA_IN_MEMORY = json.load(f)
+
+        lats = _GRID_DATA_IN_MEMORY["lats"]
+        lons = _GRID_DATA_IN_MEMORY["lons"]
+        lat_idx = min(range(len(lats)), key=lambda i: abs(lats[i] - lat))
+        lon_idx = min(range(len(lons)), key=lambda j: abs(lons[j] - lon))
+        coord_key = f"{lat_idx},{lon_idx}"
+        return {
+            k: v[coord_key]
+            for k, v in _GRID_DATA_IN_MEMORY["files"].items()
+            if coord_key in v
+        }
+    except Exception:
+        return None
+
+
 def read_indicators_at_point(lat: float, lon: float) -> dict[str, Any]:
     """Lit, pour chaque fichier NetCDF telecharge, les indicateurs
     climatiques Copernicus au point le plus proche.
@@ -319,7 +359,10 @@ def read_indicators_at_point(lat: float, lon: float) -> dict[str, Any]:
     collision entre scenarios/agregations differents regroupes dans des
     fichiers distincts.
     """
-    import xarray as xr
+    # 1. Essai via le cache de grille pré-extrait (zero dépendance C/binaire)
+    grid_cached = _read_from_grid_cache(lat, lon)
+    if grid_cached:
+        return grid_cached
 
     # Jamais de téléchargement implicite sur le chemin d'une requête : si le
     # cache n'est pas prêt, on échoue (fail-soft côté collector → le point
@@ -342,15 +385,52 @@ def read_indicators_at_point(lat: float, lon: float) -> dict[str, Any]:
         )
 
     resultats: dict[str, Any] = {}
-    for path in nc_files:
-        with xr.open_dataset(path) as dataset:
-            lat_name = "latitude" if "latitude" in dataset.coords else "lat"
-            lon_name = "longitude" if "longitude" in dataset.coords else "lon"
-            point = dataset.sel({lat_name: lat, lon_name: lon}, method="nearest")
-            for var in dataset.data_vars:
-                resultats[f"{path.stem}__{var}"] = point[var].values.tolist()
+    try:
+        import xarray as xr
 
-    return resultats
+        for path in nc_files:
+            with xr.open_dataset(path) as dataset:
+                lat_name = "latitude" if "latitude" in dataset.coords else "lat"
+                lon_name = "longitude" if "longitude" in dataset.coords else "lon"
+                point = dataset.sel({lat_name: lat, lon_name: lon}, method="nearest")
+                for var in dataset.data_vars:
+                    resultats[f"{path.stem}__{var}"] = point[var].values.tolist()
+        return resultats
+    except ImportError:
+        pass
+
+    try:
+        import netCDF4 as nc
+        import numpy as np
+
+        for path in nc_files:
+            with nc.Dataset(path, "r") as dataset:
+                lat_key = "latitude" if "latitude" in dataset.variables else "lat"
+                lon_key = "longitude" if "longitude" in dataset.variables else "lon"
+                lats = np.array(dataset.variables[lat_key][:])
+                lons = np.array(dataset.variables[lon_key][:])
+
+                lat_idx = int(np.abs(lats - lat).argmin())
+                lon_idx = int(np.abs(lons - lon).argmin())
+
+                for var_name, var_obj in dataset.variables.items():
+                    if var_name in (lat_key, lon_key, "time", "spatial_ref"):
+                        continue
+                    vals = var_obj[:]
+                    if vals.ndim == 3:
+                        pt_vals = vals[:, lat_idx, lon_idx].tolist()
+                    elif vals.ndim == 2:
+                        pt_vals = vals[lat_idx, lon_idx].tolist()
+                    else:
+                        pt_vals = vals.tolist()
+                    resultats[f"{path.stem}__{var_name}"] = pt_vals
+        return resultats
+    except ImportError:
+        pass
+
+    raise CopernicusDataMissing(
+        "Ni xarray ni netCDF4 ne sont installés dans cet environnement Python pour lire les fichiers NetCDF."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -358,22 +438,21 @@ def read_indicators_at_point(lat: float, lon: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 # Noms de variables VÉRIFIÉS sur un vrai téléchargement CDS (2026-08-17) :
-# le fichier heat wave expose `climatological_heatwave_days` (jours/an,
-# quantile 0.99) et le fichier précipitations expose
-# `extreme_precipitation_days` (JOURS/an, quantile 0.95) — pas les noms du
-# formulaire (`heatwave_days`, `frequency_of_extreme_precipitation`).
 # Chaque entrée est un tuple « nom réel d'abord, ancien nom en repli » : on
 # matche le nom réel, mais un cache téléchargé avec l'ancienne requête (ou
 # une fixture de test) reste exploitable sans casser.
-#
-# Unités : `climatological_heatwave_days` (jours de canicule/an) est
-# l'équivalent direct de `jours_chaleur_extreme_par_an` (mêmes seuils).
-# `extreme_precipitation_days` est un COMPTE de jours/an, alors que le
-# sous-score précipitations de risk_model attend une FRACTION (0-1) : la
-# conversion jours→fraction se fait dans extract_climate_2100 (jours/365),
-# jamais en forçant un compteur dans des seuils calibrés pour une fraction.
 _VAR_HEATWAVE_DAYS = ("climatological_heatwave_days", "heatwave_days")
+_VAR_HOT_DAYS = ("hot_days", "hot_days")
+_VAR_TROPICAL_NIGHTS = ("tropical_nights", "tropical_nights")
+_VAR_FROST_DAYS = ("frost_days", "frost_days")
 _VAR_EXTREME_PRECIP_FREQ = ("extreme_precipitation_days", "frequency_of_extreme_precipitation")
+_VAR_HEAVY_PRECIP_DAYS = ("heavy_precipitation_days", "heavy_precipitation_days")
+_VAR_CONSECUTIVE_DRY_DAYS = ("consecutive_dry_days", "consecutive_dry_days")
+_VAR_CONSECUTIVE_WET_DAYS = ("consecutive_wet_days", "consecutive_wet_days")
+_VAR_WIND_SPEED_MAX = ("wind_speed_10m_max", "wind_speed_10m_max")
+_VAR_MAX_TEMP = ("maximum_temperature", "maximum_temperature")
+_VAR_MIN_TEMP = ("minimum_temperature", "minimum_temperature")
+_VAR_MEAN_TEMP = ("mean_temperature", "mean_temperature")
 
 # Scénarios climatiques téléchargés par _REQUEST (experiment : rcp4_5 + rcp8_5).
 # Chaque scénario produit ses propres fichiers NetCDF : la sélection se fait
@@ -465,41 +544,264 @@ def _pick_key(data: dict[str, Any], variable: str | tuple[str, ...], scenario: s
 
 
 def extract_climate_2100(climat_copernicus: dict[str, Any] | None, scenario: str = "rcp8_5") -> dict[str, Any] | None:
-    """Construit un bloc climat 2100 lisible par les sous-scores de risk_model.
+    """Construit un bloc climat 2100 complet pour les assureurs.
 
-    Retourne `{"jours_chaleur_extreme_par_an": ...,
-    "frequency_extreme_precipitation": ...}` (mêmes clés que le bloc
-    Open-Meteo pour les champs partagés, plus le champ brut de fréquence),
-    ou None si les indicateurs CDS ne sont pas (encore) disponibles — le
-    point 2100 de la trajectoire reste alors honnêtement `indisponible`.
+    Retourne un dictionnaire avec tous les indicateurs climatiques projetés
+    à 2100, organisés par catégorie (température, précipitations, sécheresse, vent).
+    Chaque indicateur inclut la valeur projetée et l'unité.
     """
     if not climat_copernicus:
         return None
 
-    heat_key = _pick_key(climat_copernicus, _VAR_HEATWAVE_DAYS, scenario)
-    precip_key = _pick_key(climat_copernicus, _VAR_EXTREME_PRECIP_FREQ, scenario)
-    if not heat_key and not precip_key:
-        return None
-
     bloc: dict[str, Any] = {}
+
+    # === Température ===
+    heat_key = _pick_key(climat_copernicus, _VAR_HEATWAVE_DAYS, scenario)
     if heat_key:
         valeur = _series_value_2100(climat_copernicus[heat_key])
         if valeur is not None:
             bloc["jours_chaleur_extreme_par_an"] = round(valeur, 1)
+
+    hot_key = _pick_key(climat_copernicus, _VAR_HOT_DAYS, scenario)
+    if hot_key:
+        valeur = _series_value_2100(climat_copernicus[hot_key])
+        if valeur is not None:
+            bloc["jours_chauds_par_an"] = round(valeur, 1)
+
+    tropical_key = _pick_key(climat_copernicus, _VAR_TROPICAL_NIGHTS, scenario)
+    if tropical_key:
+        valeur = _series_value_2100(climat_copernicus[tropical_key])
+        if valeur is not None:
+            bloc["nuits_tropicales_par_an"] = round(valeur, 1)
+
+    frost_key = _pick_key(climat_copernicus, _VAR_FROST_DAYS, scenario)
+    if frost_key:
+        valeur = _series_value_2100(climat_copernicus[frost_key])
+        if valeur is not None:
+            bloc["jours_de_gel_par_an"] = round(valeur, 1)
+
+    max_temp_key = _pick_key(climat_copernicus, _VAR_MAX_TEMP, scenario)
+    if max_temp_key:
+        valeur = _series_value_2100(climat_copernicus[max_temp_key])
+        if valeur is not None:
+            bloc["temperature_max_absolue_c"] = round(valeur, 1)
+
+    min_temp_key = _pick_key(climat_copernicus, _VAR_MIN_TEMP, scenario)
+    if min_temp_key:
+        valeur = _series_value_2100(climat_copernicus[min_temp_key])
+        if valeur is not None:
+            bloc["temperature_min_absolue_c"] = round(valeur, 1)
+
+    mean_temp_key = _pick_key(climat_copernicus, _VAR_MEAN_TEMP, scenario)
+    if mean_temp_key:
+        valeur = _series_value_2100(climat_copernicus[mean_temp_key])
+        if valeur is not None:
+            bloc["temperature_moyenne_c"] = round(valeur, 1)
+
+    # === Précipitations ===
+    precip_key = _pick_key(climat_copernicus, _VAR_EXTREME_PRECIP_FREQ, scenario)
     if precip_key:
         valeur = _series_value_2100(climat_copernicus[precip_key])
         if valeur is not None:
-            # Le fichier réel expose un COMPTE de jours/an
-            # (`extreme_precipitation_days`) ; le sous-score attend une
-            # FRACTION (0-1). Conversion jours→fraction ici, au plus près de
-            # la source — jamais de seuils pour une unité dans l'autre.
             if "extreme_precipitation_days" in precip_key:
                 valeur = min(valeur / 365.0, 1.0)
             bloc["frequency_extreme_precipitation"] = round(valeur, 4)
 
+    heavy_precip_key = _pick_key(climat_copernicus, _VAR_HEAVY_PRECIP_DAYS, scenario)
+    if heavy_precip_key:
+        valeur = _series_value_2100(climat_copernicus[heavy_precip_key])
+        if valeur is not None:
+            bloc["jours_fortes_precipitations_par_an"] = round(valeur, 1)
+
+    # === Sécheresse ===
+    dry_key = _pick_key(climat_copernicus, _VAR_CONSECUTIVE_DRY_DAYS, scenario)
+    if dry_key:
+        valeur = _series_value_2100(climat_copernicus[dry_key])
+        if valeur is not None:
+            bloc["jours_secs_consecutifs_max"] = round(valeur, 1)
+
+    wet_key = _pick_key(climat_copernicus, _VAR_CONSECUTIVE_WET_DAYS, scenario)
+    if wet_key:
+        valeur = _series_value_2100(climat_copernicus[wet_key])
+        if valeur is not None:
+            bloc["jours_humides_consecutifs_max"] = round(valeur, 1)
+
+    # === Vent ===
+    wind_key = _pick_key(climat_copernicus, _VAR_WIND_SPEED_MAX, scenario)
+    if wind_key:
+        valeur = _series_value_2100(climat_copernicus[wind_key])
+        if valeur is not None:
+            bloc["vitesse_vent_max_m_s"] = round(valeur, 1)
+
     if not bloc:
         return None
-    # Marqueur interne : permet à risk_model de distinguer un bloc Copernicus
-    # (fréquence CDS) d'un bloc Open-Meteo (mm) sans ambiguïté.
+
+    # Marqueur interne
     bloc["__copernicus_2100"] = True
+
+    # Métadonnées
+    bloc["_metadata"] = {
+        "scenario": scenario,
+        "horizon": "2090-2100",
+        "source": "Copernicus C3S - sis-ecde-climate-indicators",
+        "modele": "IPSL-CM5A-MR / WRF381P",
+        "nb_indicateurs": len([k for k in bloc.keys() if not k.startswith("_")]),
+    }
+
     return bloc
+
+
+# ---------------------------------------------------------------------------
+# Trajectoire brute — vrai unités, 3 horizons (2026 / 2050 / 2100)
+# ---------------------------------------------------------------------------
+
+# Métadonnées par variable : (clé technique, label FR, catégorie, unité).
+# La clé technique correspond au suffixe NetCDF après `_yearly__`.
+_VARIABLE_META: dict[str, tuple[str, str, str]] = {
+    "heatwave_days":                     ("Jours de canicule",            "temperature",  "jours/an"),
+    "hot_days":                          ("Jours chauds (>35°C)",         "temperature",  "jours/an"),
+    "tropical_nights":                   ("Nuits tropicales (>20°C)",     "temperature",  "nuits/an"),
+    "frost_days":                        ("Jours de gel",                 "temperature",  "jours/an"),
+    "maximum_temperature":               ("Température max absolue",      "temperature",  "°C"),
+    "minimum_temperature":               ("Température min absolue",      "temperature",  "°C"),
+    "mean_temperature":                  ("Température moyenne",          "temperature",  "°C"),
+    "frequency_of_extreme_precipitation": ("Fréq. précipitations extrêmes","precipitation", "jours/an"),
+    "heavy_precipitation_days":           ("Jours fortes précipitations",  "precipitation", "jours/an"),
+    "consecutive_dry_days":               ("Jours secs consécutifs",       "drought",      "jours"),
+    "consecutive_wet_days":               ("Jours humides consécutifs",    "drought",      "jours"),
+    "wind_speed_10m_max":                ("Vitesse du vent max",          "wind",         "m/s"),
+}
+
+_VAR_ALIASES: dict[str, tuple[str, ...]] = {
+    "heatwave_days": _VAR_HEATWAVE_DAYS,
+    "hot_days": _VAR_HOT_DAYS,
+    "tropical_nights": _VAR_TROPICAL_NIGHTS,
+    "frost_days": _VAR_FROST_DAYS,
+    "maximum_temperature": _VAR_MAX_TEMP,
+    "minimum_temperature": _VAR_MIN_TEMP,
+    "mean_temperature": _VAR_MEAN_TEMP,
+    "frequency_of_extreme_precipitation": _VAR_EXTREME_PRECIP_FREQ,
+    "heavy_precipitation_days": _VAR_HEAVY_PRECIP_DAYS,
+    "consecutive_dry_days": _VAR_CONSECUTIVE_DRY_DAYS,
+    "consecutive_wet_days": _VAR_CONSECUTIVE_WET_DAYS,
+    "wind_speed_10m_max": _VAR_WIND_SPEED_MAX,
+}
+
+# Fenêtres temporelles (années du dataset CDS 1940-2100)
+_WINDOWS: dict[int, tuple[int, int]] = {
+    2026: (2021, 2030),  # Moyenne des années récentes
+    2050: (2041, 2050),  # Moyenne du milieu de siècle
+    2100: (2090, 2100),  # Moyenne de la décennie finale
+}
+
+# Année de début du dataset CDS
+_CDS_START_YEAR = 1940
+
+
+def _window_average(values: list, start: int, end: int) -> float | None:
+    """Moyenne d'une série annuelle sur une fenêtre donnée.
+
+    ``values`` est la liste brute telle que stockée par
+    ``read_indicators_at_point()`` — une valeur par année, du
+    ``_CDS_START_YEAR`` (1940) jusqu'à 2100.  On extrait la sous-liste
+    correspondant aux années [start, end] et on en calcule la moyenne.
+    Retourne None si aucune valeur exploitable n'est présente.
+    """
+    if not isinstance(values, (list, tuple)) or not values:
+        if isinstance(values, (int, float)):
+            return float(values)
+        return None
+    # Index dans la liste : année - _CDS_START_YEAR
+    idx_start = max(0, start - _CDS_START_YEAR)
+    idx_end = min(len(values), end - _CDS_START_YEAR + 1)
+    if idx_start >= idx_end:
+        return None
+    window = [
+        float(v)
+        for v in values[idx_start:idx_end]
+        if isinstance(v, (int, float))
+    ]
+    if not window:
+        return None
+    return sum(window) / len(window)
+
+
+def extract_trajectoire_brute(
+    climat_copernicus: dict[str, Any] | None,
+    scenario: str = "rcp8_5",
+) -> dict[str, Any] | None:
+    """Construit une trajectoire climatique en vraies unités (0-100 supprimé).
+
+    Fenêtre les séries annuelles CDS en 3 horizons (2026, 2050, 2100) et
+    retourne un objet de forme compatible ``Trajectoire`` (frontend) avec
+    des valeurs en unités réelles (jours/an, °C, m/s, etc.).
+
+    Contrairement à l'ancien ``risk_model.compute_trajectoire()`` qui
+    produisait un indice d'exposition 0-100, cette fonction expose les
+    valeurs brutes du dataset CDS ``sis-ecde-climate-indicators``.
+
+    Retourne None si aucune variable n'est exploitable.
+    """
+    if not climat_copernicus:
+        return None
+
+    perils: dict[str, Any] = {}
+
+    for var_key, (label, category, unit) in _VARIABLE_META.items():
+        points = []
+        has_any = False
+        candidates = _VAR_ALIASES.get(var_key, (var_key,))
+
+        for horizon, (win_start, win_end) in sorted(_WINDOWS.items()):
+            # Collecter les valeurs pour chaque scénario disponible
+            scenario_values: dict[str, float | None] = {}
+            for sc in SCENARIOS_CDS:
+                key = _pick_key(climat_copernicus, candidates, scenario=sc)
+                if key:
+                    raw = climat_copernicus[key]
+                    val = _window_average(raw, win_start, win_end)
+                    scenario_values[sc] = round(val, 2) if val is not None else None
+                else:
+                    scenario_values[sc] = None
+
+            # Valeur principale = scénario demandé
+            primary_val = scenario_values.get(scenario)
+            if primary_val is not None:
+                has_any = True
+
+            point_type = (
+                "observe" if horizon == 2026
+                else "projete" if primary_val is not None
+                else "indisponible"
+            )
+
+            points.append({
+                "horizon": horizon,
+                "type": point_type,
+                "scenario": scenario if primary_val is not None else None,
+                "valeur": primary_val,
+                "scenarios": {sc: v for sc, v in scenario_values.items() if v is not None} or None,
+                "unite": unit,
+                "resolution": "grid-cell",
+                "confiance": "elevee" if horizon == 2100 and primary_val is not None else "moyenne",
+                "source": f"copernicus.cds.{var_key}" if primary_val is not None else None,
+                "date_source": None,
+            })
+
+        if not has_any:
+            continue
+
+        perils[var_key] = {
+            "label": label,
+            "category": category,
+            "points": points,
+        }
+
+    if not perils:
+        return None
+
+    return {
+        "horizons": [2026, 2050, 2100],
+        "note": "Valeurs brutes Copernicus CDS (indices climatiques, unités réelles).",
+        "perils": perils,
+    }

@@ -1,13 +1,9 @@
 """
-TyphoonState — etat partage entre les noeuds du StateGraph LangGraph (cf.
-README racine, section "Architecture multi-agents" : "Les agents
-communiquent exclusivement via un etat partage").
+TyphoonState — état simplifié pour la collecte de données brutes.
 
-Un TypedDict (pas un modele Pydantic strict), pour la meme raison que
-`schemas/building_data.py` : chaque noeud n'ecrit qu'un sous-ensemble de
-cles, et on ne veut pas qu'une validation stricte sur l'etat intermediaire
-fasse echouer le graphe avant meme d'avoir atteint le noeud qui produit le
-champ manquant.
+Plus de StateGraph LangGraph — le collector est appelé directement
+par la route API. Ce module est conservé pour la rétrocompatibilité
+et la clarté du contrat de sortie.
 """
 
 from __future__ import annotations
@@ -16,24 +12,10 @@ from typing import Any, TypedDict
 
 
 class TyphoonState(TypedDict, total=False):
-    # Entree
+    # Entrée
     adresse: str
     formulaire: dict[str, Any] | None
-    copernicus: bool  # True = activer Copernicus (CDS), False = desactive, champs null
+    copernicus: bool  # True = activer Copernicus (CDS), False = désactivé, champs null
 
-    # Ecrit par collector_agent
+    # Écrit par collector_agent
     building_data: dict[str, Any]
-
-    # Ecrit par scoring_agent
-    risk_scores: dict[str, Any]
-
-    # Ecrit par interpretation_agent
-    interpretations: dict[str, Any]
-
-    # Ecrit par interpretation_agent : top 3 des risques principaux
-    # (scores deterministes + narration LLM), cf. app/agents/risques_principaux.py
-    risques_principaux: dict[str, Any]
-
-    # Ecrit par digital_twin_agent (sortie finale, cf. contrat "Jumeau
-    # numerique 3D" du README)
-    digital_twin: dict[str, Any]

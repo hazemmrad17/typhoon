@@ -18,6 +18,10 @@ backend/data/lookup/dvf/
 .env
 backend/.env
 *.env
+# Toute variante/copie locale (.env.real2, .env.bak, .env.local…). Le
+# pattern *.env ne couvre pas `.env.real2` : une copie réelle de clés a
+# failli partir en commit — ne jamais committer ces fichiers.
+.env.*
 # Explorateur Windows ajoute parfois .txt en enregistrant un .env : deja
 # arrive deux fois sur ce projet (backend/.env puis ce dossier-ci).
 *.env.txt
@@ -34,7 +38,8 @@ Thumbs.db
 
 .freebuff/
 
-# R\u00e9f\u00e9rence design / artefacts hors d\u00e9p\u00f4t (Nolla, EVpin, builds)
+# Référence design / artefacts hors dépôt (Nolla, EVpin, builds)
+frontend/public/_assets/
 nollahealth-clone/
 evpin-clone/
 frontend/dist/

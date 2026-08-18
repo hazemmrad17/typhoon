@@ -25,13 +25,9 @@ ROOT_DIR = BASE_DIR.parent
 
 
 class Settings(BaseSettings):
-    # Chemins absolus : la configuration reste identique que Uvicorn soit lancé
-    # depuis la racine du dépôt ou depuis le dossier backend. Deux .env sont
-    # lus — backend/.env puis <racine>/.env, le dernier ayant priorité : les
-    # postes qui ne renseignent que backend/.env (cas courant) fonctionnent,
-    # sans changer la précédence documentée du .env racine.
+    # Un seul .env à la racine du projet (pas de backend/.env).
     model_config = SettingsConfigDict(
-        env_file=(BASE_DIR / ".env", ROOT_DIR / ".env"), extra="ignore"
+        env_file=(ROOT_DIR / ".env",), extra="ignore"
     )
 
     # BDNB (aucune cle necessaire, confirme par un test reel - voir le guide)
@@ -64,31 +60,6 @@ class Settings(BaseSettings):
     # avant chaque appel cdsapi (qui, lui, lit os.environ ou ~/.cdsapirc).
     cdsapi_url: str = ""
     cdsapi_key: str = ""
-
-    # Lookup local DVF - meme logique de chemin absolu. Les CSV par
-    # departement (voir backend/data/lookup/dvf/README.md) ne sont pas
-    # versionnes dans le repo et pesent lourd : chaque poste doit les
-    # telecharger localement. Ce flag permet de desactiver DVF en un
-    # instant sur un poste qui ne les a pas encore (evite de voir
-    # "dvf_local" en erreur sur chaque diagnostic), sans toucher au code.
-    # --- CHANGEZ ICI --- passez a False si les CSV ne sont pas presents
-    # sur ce poste. Vous pouvez aussi le definir via DVF_ENABLED=false
-    # dans .env (pratique pour ne pas modifier ce fichier vous-meme et
-    # eviter les allers-retours si plusieurs personnes partagent le repo).
-    dvf_enabled: bool = False
-    dvf_lookup_dir: str = str(BASE_DIR / "data" / "lookup" / "dvf")
-
-    # Mistral (agent recommandations — RAG travaux, cf.
-    # app/recommandations/ et backend/recommendation_travaux-main/)
-    mistral_api_key: str | None = None
-
-    # Annonces immobilieres "en vente" (carte zone, marqueurs colores par
-    # score climatique - cf. app/connectors/annonces_lookup.py). Source :
-    # backend/data/annonces_maisons_france.csv, une base constituee a la
-    # main par l'utilisateur (liens PAP.fr reels) - gratuit, pas d'appel
-    # reseau. Aucune option RapidAPI ici : un essai reel a facture des la
-    # premiere requete meme avec une cle valide, ce chemin a ete retire du
-    # code entierement plutot que juste desactive.
 
     # CORS — origines autorisées, séparées par des virgules. Par défaut,
     # seulement le frontend Vite en dev local (port 5173) : un joker "*"

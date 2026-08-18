@@ -1,0 +1,15 @@
+# Ruff — backend Typhon.
+# Sélection volontairement minimale : les règles qui attrapent de VRAIS bugs
+# (noms non définis, imports/variables inutilisés, except nu, erreurs de
+# syntaxe) — pas le style. Le codebase utilise %-format, des except
+# Exception en fail-soft, etc. : ouvrir la sélection (UP, SIM, BLE…) est un
+# chantier à part entière, pas un pré-requis de CI.
+# Voir `ruff rule` pour le détail de chaque code.
+
+exclude = ["out", ".pytest_cache", "venv"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+# E701/E702 (plusieurs instructions sur une ligne) : style assumé du
+# codebase (ex. `if x: return y` dans georisques.py, gltf_builder.py).
+ignore = ["E701", "E702"]

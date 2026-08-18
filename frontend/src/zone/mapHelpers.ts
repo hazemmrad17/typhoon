@@ -333,8 +333,12 @@ export function gmlToGeoJson(xmlText: string): GeoJSON.FeatureCollection | null 
 
 /** Bbox [west, south, east, north] (degrés WGS84) centrée sur un point, avec
  *  une marge fixe — utilisée pour restreindre les requêtes WFS au voisinage
- *  de l'adresse diagnostiquée. */
-export function bboxAround(lon: number, lat: number, marginDeg = 0.012): [number, number, number, number] {
+ *  de l'adresse diagnostiquée. Marge 0.05° (≈ 5,5 km) : les couches vecteur
+ *  Géorisques (périmètres PPR, canalisations) couvrent souvent plus large que
+ *  le voisinage immédiat de l'adresse — une marge de 0.012° ne ramenait
+ *  aucune feature pour ces couches (vérifié en direct sur le service), et la
+ *  couche retombait sur le raster WMS ou rien. */
+export function bboxAround(lon: number, lat: number, marginDeg = 0.05): [number, number, number, number] {
   return [lon - marginDeg, lat - marginDeg, lon + marginDeg, lat + marginDeg];
 }
 

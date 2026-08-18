@@ -113,11 +113,19 @@ export function putCachedDiagnostic(
       : null;
   const existingRapportAt =
     existingRapport && existing ? (existing.rapportAt ?? null) : null;
+  // La trajectoire climatique est rattachée PLUS TARD (réponse asynchrone
+  // /diagnostic/fast → putCachedTrajectoire) : on la conserve telle quelle.
+  // Sans ça, un re-diagnostic ou un rafraîchissement effaçait la trajectoire
+  // de l'entrée cachée jusqu'à la prochaine réponse fast — et si celle-ci
+  // échoue (backend momentanément injoignable), l'onglet « Projection
+  // climatique » restait vide à jamais pour une adresse servie du cache.
+  const existingTrajectoire = existing?.trajectoire ?? undefined;
   saveCache([
     {
       key,
       report,
       rapport: rapport ?? existingRapport,
+      trajectoire: existingTrajectoire,
       createdAt: Date.now(),
       rapportAt: rapport ? Date.now() : existingRapportAt,
       rapportVersion: rapport ? RAPPORT_VERSION : (existingRapport ? RAPPORT_VERSION : null),

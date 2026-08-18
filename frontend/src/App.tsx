@@ -1,16 +1,48 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { Home } from './routes/Home';
 import { StaticPage } from './routes/StaticPage';
-import { Zone } from './routes/Zone';
 import { Faq } from './routes/Faq';
 import { Contact } from './routes/Contact';
-import { AccountSettings } from './routes/AccountSettings';
-import { Portfolio } from './routes/Portfolio';
-import { WatchlistPage } from './routes/WatchlistPage';
-import { Dashboard } from './routes/Dashboard';
-import { Login } from './routes/Login';
 import { useAuth } from './typhoon/auth';
+
+// Routes lourdes chargées paresseusement : Zone embarque la carte
+// (mapbox-gl + maplibre + ol) et Portfolio la réutilise — rester en import
+// statique mettrait ~2,5 Mo (mapbox/maplibre/ol) dans le chunk initial, qui
+// ne sert que la landing. React.lazy découpe un chunk par route ; le
+// navigateur ne télécharge les libs de carte qu'à l'arrivée sur /zone ou
+// /portfolio. Les routes sont des exports nommés, d'où le mapping .then().
+// Login est public mais rare (l'app démarre en mode démo ou déjà connectée) :
+// le charger paresseusement retire @supabase/supabase-js + le formulaire du
+// chunk initial (le client Supabase lui-même reste créé par AuthProvider).
+const Login = lazy(() => import('./routes/Login').then((m) => ({ default: m.Login })));
+const Zone = lazy(() => import('./routes/Zone').then((m) => ({ default: m.Zone })));
+const AccountSettings = lazy(() =>
+  import('./routes/AccountSettings').then((m) => ({ default: m.AccountSettings }))
+);
+const Portfolio = lazy(() =>
+  import('./routes/Portfolio').then((m) => ({ default: m.Portfolio }))
+);
+const WatchlistPage = lazy(() =>
+  import('./routes/WatchlistPage').then((m) => ({ default: m.WatchlistPage }))
+);
+const Dashboard = lazy(() =>
+  import('./routes/Dashboard').then((m) => ({ default: m.Dashboard }))
+);
+
+/**
+ * Filet de chargement pendant le téléchargement d'un chunk de route
+ * (même style que le garde d'auth : spinner centré, pas de flash de layout).
+ */
+function RouteFallback() {
+  return (
+    <div className="auth-gate-loading" role="status">
+      <md-circular-progress indeterminate />
+      <span>Chargement…</span>
+    </div>
+  );
+}
 
 /**
  * Garde d'authentification : redirige vers /login (en mémorisant la page
@@ -54,7 +86,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
  */
 export default function App() {
   return (
-    <Routes>
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/faq" element={<Faq />} />
@@ -123,6 +156,7 @@ export default function App() {
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }

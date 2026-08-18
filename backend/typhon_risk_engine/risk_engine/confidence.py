@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .canonical import Status, VariableBag
+from .canonical import VariableBag
 
 EVIDENCE_SCORE = {"high": 1.0, "medium": 0.6, "low": 0.3}
 

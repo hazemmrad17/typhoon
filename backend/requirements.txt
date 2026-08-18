@@ -1,47 +1,25 @@
-# --- Backend / orchestrateur ---
+# --- Backend / FastAPI ---
 fastapi
 uvicorn[standard]
 pydantic>=2
 pydantic-settings
 
-# --- Orchestration multi-agents (prochaine etape) ---
-langgraph
-langchain
-langchain-anthropic
-langchain-community
-
 # --- Appels API / HTTP ---
 httpx
 requests
 
-# --- Géométries (reprojection BDNB Lambert-93 → WGS84 pour MapLibre) ---
+# --- Géométries (reprojection BDNB Lambert-93 → WGS84) ---
 pyproj
-laspy>=2.5
-lazrs>=0.5
-
-# --- Lookup local DVF ---
-pandas
 
 # --- Copernicus Climate Data Store (projections climatiques) ---
 cdsapi
 xarray
 netCDF4
 
-# --- RAG (prochaine etape) ---
-chromadb
-
-# --- Agent recommandations (RAG travaux, cf. app/recommandations/) ---
-# SDK 2.x : client sync importé depuis mistralai.client (voir mistral_client.py).
-mistralai>=2.0.0,<3.0.0
-numpy>=1.26.0
-
 # --- Divers ---
 python-dotenv
-sqlalchemy
 
-# --- Tests ---
+# --- Tests / lint ---
 pytest
 pytest-asyncio
-scipy>=1.16
-pillow>=11.0
-trimesh>=4.0
+ruff

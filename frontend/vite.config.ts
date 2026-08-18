@@ -78,7 +78,7 @@ function nextImagePlugin(): Plugin {
   return {
     name: 'typhoon-next-image-static',
     configureServer(server) {
-      server.middlewares.use('/_next/image', (req, res, next) => {
+      server.middlewares.use('/_next/image', (req, res, _next) => {
         const url = new URL(req.url || '/', 'http://localhost');
         const target = url.searchParams.get('url');
         if (!target) {
@@ -213,5 +213,36 @@ export default defineConfig({
   envDir: '..',
   server: {
     port: 5173,
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // Chunk initial < 500 kB : les gros vendors stables (react-dom,
+        // material-web, supabase) sont isolés dans des chunks dédiés —
+        // cache navigateur pérenne (ils changent rarement) et la landing
+        // n'a plus à télécharger les bibliothèques de carte (déjà
+        // lazy-loadées via React.lazy dans App.tsx). Les libs non listées
+        // gardent le comportement par défaut de Rollup (undefined).
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@material/web')) return 'material-web';
+          if (id.includes('@supabase')) return 'supabase';
+          if (id.includes('react') || id.includes('scheduler')) return 'vendor-react';
+          if (id.includes('mapbox-gl')) return 'mapbox';
+          if (id.includes('maplibre-gl')) return 'maplibre';
+          if (id.includes('/ol/')) return 'openlayers';
+          if (
+            id.includes('jspdf') ||
+            id.includes('html2canvas') ||
+            id.includes('dompurify') ||
+            id.includes('canvg') ||
+            id.includes('html2canvas-pro')
+          ) {
+            return 'pdf-vendor';
+          }
+          return undefined;
+        },
+      },
+    },
   },
 });
