@@ -18,12 +18,12 @@ def _make_annual_series(
     base_value: float = 10.0,
     trend: float = 0.1,
 ) -> list[float]:
-    """Génère une série annuelle fictive 1940-2100 (161 valeurs).
+    """Génère une série annuelle fictive 1951-2100 (150 valeurs).
 
-    La valeur pour l'année Y est base_value + trend * (Y - 1940).
+    La valeur pour l'année Y est base_value + trend * (Y - 1951).
     Cela simule une tendance croissante réaliste.
     """
-    return [base_value + trend * (y - 1940) for y in range(1940, 2101)]
+    return [base_value + trend * (y - 1951) for y in range(1951, 2101)]
 
 
 def _climat_copernicus_factice(
@@ -71,13 +71,13 @@ def test_extract_trajectoire_brute_windows_average():
     """Les fenêtres temporelles calculent correctement les moyennes."""
     # Série avec des valeurs connues par décennie
     # 2021-2030: 20.0, 2041-2050: 40.0, 2090-2100: 80.0
-    values = [0.0] * 161  # 1940-2100
+    values = [0.0] * 150  # 1951-2100
     for y in range(2021, 2031):
-        values[y - 1940] = 20.0
+        values[y - 1951] = 20.0
     for y in range(2041, 2051):
-        values[y - 1940] = 40.0
+        values[y - 1951] = 40.0
     for y in range(2090, 2101):
-        values[y - 1940] = 80.0
+        values[y - 1951] = 80.0
 
     stem = "test-rcp8_5-wrf381p"
     climat = {f"{stem}__heatwave_days": values}

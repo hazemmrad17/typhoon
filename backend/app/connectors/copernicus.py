@@ -694,8 +694,8 @@ _WINDOWS: dict[int, tuple[int, int]] = {
     2100: (2090, 2100),  # Moyenne de la décennie finale
 }
 
-# Année de début du dataset CDS
-_CDS_START_YEAR = 1940
+# Année de début du dataset CDS (1951-2100, 150 années)
+_CDS_START_YEAR = 1951
 
 
 def _window_average(values: list, start: int, end: int) -> float | None:
