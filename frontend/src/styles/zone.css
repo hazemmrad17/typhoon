@@ -1743,7 +1743,8 @@
 .zone-panel-body > .zone-results,
 .zone-panel-body > .gr-panel,
 .zone-panel-body > .gr-empty,
-.zone-panel-body > .cop-panel {
+.zone-panel-body > .cop-panel,
+.zone-panel-body > .cd-panel {
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;

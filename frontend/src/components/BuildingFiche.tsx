@@ -652,7 +652,7 @@ function PerformancesSection({ b }: { b: BdnbBatiment }) {
 
 function RisquesSection({
   b,
-  risques,
+  risques: _risques,
 }: {
   b: BdnbBatiment;
   risques?: BatimentRisques | null;

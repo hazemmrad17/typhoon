@@ -176,13 +176,16 @@ def _request_signature() -> str:
 
 
 def _marker_valid(marker: Path) -> bool:
-    """Le marqueur existe ET le cache est valide (ou contient des fichiers .nc)."""
+    """Le marqueur existe ET le cache est valide (empreinte de requête concordante)."""
     if not marker.exists():
         return False
     try:
         content = marker.read_text(encoding="utf-8").strip()
-        return content.startswith("ok:")
-    except OSError:
+        if not content.startswith("ok:"):
+            return False
+        _, hash_val = content.split(":", 1)
+        return hash_val == _request_signature()
+    except (OSError, ValueError):
         return False
 
 

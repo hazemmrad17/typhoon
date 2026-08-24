@@ -20,7 +20,7 @@ def test_health_detailed_reports_dependency_config():
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    for dep in ("mistral", "copernicus", "dvf", "bdnb", "georisques"):
+    for dep in ("copernicus", "bdnb", "georisques"):
         assert dep in body["dependencies"]
     assert "cors_allowed_origins" in body
     assert "rate_limit" in body

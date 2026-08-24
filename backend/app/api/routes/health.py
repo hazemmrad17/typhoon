@@ -26,18 +26,10 @@ def health_detailed() -> dict:
     return {
         "status": "ok",
         "dependencies": {
-            "mistral": {
-                "configured": bool(settings.mistral_api_key),
-                "note": "Recommandations narratives (rapport, chat) indisponibles sans clé.",
-            },
             "copernicus": {
                 "enabled": settings.copernicus_enabled,
                 "configured": bool(settings.cdsapi_url and settings.cdsapi_key),
                 "note": "Projections 2100 indisponibles si désactivé ou non configuré (repli honnête, pas d'erreur).",
-            },
-            "dvf": {
-                "enabled": settings.dvf_enabled,
-                "note": "Valeurs foncières locales — désactivé si les CSV ne sont pas présents sur ce poste.",
             },
             "bdnb": {"configured": True, "note": "API publique, aucune clé requise."},
             "georisques": {"configured": True, "note": "API publique, aucune clé requise."},

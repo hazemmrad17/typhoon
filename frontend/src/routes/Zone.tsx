@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { UnifiedMap } from '../components/UnifiedMap';
+import { WeatherForecastMap } from '../components/WeatherForecastMap';
 import { BuildingFiche } from '../components/BuildingFiche';
 import { ZoneRecommendations } from '../components/ZoneRecommendations';
 import { ZoneArtisans } from '../components/ZoneArtisans';
@@ -22,7 +23,7 @@ import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
 import { useAuth } from '../typhoon/auth';
-import { CopernicusPanel } from '../components/CopernicusPanel';
+import { ClimateDashboard } from '../components/ClimateDashboard';
 import {
   loadCatNatLatest,
   recordCatNatLatest,
@@ -55,7 +56,8 @@ import {
   putCachedTrajectoire,
 } from '../zone/diagnosticCache';
 import '../styles/zone.css';
-import '../styles/copernicus.css';
+import '../styles/climate-dashboard.css';
+import '../styles/weather-map.css';
 
 
 /* ── Multi-profils (Phase A) : ordre du stepper par profil.
@@ -73,7 +75,7 @@ const STEP_LABELS: Record<string, string> = {
   carto: 'Cartographie',
   decision: 'Synthèse',
   analyse: 'Bien & contexte',
-  copernicus: 'Projection climatique',
+  copernicus: 'État climatique',
   recommandations: 'Recommandations',
   artisans: 'Artisans',
   rapport: 'Rapport IA',
@@ -769,7 +771,7 @@ export function Zone() {
                     currentStepId === 'analyse' ? (
                       <BuildingFiche report={report} risques={batimentRisques} />
                     ) : currentStepId === 'copernicus' ? (
-                      <CopernicusPanel trajectoire={trajectoire} />
+                      <ClimateDashboard lat={report.lat} lon={report.lon} report={report} />
                     ) : currentStepId === 'decision' || currentStepId === 'carto' ? (
                   <section className="zone-results">
                     <div className="addr-heading">
@@ -907,20 +909,28 @@ export function Zone() {
                     <md-icon>chevron_right</md-icon>
                   </md-icon-button>
                 )}
-                <UnifiedMap
-                  report={report}
-                  visibleLayerKeys={visibleLayerKeys}
-                  batimentRisques={batimentRisques}
-                  showRisks={currentStepId === 'carto' || currentStepId === 'decision'}
-                  allowParcels={currentStepId === 'analyse'}
-                  /* Parcelles ON + éclairage « jour » à l'arrivée sur « Bien &
-                     contexte » ; Parcelles OFF dès qu'on passe à « Synthèse »
-                     (et aux étapes suivantes). */
-                  defaultParcels={currentStepId === 'analyse'}
-                  defaultLightPreset={currentStepId === 'analyse' ? 'day' : undefined}
-                  buildingsLimit={currentStepId === 'carto' || currentStepId === 'decision' ? 500 : 200}
-                  fitZoom={16.5}
-                />
+                {currentStepId === 'copernicus' ? (
+                  <WeatherForecastMap
+                    lat={report?.lat ?? 48.8566}
+                    lon={report?.lon ?? 2.3522}
+                    data={null}
+                  />
+                ) : (
+                  <UnifiedMap
+                    report={report}
+                    visibleLayerKeys={visibleLayerKeys}
+                    batimentRisques={batimentRisques}
+                    showRisks={currentStepId === 'carto' || currentStepId === 'decision'}
+                    allowParcels={currentStepId === 'analyse'}
+                    /* Parcelles ON + éclairage « jour » à l'arrivée sur « Bien &
+                       contexte » ; Parcelles OFF dès qu'on passe à « Synthèse »
+                       (et aux étapes suivantes). */
+                    defaultParcels={currentStepId === 'analyse'}
+                    defaultLightPreset={currentStepId === 'analyse' ? 'day' : undefined}
+                    buildingsLimit={currentStepId === 'carto' || currentStepId === 'decision' ? 500 : 200}
+                    fitZoom={16.5}
+                  />
+                )}
               </section>
             </div>
 

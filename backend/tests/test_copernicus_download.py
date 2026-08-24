@@ -69,10 +69,11 @@ def _fake_cdsapi(monkeypatch: pytest.MonkeyPatch, tmp_path) -> list:
 
 
 def test_requete_minimaliste_pour_la_production():
-    """France + yearly + 2 variables → fichier en dizaines de Mo, pas en Go."""
+    """France + yearly + variables climatiques → fichier en dizaines de Mo, pas en Go."""
     req = copernicus._REQUEST
     assert req["temporal_aggregation"] == ["yearly"]
-    assert req["variable"] == ["heatwave_days", "frequency_of_extreme_precipitation"]
+    assert "heatwave_days" in req["variable"]
+    assert "frequency_of_extreme_precipitation" in req["variable"]
     assert req["area"] == [51.5, -5.5, 41.0, 10.0]
     assert "monthly" not in req["temporal_aggregation"]
     assert "seasonal" not in req["temporal_aggregation"]

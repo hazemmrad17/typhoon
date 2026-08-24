@@ -1,0 +1,148 @@
+/* =============================================================================
+   TYPHOON — WeatherForecastMap — Carte des prévisions météo
+   Design tokens M3 du thème .zone-app.
+   ============================================================================= */
+
+.weather-map-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Variable selector ── */
+
+.weather-var-selector {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--md-sys-color-surface-container);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.weather-var-selector::-webkit-scrollbar {
+  display: none;
+}
+
+.weather-var-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 99px;
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.weather-var-btn:hover {
+  background: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline);
+}
+
+.weather-var-btn.active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: var(--md-sys-color-primary);
+}
+
+.weather-var-btn md-icon {
+  font-size: 16px;
+}
+
+/* ── Map canvas ── */
+
+.weather-map-canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Legend ── */
+
+.weather-legend {
+  position: absolute;
+  bottom: 40px;
+  left: 12px;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 12px;
+  padding: 8px 12px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.weather-legend-title {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.weather-legend-scale {
+  display: flex;
+  gap: 4px;
+}
+
+.weather-legend-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.weather-legend-color {
+  width: 16px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.weather-legend-item span {
+  font-size: 0.58rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Source info ── */
+
+.weather-map-source {
+  position: absolute;
+  top: 10px;
+  right: 50px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  font-size: 0.65rem;
+  color: var(--md-sys-color-on-surface-variant);
+  z-index: 10;
+}
+
+.weather-map-source md-icon {
+  font-size: 14px;
+}
+
+/* ── Popup overrides ── */
+
+.mapboxgl-popup-content {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
+}
+
+.mapboxgl-popup-tip {
+  border-top-color: var(--md-sys-color-surface-container-high) !important;
+}

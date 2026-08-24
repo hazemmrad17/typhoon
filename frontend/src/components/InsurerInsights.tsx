@@ -13,14 +13,10 @@
 // =============================================================================
 
 import { useState } from 'react';
-import type { CSSProperties } from 'react';
 import {
-  D03,
   bandForKey,
-  aleaScore,
   type AleaDetail,
   type Trajectoire,
-  type TrajectoirePeril,
 } from '../zone/config';
 
 /* ── Types ── */
@@ -440,8 +436,8 @@ function DamagePotential({ zones, bdnb }: {
 export function InsurerInsights({
   riskScores,
   buildingData,
-  trajectoire,
-  aleas,
+  trajectoire: _trajectoire,
+  aleas: _aleas,
 }: {
   riskScores: RiskScores;
   buildingData: BuildingData;

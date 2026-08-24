@@ -207,6 +207,105 @@ export interface RecommandationsIA {
 }
 
 // ---------------------------------------------------------------------------
+// Données climatiques opérationnelles (GET /api/climate)
+// Sources : Open-Meteo (GloFAS v4, FWI) + ERA5-Land (CDS)
+// ---------------------------------------------------------------------------
+
+export interface FloodRisk {
+  current_discharge_m3s: number | null;
+  percentile: number;
+  return_period: string;
+  risk_level: string;
+  risk_label: string;
+  risk_color: string;
+  mean_discharge_m3s: number;
+  min_discharge_m3s: number;
+  max_discharge_m3s: number;
+  forecast_30day: { date: string; discharge_m3s: number }[];
+  source: string;
+  unit: string;
+}
+
+export interface FireDanger {
+  current_fwi: number;
+  risk_level: string;
+  risk_label: string;
+  risk_color: string;
+  avg_fwi_92d: number;
+  max_fwi_92d: number;
+  forecast_16day: { date: string; fwi: number; level: string; label: string; color: string }[];
+  source: string;
+  unit: string;
+}
+
+export interface SoilMoisture {
+  current_value: number;
+  unit: string;
+  source: string;
+  status: string;
+  risk_label?: string;
+  risk_color?: string;
+  avg_value_30d?: number;
+  monthly_series?: { date: string; value: number; unit: string }[];
+}
+
+export interface HeatStress {
+  current_hi: number;
+  current_temp: number;
+  current_rh: number;
+  risk_level: string;
+  risk_label: string;
+  risk_color: string;
+  avg_hi_92d: number;
+  max_hi_92d: number;
+  hot_days_92d: number;
+  danger_days_92d: number;
+  forecast_16day: { date: string; hi: number; temp_max: number; rh_min: number; level: string; label: string; color: string }[];
+  source: string;
+  unit: string;
+}
+
+export interface WindRisk {
+  current_speed: number;
+  current_gusts: number;
+  risk_level: string;
+  risk_label: string;
+  risk_color: string;
+  avg_speed_92d: number;
+  max_speed_92d: number;
+  storm_days_92d: number;
+  strong_days_92d: number;
+  forecast_16day: { date: string; speed: number; gusts: number; level: string; label: string; color: string }[];
+  source: string;
+  unit: string;
+}
+
+export interface SeasonalForecast {
+  months: { month: string; month_name: string; avg_temp: number | null; total_precip: number | null }[];
+  temp_anomaly: number;
+  precip_anomaly: number;
+  temp_range: { min: number | null; max: number | null; avg: number | null };
+  precip_range: { min: number | null; max: number | null; total: number | null };
+  source: string;
+  ensemble_members: number;
+}
+
+export interface ClimateData {
+  lat: number;
+  lon: number;
+  flood: FloodRisk | null;
+  fire_danger: FireDanger | null;
+  soil_moisture: SoilMoisture | null;
+  heat_stress: HeatStress | null;
+  wind_risk: WindRisk | null;
+  seasonal: SeasonalForecast | null;
+  metadata: {
+    elapsed_ms: number;
+    sources: Record<string, string>;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Risques principaux (panneau « Comprendre les risques »)
 // Contrat backend app/agents/risques_principaux.py — top 3 par aléa, scores
 // déterministes du moteur (F×V) + narration LLM (explication, facteurs

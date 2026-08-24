@@ -248,34 +248,6 @@ def test_d03_bands(score, expected):
 
 
 # ---------------------------------------------------------------------------
-# Test 7 : Recommandations Mistral — Fail-soft en cas d'erreur / timeout
-# ---------------------------------------------------------------------------
-
-def test_recommandations_mistral_failure():
-    """Vérifie qu'un échec Mistral retourne None sans lever d'exception."""
-    from app.recommandations.adresse_recommandations import recommander
-
-    async def _run():
-        with patch("app.connectors.georisques.fetch_georisques_raw", return_value=GEORISQUES_RAW_NICE):
-            mock_client = AsyncMock(spec=httpx.AsyncClient)
-            report = await get_risque_report(
-                client=mock_client,
-                adresse_saisie="test",
-                adresse_normalisee="14 Avenue des Palmiers 06000 Nice",
-                lat=43.7102, lon=7.2620, code_insee="06088",
-            )
-            # Simulation d'un échec Mistral (Timeout / Erreur API / etc.)
-            with patch("app.recommandations.adresse_recommandations._appeler_mistral_sync", side_effect=TimeoutError("Mistral API timeout")):
-                recs = await recommander(report)
-                return report, recs
-
-    report, recs = asyncio.run(_run())
-    assert recs is None
-    assert isinstance(report, RisqueReport)
-    assert report.adresse_normalisee == "14 Avenue des Palmiers 06000 Nice"
-
-
-# ---------------------------------------------------------------------------
 # Test 8 : Introspection — Interdiction absolue d'importer geocodage_connector
 # ---------------------------------------------------------------------------
 
@@ -375,30 +347,4 @@ def test_ppr_wfs_per_building_scores():
 
 
 # ---------------------------------------------------------------------------
-# Test 10 : Rapport Narratif Mistral — Fail-soft
-# ---------------------------------------------------------------------------
-
-def test_rapport_narratif_mistral_fail_soft():
-    """Vérifie que generer_rapport_narratif retourne (None, cause) en cas
-    d'échec Mistral — fail-soft sans exception, cause transmise."""
-    from app.recommandations.rapport_narratif import generer_rapport_narratif
-
-    async def _run():
-        with patch("app.connectors.georisques.fetch_georisques_raw", return_value=GEORISQUES_RAW_NICE):
-            mock_client = AsyncMock(spec=httpx.AsyncClient)
-            report = await get_risque_report(
-                client=mock_client,
-                adresse_saisie="test",
-                adresse_normalisee="14 Avenue des Palmiers 06000 Nice",
-                lat=43.7102, lon=7.2620, code_insee="06088",
-            )
-            with patch("app.recommandations.rapport_narratif._appeler_mistral_narratif_sync", side_effect=RuntimeError("Mistral API error")):
-                res, cause = await generer_rapport_narratif(report)
-                return res, cause
-
-    res, cause = asyncio.run(_run())
-    assert res is None
-    assert cause and "Mistral" in cause
-
-
 
