@@ -89,7 +89,7 @@ def counters(monkeypatch):
         c.georisques += 1
         return _raw_georisques()
 
-    async def fake_bdnb(client, address):
+    async def fake_bdnb(client, address, label_ban=""):
         c.bdnb += 1
         return dict(BDNB_FICHE)
 
@@ -179,7 +179,7 @@ def test_wfs_down_yields_null_present_without_per_building(monkeypatch, counters
 
 
 def test_bdnb_failure_partial_record(counters, monkeypatch):
-    async def failing_bdnb(client, address):
+    async def failing_bdnb(client, address, label_ban=""):
         counters.bdnb += 1
         raise httpx.ConnectTimeout("boom")
 
