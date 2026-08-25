@@ -31,18 +31,17 @@ def test_consume_beyond_budget_refused(monkeypatch):
 
 def test_month_rollover_resets(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.bdnb_monthly_budget", 3)
-    budget.reset("2026-07")
+    monkeypatch.setattr(budget, "_current_month", lambda: "2026-07")
+    budget.reset()
     budget.consume(3)
-    # changement de mois détecté au prochain accès
+    # le mois bascule : le prochain accès réinitialise l'état
+    monkeypatch.setattr(budget, "_current_month", lambda: "2026-08")
     assert budget.remaining(3) == 3
     assert budget.consumed() == 0
 
 
-def test_batch_rejected_when_budget_exhausted_single_unaffected(
-    monkeypatch, counters
-):
-    """counters = fixture de test_result_cache ; on la réimporte ici pour
-    mocker les sources. Budget épuisé -> lot refusé, unitaire passe."""
+def test_batch_rejected_when_budget_exhausted_single_unaffected(monkeypatch):
+    """Budget épuisé -> lot refusé 429 ; la requête unitaire passe."""
     from app.connectors.geocoding import GeocodeResult
 
     monkeypatch.setattr("app.core.config.settings.bdnb_monthly_budget", 0)

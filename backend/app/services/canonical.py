@@ -43,6 +43,7 @@ from app.schemas.diagnostic_record import SCHEMA_VERSION
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.limits import BDNB_LIMIT, GEO_LIMIT
+from app.services import budget
 
 logger = get_logger(__name__)
 
@@ -274,7 +275,9 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
         async def _safe_bdnb() -> dict | None:
             try:
                 await BDNB_LIMIT.acquire()
-                return await _fetch_bdnb_avec_repli(client, adresse, geo.label)
+                data = await _fetch_bdnb_avec_repli(client, adresse, geo.label)
+                budget.consume(1)  # FR-28 : comptabilisé après succès
+                return data
             except BdnbAdresseIntrouvable:
                 erreurs_partielles.append("bdnb: adresse non reconnue par le géocodeur BDNB")
                 return None

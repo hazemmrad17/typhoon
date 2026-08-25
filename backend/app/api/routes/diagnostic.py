@@ -38,6 +38,7 @@ from app.connectors.georisques import get_risque_report
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services import batch as batch_service
+from app.services import budget
 from app.services.canonical import AdresseAmbigueError, build_diagnostic_record
 
 logger = get_logger(__name__)
@@ -209,6 +210,23 @@ class InternalBatchRequest(BaseModel):
 async def submit_internal_batch(payload: InternalBatchRequest) -> dict:
     """Soumet un lot d'adresses (FR-20) — N × le pipeline canonique."""
     logger.info("POST /diagnostic/batch  n=%d", len(payload.addresses))
+
+    # FR-28 : le lot est refusé si l'enveloppe mensuelle BDNB ne couvre pas
+    # sa taille. La requête unitaire interactive n'est jamais bloquée par ce
+    # garde en v1.
+    if budget.remaining(settings.bdnb_monthly_budget) < len(payload.addresses):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "budget_epuise",
+                "detail": (
+                    "Enveloppe mensuelle BDNB insuffisante pour ce lot "
+                    f"({budget.remaining(settings.bdnb_monthly_budget)}/"
+                    f"{settings.bdnb_monthly_budget} restants). "
+                    "Passer sur BDNB Open Plus ou attendre la réinitialisation."
+                ),
+            },
+        )
 
     async def analyze_address(address: str) -> dict:
         record = await build_diagnostic_record(address)
