@@ -221,6 +221,25 @@ def to_canonical_record(
     return record
 
 
+# Sous-sources Géorisques : utilisées pour marquer l'échec TOTAL de la source
+# (chaque normalisateur consulte son propre drapeau et retombe en present=null).
+_ALL_SUB_SOURCES = (
+    "icpe", "risques_commune", "zones_inondables", "zonage_sismique",
+    "mouvements_terrain", "radon", "cavites", "ppr", "ssp",
+    "canalisations", "vent_cyclonique", "catnat", "rga",
+)
+
+
+def _total_failure_raw(detail: str) -> dict:
+    return {
+        "erreurs": [
+            {"source": s, "erreur": f"indisponible: {detail}"}
+            for s in _ALL_SUB_SOURCES
+        ],
+        "batiment": {},
+    }
+
+
 async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
     """Point d'entrée unique : une adresse française -> un DiagnosticRecord.
 
@@ -276,6 +295,9 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
             try:
                 await BDNB_LIMIT.acquire()
                 data = await _fetch_bdnb_avec_repli(client, adresse, geo.label)
+                if data is not None and not isinstance(data, dict):
+                    # payload 200 malformé : contrat protégé, jamais un 500
+                    raise TypeError(f"payload BDNB non-dict: {type(data).__name__}")
                 budget.consume(1)  # FR-28 : comptabilisé après succès
                 return data
             except BdnbAdresseIntrouvable:
@@ -286,8 +308,17 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
                 erreurs_partielles.append(f"bdnb: {type(exc).__name__}: {exc}")
                 return None
 
+        async def _safe_georisques() -> dict:
+            try:
+                return await fetch_georisques_raw(client, geo.citycode, geo.lat, geo.lon)
+            except Exception as exc:
+                # FR-22 : échec total -> dégradation explicite, pas d'erreur fatale.
+                logger.warning("  [georisques] ECHEC TOTAL -> %s: %s", type(exc).__name__, exc)
+                erreurs_partielles.append(f"georisques: {type(exc).__name__}: {exc}")
+                return _total_failure_raw(str(exc))
+
         raw_geo, bdnb_data = await asyncio.gather(
-            fetch_georisques_raw(client, geo.citycode, geo.lat, geo.lon),
+            _safe_georisques(),
             _safe_bdnb(),
         )
 
