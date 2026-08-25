@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     # Geocodage (BAN / Geoplateforme IGN, public, sans cle)
     geocoding_url: str = "https://data.geopf.fr/geocodage/search"
 
+    # Attribution LO 2.0 — obligatoire dans chaque bloc de provenance du contrat
+    # canonique (source + date de derniere mise a jour du jeu de donnees).
+    # Mettre a jour le millesime a chaque nouvelle publication fournisseur.
+    attribution_georisques: str = (
+        "Source Géorisques (BRGM / MTE) — données à jour au <millésime>"
+    )
+    attribution_bdnb: str = (
+        "Source BDNB (CSTB) — données à jour au <millésime>"
+    )
+
     # IGN Altimetrie (Geoplateforme, public, sans cle)
     ign_altitude_base_url: str = "https://data.geopf.fr/altimetrie/1.0"
 

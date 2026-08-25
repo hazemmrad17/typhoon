@@ -788,7 +788,26 @@ async def get_risque_report(
     cycloniques, PPR et sites et sols pollués.
     """
     raw = await fetch_georisques_raw(client, code_insee, lat, lon)
+    return risque_report_from_raw(
+        raw, adresse_saisie=adresse_saisie, adresse_normalisee=adresse_normalisee,
+        lat=lat, lon=lon, code_insee=code_insee,
+    )
 
+
+def risque_report_from_raw(
+    raw: dict | None,
+    *,
+    adresse_saisie: str,
+    adresse_normalisee: str,
+    lat: float,
+    lon: float,
+    code_insee: str,
+) -> RisqueReport:
+    """Normalisation pure (aucun réseau) : brut Géorisques -> RisqueReport.
+
+    Exposée séparément pour que le pipeline canonique puisse partager la
+    même normalisation sans re-déclencher les appels réseau.
+    """
     aleas = [
         _alea_icpe(raw),
         _alea_inondation(raw),
@@ -807,7 +826,7 @@ async def get_risque_report(
 
     erreurs_partielles = [
         f"{e['source']}: {e['erreur']}"
-        for e in (raw.get("erreurs") or [])
+        for e in ((raw or {}).get("erreurs") or [])
     ]
     alea_count = sum(1 for a in aleas if a.present is True)
 

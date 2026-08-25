@@ -38,6 +38,7 @@ from app.connectors.georisques import get_risque_report
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services import batch as batch_service
+from app.services.canonical import AdresseAmbigueError, build_diagnostic_record
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -54,30 +55,48 @@ class DiagnosticRequest(BaseModel):
 @router.post("/diagnostic/adresse")
 async def diagnostic_adresse_post(payload: DiagnosticRequest) -> dict:
     """
-    Collecte des données brutes pour une adresse.
+    Transaction produit : une adresse française -> un DiagnosticRecord canonique.
 
-    Retourne le contrat brut (§1) :
-      - adresse : geocodage
-      - bdnb : fiche bâtiment complète
-      - georisques : aléas réglementaires
-      - erreurs_sources : liste des erreurs
-      - genere_le : timestamp UTC
+    Portes de géocodage avant tout appel source :
+      422 adresse_ambigue      (score < 0.4, label_propose fourni)
+      422 adresse_non_trouvee
+      502 geocodage_indisponible
+    Dégradation : échec BDNB -> 200 partiel avec erreurs_partielles.
     """
     logger.info("POST /diagnostic/adresse  adresse=%r", payload.adresse)
     t0 = time.perf_counter()
 
     try:
-        building_data = await collect(payload.adresse)
+        record = await build_diagnostic_record(payload.adresse)
+    except AdresseAmbigueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "adresse_ambigue",
+                "detail": str(exc),
+                "label_propose": exc.label_propose,
+            },
+        ) from exc
+    except GeocodingError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "adresse_non_trouvee", "detail": str(exc)},
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "geocodage_indisponible", "detail": str(exc)},
+        ) from exc
     except Exception as exc:
         logger.exception("diagnostic/adresse -- échec pour %r", payload.adresse)
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "diagnostic/adresse OK en %.2fs (%d erreur(s) de source)",
-        elapsed, len(building_data.get("erreurs_sources", [])),
+        "diagnostic/adresse OK en %.2fs — %d aléas, %d erreur(s) partielle(s)",
+        elapsed, len(record.aleas), len(record.erreurs_partielles),
     )
-    return building_data
+    return record.model_dump(by_alias=True)
 
 
 # ---------------------------------------------------------------------------
