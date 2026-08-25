@@ -150,28 +150,55 @@ def _rest_mock_client(calls: list[str]) -> httpx.AsyncClient:
 @pytest.mark.asyncio
 async def test_wfs_failure_degrades_without_breaking_rest(monkeypatch):
     """WFS injoignable -> batiment={}, le REST continue de répondre."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.services import canonical
+
     rest_calls: list[str] = []
 
+    async def fake_geo(client, a):
+        from app.connectors.geocoding import GeocodeResult
+        return GeocodeResult(label="x", citycode="75056", postcode="", city="P",
+                             score=0.95, lat=48.85, lon=2.35)
+
+    async def broken_wfs_client():
+        class _Broken:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return None
+
+            async def get(self, *args, **kwargs):
+                raise httpx.ConnectError("wfs down")
+
+        return _Broken()
+
     async def fake_fetch(client, citycode, lat, lon):
-        # réimplémente le squelette : WFS isolé puis REST
         try:
             async with gg._new_wfs_client() as wfs_client:
                 batiment = await gg.resolve_per_building(wfs_client, lon, lat)
         except Exception:
             batiment = {}
         raw = {"erreurs": [], "batiment": batiment}
-        raw["gaspar"] = await _fake_rest()
+        raw["gaspar"] = {"data": []}  # la jambe REST répond normalement
         rest_calls.append("done")
         return raw
 
-    async def _fake_rest():
-        return {}
+    async def fake_bdnb(client, a, l=""):
+        return None
 
-    monkeypatch.setattr(gg, "_new_wfs_client", lambda: _BrokenWFSClient())
-    monkeypatch.setattr("app.services.canonical.fetch_georisques_raw", fake_fetch)
+    monkeypatch.setattr(canonical, "geocode_address", fake_geo)
+    monkeypatch.setattr(canonical, "fetch_georisques_raw", fake_fetch)
+    monkeypatch.setattr(canonical, "_fetch_bdnb_avec_repli", fake_bdnb)
+    monkeypatch.setattr(gg, "_new_wfs_client", lambda: broken_wfs_client())
 
-    body = await _canonical_from_batiment({})
+    with TestClient(app) as client:
+        resp = client.post("/diagnostic/adresse", json={"adresse": "10 rue x"})
+
+    assert resp.status_code == 200
     assert rest_calls == ["done"]
-    by_code = {a["code"]: a for a in body["aleas"]}
+    by_code = {a["code"]: a for a in resp.json()["aleas"]}
     assert by_code["inondation"]["resolution"] != "per-building"
     assert by_code["sismicite"]["resolution"] == "commune-level"
