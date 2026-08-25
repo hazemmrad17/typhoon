@@ -1,4 +1,4 @@
-"""
+﻿"""
 Geocodage d'adresse -> coordonnees + code INSEE commune.
 
 Source : API Geocodage de la Geoplateforme IGN (successeur de l'ancienne
@@ -10,6 +10,7 @@ Doc : https://data.geopf.fr/geocodage/search
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
@@ -30,6 +31,26 @@ class GeocodeResult:
 
 class GeocodingError(RuntimeError):
     pass
+
+
+# FR-04 : le service Géoplateforme renvoie 429 + Retry-After en cas de
+# saturation (50 req/s/IP). On honor l'attente UNE fois, puis on laisse
+# l'erreur remonter — jamais de boucle.
+_MAX_RETRY_AFTER_S = 5.0
+
+
+async def _get_with_429_retry(
+    client: httpx.AsyncClient, url: str, params: dict
+) -> httpx.Response:
+    response = await client.get(url, params=params)
+    if response.status_code != 429:
+        return response
+    try:
+        delay = float(response.headers.get("retry-after") or 1.0)
+    except ValueError:
+        delay = 1.0
+    await asyncio.sleep(min(max(delay, 0.0), _MAX_RETRY_AFTER_S))
+    return await client.get(url, params=params)
 
 
 async def reverse_geocode(client: httpx.AsyncClient, lat: float, lon: float) -> GeocodeResult:
@@ -73,9 +94,8 @@ async def geocode_address(client: httpx.AsyncClient, address: str) -> GeocodeRes
     Leve GeocodingError si l'adresse ne peut pas etre resolue (aucun
     resultat retourne par le service).
     """
-    response = await client.get(
-        settings.geocoding_url,
-        params={"q": address, "limit": 1},
+    response = await _get_with_429_retry(
+        client, settings.geocoding_url, {"q": address, "limit": 1}
     )
     response.raise_for_status()
     data = response.json()
@@ -111,9 +131,8 @@ async def search_municipalities(
     Retour : [{label, city, context, citycode, postcode, score, lat, lon}, ...]
     (meme forme que l'ancienne API Adresse, decommissionnee fin 01/2026).
     """
-    response = await client.get(
-        settings.geocoding_url,
-        params={"q": q, "type": "municipality", "limit": limit},
+    response = await _get_with_429_retry(
+        client, settings.geocoding_url, {"q": address, "limit": 1}
     )
     response.raise_for_status()
     data = response.json()
