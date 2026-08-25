@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { API, type RisqueReport } from '../zone/config';
-import { aggregateRecommendations, formatZoneLabel, type RecommendationZone } from '../jumeau/recommendations';
+import { aggregateRecommendations, formatZoneLabel, type RecommendationZone } from '../zone/recommendations';
 
 type Entreprise = {
   nom_entreprise?: string;

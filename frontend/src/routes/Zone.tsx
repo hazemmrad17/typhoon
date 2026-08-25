@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //   TYPHOON — /zone : diagnostic géo-risque par adresse (Stepper Material 3)
 //     1. Adresse         — hero centré façon Gemini (champ de recherche au centre)
 //     2. Cartographie    — aléas & risques (panneau latéral rétractable) + carte unifiée
@@ -42,7 +42,7 @@ import {
   type GeocodeSuggestion,
   type Trajectoire,
 } from '../zone/config';
-import type { RecommendationZone } from '../jumeau/recommendations';
+import type { RecommendationZone } from '../zone/recommendations';
 import {
   addConversation,
   loadConversations,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import {
   aggregateRecommendations,
   formatCost,
@@ -7,7 +7,7 @@ import {
   type AggregatedRecommendation,
   type RecommendationsSnapshot,
   type RecommendationSort,
-} from '../jumeau/recommendations';
+} from '../zone/recommendations';
 
 const EMPTY_SNAPSHOT: RecommendationsSnapshot = { zones: {}, ready: false };
 

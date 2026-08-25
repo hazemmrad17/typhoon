@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { ALEA_ICON_FALLBACK, ALEA_ICONS, aleaScore, bandForKey, type RisqueReport } from '../zone/config';
-import { aggregateRecommendations, formatCost, formatZoneLabel, type RecommendationZone } from '../jumeau/recommendations';
+import { aggregateRecommendations, formatCost, formatZoneLabel, type RecommendationZone } from '../zone/recommendations';
 
 type Props = {
   report: RisqueReport | null;

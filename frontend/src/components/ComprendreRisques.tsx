@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //   TYPHOON — /zone : panneau « Comprendre risque »
 //   Tableau de bord analytique agrégeant les scores de risque par aléa
 //   (inondation, RGA, sismicité…) sur l'ensemble des zones du bâtiment,
@@ -13,7 +13,7 @@ import {
   type D03Band,
   type RisquesPrincipaux,
 } from '../zone/config';
-import { formatZoneLabel, type RecommendationZone } from '../jumeau/recommendations';
+import { formatZoneLabel, type RecommendationZone } from '../zone/recommendations';
 
 const NIVEAU_SCORE: Record<string, number> = {
   tres_faible: 10,
