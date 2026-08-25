@@ -1,15 +1,14 @@
 """
 collector_agent : orchestrateur de collecte de données brutes.
 
-Le produit se recentre sur la fusion de données brutes (Géorisques + BDNB +
-Copernicus) par bâtiment. L'assureur applique son propre modèle actuariel —
+Le produit est la fusion de données brutes (Géorisques + BDNB) par
+bâtiment. L'assureur applique son propre modèle actuariel —
 on ne produit ni score, ni niveau, ni recommandations.
 
 Contrat de sortie :
     adresse → geocodage → lat/lon/citycode
     bdnb → fiche bâtiment complète (139 champs)
     georisques → aléas réglementaires bruts
-    copernicus → projections climatiques CDS
     erreurs_sources → liste des erreurs par source
     genere_le → timestamp UTC
 
@@ -29,7 +28,6 @@ import httpx
 
 from app.connectors import bdnb as bdnb_connector
 from app.connectors.bdnb import BdnbAdresseIntrouvable
-from app.connectors import copernicus
 from app.connectors import georisques as georisques_connector
 from app.connectors.geocoding import geocode_address, reverse_geocode
 from app.core.config import settings
@@ -65,15 +63,12 @@ async def _fetch_bdnb_avec_repli(client: httpx.AsyncClient, address: str, label_
         return await bdnb_connector.fetch_bdnb(client, address)
 
 
-async def collect(address: str, enable_copernicus: bool = True) -> dict:
+async def collect(address: str) -> dict:
     """Point d'entrée principal : collecte des données brutes pour une adresse.
 
     Retourne le contrat de sortie brut sans aucun scoring ni interprétation.
     """
-    logger.info(
-        "collector_agent -- début collecte pour %r (enable_copernicus=%s)",
-        address, enable_copernicus,
-    )
+    logger.info("collector_agent -- début collecte pour %r", address)
     t0 = time.perf_counter()
     erreurs: list[dict] = []
 
@@ -96,7 +91,7 @@ async def collect(address: str, enable_copernicus: bool = True) -> dict:
             )
 
         # Étape 2 - collecte parallèle
-        logger.info("etape 2/3 -- collecte parallèle (bdnb, georisques, copernicus)")
+        logger.info("etape 2/3 -- collecte parallèle (bdnb, georisques)")
         tasks: dict[str, Awaitable] = {
             "bdnb": _safe_call("bdnb", _fetch_bdnb_avec_repli(client, address, geocode.label), erreurs),
             "georisques": _safe_call(
@@ -106,22 +101,12 @@ async def collect(address: str, enable_copernicus: bool = True) -> dict:
             ),
         }
 
-        if enable_copernicus:
-            tasks["copernicus"] = _safe_call(
-                "copernicus",
-                asyncio.to_thread(copernicus.read_indicators_at_point, geocode.lat, geocode.lon),
-                erreurs,
-            )
-        else:
-            logger.info("  copernicus désactivé (flag=False) -> copernicus = None")
-
         keys = list(tasks.keys())
         results = await asyncio.gather(*(tasks[k] for k in keys))
         resolved = dict(zip(keys, results))
 
         bdnb_data = resolved["bdnb"]
         georisques_data = resolved["georisques"]
-        copernicus_data = resolved.get("copernicus")
 
     # Étape 3 - assemblage du contrat brut
     logger.info("etape 3/3 -- assemblage du contrat (%d erreur(s) de source)", len(erreurs))
@@ -150,16 +135,6 @@ async def collect(address: str, enable_copernicus: bool = True) -> dict:
                 "provider": "Géorisques",
                 "url": "https://www.georisques.gouv.fr",
                 "recuperee_le": now_iso,
-            },
-        },
-        "copernicus": {
-            "donnees": copernicus_data,
-            "trajectoire": copernicus.extract_trajectoire_brute(copernicus_data) if copernicus_data else None,
-            "_source": {
-                "provider": "Copernicus C3S",
-                "url": "https://cds.climate.copernicus.eu",
-                "recuperee_le": now_iso,
-                "disponible": copernicus_data is not None,
             },
         },
         "erreurs_sources": erreurs,

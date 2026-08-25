@@ -18,19 +18,13 @@ def health() -> dict:
 @router.get("/health/detailed")
 def health_detailed() -> dict:
     """État de configuration des dépendances externes — pas de ping réseau
-    en direct (coûteux/lent à chaque appel, cf. le même choix assumé pour
-    `copernicus_status()`) : seulement "est-ce configuré", pas "est-ce en
-    ligne à l'instant T". Utile pour un tableau de bord d'exploitation ou un
-    diagnostic rapide après déploiement — pas un remplacement du monitoring
-    des connecteurs individuels."""
+    en direct (coûteux/lent à chaque appel) : seulement "est-ce configuré",
+    pas "est-ce en ligne à l'instant T". Utile pour un tableau de bord
+    d'exploitation ou un diagnostic rapide après déploiement — pas un
+    remplacement du monitoring des connecteurs individuels."""
     return {
         "status": "ok",
         "dependencies": {
-            "copernicus": {
-                "enabled": settings.copernicus_enabled,
-                "configured": bool(settings.cdsapi_url and settings.cdsapi_key),
-                "note": "Projections 2100 indisponibles si désactivé ou non configuré (repli honnête, pas d'erreur).",
-            },
             "bdnb": {"configured": True, "note": "API publique, aucune clé requise."},
             "georisques": {"configured": True, "note": "API publique, aucune clé requise."},
         },

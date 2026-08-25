@@ -57,9 +57,8 @@ WFS_LAYER_MAP: dict[str, list[str]] = {
 # prévention des risques sismiques, site-spécifique, prescrit dans une poignée
 # de communes) — un instrument juridiquement distinct du zonage sismique
 # national (5 zones, fixées par décret par commune, sans résolution plus fine
-# possible). Le score sismique national ne doit donc PAS se fier à ce type pour
-# sa résolution "per-building" — cf. `risk_model._sismique_subscore`, qui garde
-# volontairement `commune-level` et n'utilise ce type que comme signal annexe.
+# possible). La résolution de l'aléa sismicité doit donc rester `commune-level`
+# et n'utiliser ce type que comme signal annexe.
 PPR_TYPE_LAYERS: dict[str, list[str]] = {
     "inondation": ["ms:PPRN_PERIMETRE_INOND", "ms:PPRN_PERIMETRE_SUBMAR"],
     "mouvement_terrain": ["ms:PPRN_PERIMETRE_MVT"],

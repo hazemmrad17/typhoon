@@ -15,7 +15,6 @@ class TyphoonState(TypedDict, total=False):
     # Entrée
     adresse: str
     formulaire: dict[str, Any] | None
-    copernicus: bool  # True = activer Copernicus (CDS), False = désactivé, champs null
 
     # Écrit par collector_agent
     building_data: dict[str, Any]

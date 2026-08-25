@@ -1,7 +1,7 @@
 """
 Limitation de débit — protège les routes qui déclenchent une cascade d'appels
-externes (BDNB, Géorisques, IGN, Open-Meteo/Copernicus, Mistral) contre un
-usage abusif ou un bug côté client qui boucle sans frein.
+externes (BDNB, Géorisques, IGN) contre un usage abusif ou un bug côté client
+qui boucle sans frein.
 
 Implémentation mémoire, fenêtre glissante, par IP cliente — suffisant pour un
 seul process, comme le store batch en mémoire (app/services/batch.py) fait le
@@ -21,17 +21,13 @@ from starlette.responses import JSONResponse, Response
 from app.core.config import settings
 
 # Routes limitées : (méthode, chemin exact). Uniquement celles qui déclenchent
-# une vraie collecte (BDNB/Géorisques/...) ou un appel Mistral — pas les
-# lectures légères (statut Copernicus, fiche bâtiment déjà en cache, poll de
-# batch). Chemins exacts (pas de préfixe) : évite d'attraper /diagnostic/fast
-# ou /diagnostic/batch/{id} sous l'entrée bare "/diagnostic".
+# une vraie collecte (BDNB/Géorisques/...) — pas les lectures légères (fiche
+# bâtiment déjà en cache, poll de batch). Chemins exacts (pas de préfixe) :
+# évite d'attraper /diagnostic/fast ou /diagnostic/batch/{id} sous l'entrée
+# bare "/diagnostic".
 _LIMITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
-        ("POST", "/diagnostic"),
-        ("POST", "/diagnostic/fast"),
         ("POST", "/diagnostic/batch"),
-        ("POST", "/diagnostic/recommandations"),
-        ("POST", "/diagnostic/adresse/rapport"),
         ("GET", "/diagnostic/adresse"),
     }
 )

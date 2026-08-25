@@ -3,7 +3,7 @@ Perimetre geographique du MVP : region Provence-Alpes-Cote d'Azur (PACA).
 
 Cf. docs/ROADMAP_MVP_PACA.md : ce perimetre ne s'applique qu'aux jeux de
 donnees telecharges en local (DVF, DRIAS). Les API live (BDNB, Georisques,
-IGN Altitude, Open-Meteo) fonctionnent pour n'importe quelle adresse
+IGN) fonctionnent pour n'importe quelle adresse
 francaise ; ce module sert donc a :
   - documenter/valider que l'adresse testee est bien en PACA (pour rester
     dans le perimetre de demo du sprint),

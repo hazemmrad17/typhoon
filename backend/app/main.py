@@ -1,9 +1,10 @@
 """
 Entrypoint FastAPI — API de diagnostic climatique simplifié.
 
-Le produit se recentre sur la fusion de données brutes (Géorisques + BDNB +
-Copernicus) par bâtiment. Le scoring, le jumeau numérique 3D et les
-simulations sont supprimés.
+Le produit est la fusion de données brutes (Géorisques + BDNB) par
+bâtiment, avec provenance et résolution sur chaque fait. Le scoring,
+le jumeau numérique 3D, les simulations, Copernicus et Open-Meteo sont
+supprimés.
 
 Lancement (port 8000) :
     cd backend
@@ -20,7 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import diagnostic, health, geocoding as geocoding_router, climate
+from app.api.routes import diagnostic, health, geocoding as geocoding_router
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import RateLimitMiddleware
@@ -53,4 +54,3 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(diagnostic.router)
 app.include_router(geocoding_router.router, prefix="/api", tags=["geocoding"])
-app.include_router(climate.router, prefix="/api", tags=["climate"])

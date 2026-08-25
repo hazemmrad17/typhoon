@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -63,26 +62,6 @@ class AleaDetail(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Recommandations Mistral IA — champ optionnel sur RisqueReport
-# ---------------------------------------------------------------------------
-
-class RecommandationsIA(BaseModel):
-    """
-    Recommandations générées par Mistral à partir du RisqueReport uniquement.
-
-    Règles de contrat :
-    - Mistral ne reçoit QUE RisqueReport.model_dump() (jamais les données Géorisques brutes).
-    - Si Mistral échoue ou timeout → recommandations=None sur RisqueReport (jamais un 500).
-    - Les champs ici sont tous optionnels : un champ vide vaut mieux qu'une hallucination.
-    """
-    resume: str                           # synthèse en 1–2 phrases
-    actions_prioritaires: list[str]       # ex: ["Vérifier l'assurabilité inondation", ...]
-    points_vigilance: list[str] = []      # points d'attention supplémentaires
-    modele: str = "mistral-small-latest"  # traçabilité du modèle utilisé
-    metadata: dict[str, Any] = {}         # nb_tokens, latence_ms, etc.
-
-
-# ---------------------------------------------------------------------------
 # Rapport complet
 # ---------------------------------------------------------------------------
 
@@ -98,8 +77,6 @@ class RisqueReport(BaseModel):
     erreurs_partielles: list[str] = []  # ex: ["sismicite: timeout Géorisques"]
     bdnb: dict | None = None          # fiche BDNB (batiment_groupe_complet) — None si indisponible
                                       # (alimente l'étape 3 « Analyse » du frontend)
-    copernicus: dict | None = None    # projections climatiques CDS (trajectoire brute en vraies unités)
-    recommandations: RecommandationsIA | None = None  # None si Mistral absent/en erreur
     avertissement: str = (
         "Ce rapport agrège les données publiques Géorisques (BRGM / MTE). "
         "Il ne remplace pas l'État des Risques (ERRIAL) obligatoire à la vente/location."

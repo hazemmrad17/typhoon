@@ -248,8 +248,7 @@ def _has_hazard_keyword(raw: dict, keyword: str) -> bool:
 
 def _zone_sismique(raw: dict) -> int | None:
     """Zone sismique nationale (1-5) — priorité au détail du référentiel
-    communal, repli sur l'endpoint `zonage_sismique` (même logique que
-    `risk_model._parse_zone_sismicite`)."""
+    communal, repli sur l'endpoint `zonage_sismique`."""
     zone: Any = None
     for entry in _risques_commune_entries(raw):
         for detail in (entry.get("risques_detail") or []):
@@ -295,7 +294,7 @@ def _batiment_ppr_type_status(raw: dict, ppr_type: str) -> tuple[bool | None, st
     """Statut au bâtiment pour un TYPE de PPR (inondation, mouvement_terrain,
     seisme, feu_foret, avalanche…) via `batiment.ppr_par_type` (WFS).
     L'agrégat `batiment.ppr` mélange les 8 types — ne jamais l'utiliser pour
-    un péril précis (même règle que `risk_model._batiment_status_ppr_type`)."""
+    un péril précis."""
     info = (((raw or {}).get("batiment") or {}).get("ppr_par_type") or {}).get(ppr_type)
     if not info:
         return None, "commune-level"
@@ -441,7 +440,7 @@ def _alea_inondation(raw: dict) -> AleaDetail:
 def _alea_sismicite(raw: dict) -> AleaDetail:
     """Séisme — zonage sismique national (5 zones par commune, décret
     n°2010-1255). Classification communale par nature : pas de résolution
-    au bâtiment (le PPRS reste un signal annexe, cf. risk_model)."""
+    au bâtiment (le PPRS reste un signal annexe)."""
     failed = _is_source_failed(raw, "zonage_sismique")
     if failed:
         return AleaDetail(

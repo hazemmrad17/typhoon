@@ -1,15 +1,14 @@
 """
 Routes de diagnostic Typhoon — contrat brut sans scoring.
 
-Le produit se recentre sur la fusion de données brutes (Géorisques + BDNB +
-Copernicus) par bâtiment. Le scoring, le jumeau numérique 3D et les
-simulations sont supprimés.
+Le produit est la fusion de données brutes (Géorisques + BDNB) par
+bâtiment, avec provenance et résolution. Le scoring, le jumeau numérique
+3D, les simulations, Copernicus et Open-Meteo sont supprimés.
 
 Routes actives :
   POST /diagnostic/adresse      → collecte + fusion, retourne le contrat brut
   POST /diagnostic/batch        → même chose pour une liste d'adresses
   GET  /diagnostic/batch/{id}   → polling
-  GET  /diagnostic/copernicus/status → état du pipeline
   GET  /diagnostic/adresse/rapport-pdf → proxy PDF Géorisques
   GET  /diagnostic/zone/building → fiche bâtiment par ID
   GET  /diagnostic/zone/buildings → bâtiments par bbox
@@ -36,7 +35,6 @@ from app.connectors.bdnb import (
 )
 from app.connectors.geocoding import GeocodingError, geocode_address
 from app.connectors.georisques import get_risque_report
-from app.connectors.copernicus import copernicus_status
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services import batch as batch_service
@@ -51,10 +49,6 @@ router = APIRouter()
 
 class DiagnosticRequest(BaseModel):
     adresse: str = Field(..., min_length=3, description="Adresse postale complète du bien")
-    copernicus: bool = Field(
-        default=settings.copernicus_enabled,
-        description="Activer/désactiver Copernicus (CDS) dans la collecte.",
-    )
 
 
 @router.post("/diagnostic/adresse")
@@ -66,7 +60,6 @@ async def diagnostic_adresse_post(payload: DiagnosticRequest) -> dict:
       - adresse : geocodage
       - bdnb : fiche bâtiment complète
       - georisques : aléas réglementaires
-      - copernicus : projections climatiques
       - erreurs_sources : liste des erreurs
       - genere_le : timestamp UTC
     """
@@ -74,7 +67,7 @@ async def diagnostic_adresse_post(payload: DiagnosticRequest) -> dict:
     t0 = time.perf_counter()
 
     try:
-        building_data = await collect(payload.adresse, enable_copernicus=payload.copernicus)
+        building_data = await collect(payload.adresse)
     except Exception as exc:
         logger.exception("diagnostic/adresse -- échec pour %r", payload.adresse)
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
@@ -166,24 +159,6 @@ async def diagnostic_adresse_get(
             except Exception as exc:
                 logger.warning("  [bdnb] ECHEC pour %r -> %s: %s", q, type(exc).__name__, exc)
                 report.erreurs_partielles.append(f"bdnb: {type(exc).__name__}: {exc}")
-
-            # Copernicus — projections climatiques (non bloquant)
-            if settings.copernicus_enabled:
-                try:
-                    import asyncio
-                    from app.connectors import copernicus as copernicus_connector
-
-                    copernicus_raw = await asyncio.to_thread(
-                        copernicus_connector.read_indicators_at_point, geo.lat, geo.lon,
-                    )
-                    trajectoire = copernicus_connector.extract_trajectoire_brute(copernicus_raw)
-                    report.copernicus = {
-                        "donnees": copernicus_raw,
-                        "trajectoire": trajectoire,
-                    }
-                except Exception as exc:
-                    logger.info("  [copernicus] indisponible pour %r -> %s: %s", q, type(exc).__name__, exc)
-                    report.erreurs_partielles.append(f"copernicus: {type(exc).__name__}: {exc}")
     except HTTPException:
         raise
     except Exception as exc:
@@ -220,7 +195,7 @@ async def submit_internal_batch(payload: InternalBatchRequest) -> dict:
 
     async def analyze_address(address: str) -> dict:
         """Analyse une adresse : collecte brute sans scoring."""
-        return await collect_fn(address, enable_copernicus=True)
+        return await collect_fn(address)
 
     try:
         return batch_service.submit_batch(
@@ -238,39 +213,6 @@ async def poll_internal_batch(batch_id: str) -> dict:
     if batch is None:
         raise HTTPException(status_code=404, detail=f"lot inconnu : {batch_id}")
     return batch
-
-
-# ---------------------------------------------------------------------------
-# Copernicus status
-# ---------------------------------------------------------------------------
-
-@router.get("/diagnostic/copernicus/status")
-async def copernicus_status_route() -> dict:
-    """État du pipeline Copernicus."""
-    return copernicus_status()
-
-
-class CopernicusDownloadRequest(BaseModel):
-    force: bool = Field(default=False, description="Re-télécharger même si le cache est valide.")
-
-
-@router.post("/diagnostic/copernicus/download")
-async def copernicus_download_route(payload: CopernicusDownloadRequest | None = None) -> dict:
-    """Lance le téléchargement CDS en arrière-plan."""
-    from app.connectors.copernicus import start_download
-
-    force = bool(payload.force if payload else False)
-    logger.info("POST /diagnostic/copernicus/download  force=%s", force)
-    result = start_download(force=force)
-    if result.get("reason") == "not_configured":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "copernicus_non_configure",
-                "detail": "CDSAPI_URL / CDSAPI_KEY absents — renseignez-les dans le .env.",
-            },
-        )
-    return result
 
 
 # ---------------------------------------------------------------------------

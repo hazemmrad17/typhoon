@@ -11,11 +11,6 @@ requests
 # --- Géométries (reprojection BDNB Lambert-93 → WGS84) ---
 pyproj
 
-# --- Copernicus Climate Data Store (projections climatiques) ---
-cdsapi
-xarray
-netCDF4
-
 # --- Divers ---
 python-dotenv
 
