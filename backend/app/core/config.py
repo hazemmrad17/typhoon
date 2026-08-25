@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 30
     rate_limit_window_seconds: float = 60.0
 
+    # Clés d'API pilote (FR-21) — séparées par virgules. Vide = accès ouvert
+    # (mode dev, warning journalisé). Ne jamais logger ces valeurs.
+    api_keys: str = ""
+
+    # Budget mensuel d'appels BDNB (FR-28) — garde-fou du lot ; la requête
+    # unitaire interactive n'est jamais bloquée par lui en v1.
+    bdnb_monthly_budget: int = 10000
+
     # Divers
     http_timeout_seconds: float = 15.0
 

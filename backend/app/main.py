@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import diagnostic, health, geocoding as geocoding_router
+from app.core.api_key import ApiKeyMiddleware
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import RateLimitMiddleware
@@ -43,6 +44,7 @@ app = FastAPI(title="Typhoon — API diagnostic climatique", version="0.2.0", li
 
 _cors_origins = [o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()]
 
+app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
