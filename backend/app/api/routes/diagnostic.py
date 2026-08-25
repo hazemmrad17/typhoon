@@ -207,19 +207,15 @@ class InternalBatchRequest(BaseModel):
 
 @router.post("/diagnostic/batch")
 async def submit_internal_batch(payload: InternalBatchRequest) -> dict:
-    """Soumet un lot d'adresses (Portfolio) et le traite en arrière-plan."""
-    from app.agents.collector_agent import collect as collect_fn
-
+    """Soumet un lot d'adresses (FR-20) — N × le pipeline canonique."""
     logger.info("POST /diagnostic/batch  n=%d", len(payload.addresses))
 
     async def analyze_address(address: str) -> dict:
-        """Analyse une adresse : collecte brute sans scoring."""
-        return await collect_fn(address)
+        record = await build_diagnostic_record(address)
+        return record.model_dump(by_alias=True)
 
     try:
-        return batch_service.submit_batch(
-            payload.addresses, analyzer=analyze_address
-        )
+        return batch_service.submit_batch(payload.addresses, analyzer=analyze_address)
     except Exception as exc:
         logger.exception("diagnostic/batch -- échec soumission")
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc

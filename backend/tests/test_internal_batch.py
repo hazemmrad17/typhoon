@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas.diagnostic_record import DiagnosticRecord
 
 
 def _canned_record(adresse: str) -> dict:
@@ -42,14 +43,8 @@ def _canned_record(adresse: str) -> dict:
     }
 
 
-@pytest.fixture()
-def fast_pipeline(monkeypatch):
-    async def fake_build(adresse: str) -> dict:
-        return _canned_record(adresse)
-
-    monkeypatch.setattr("app.services.batch._analyzer_ref", fake_build,
-                        raising=False)
-    yield fake_build
+def _record(adresse: str) -> DiagnosticRecord:
+    return DiagnosticRecord.model_validate(_canned_record(adresse))
 
 
 def _submit(client: TestClient, addresses: list[str]) -> dict:
@@ -69,8 +64,8 @@ def _poll_until_done(client: TestClient, batch_id: str, timeout_s: float = 10.0)
 
 
 def test_batch_envelope_and_canonical_results(monkeypatch):
-    async def fake_build(adresse: str) -> dict:
-        return _canned_record(adresse)
+    async def fake_build(adresse: str) -> DiagnosticRecord:
+        return _record(adresse)
 
     monkeypatch.setattr("app.api.routes.diagnostic.build_diagnostic_record", fake_build)
 
@@ -89,10 +84,10 @@ def test_batch_envelope_and_canonical_results(monkeypatch):
 
 
 def test_item_isolation_one_failure_never_kills_batch(monkeypatch):
-    async def flaky(adresse: str) -> dict:
+    async def flaky(adresse: str) -> DiagnosticRecord:
         if "mauvaise" in adresse:
             raise ValueError("géocodeur introuvable")
-        return _canned_record(adresse)
+        return _record(adresse)
 
     monkeypatch.setattr("app.api.routes.diagnostic.build_diagnostic_record", flaky)
 
