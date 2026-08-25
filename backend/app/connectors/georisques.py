@@ -84,6 +84,11 @@ def _payload_non_empty(payload: dict | list | None) -> bool:
     return bool(payload)
 
 
+def _new_wfs_client() -> httpx.AsyncClient:
+    """Fabrique du client WFS dédié (FR-09) — point d'injection pour les tests."""
+    return httpx.AsyncClient(timeout=10.0)
+
+
 async def fetch_georisques_raw(
     client: httpx.AsyncClient,
     citycode: str,
@@ -125,7 +130,7 @@ async def fetch_georisques_raw(
     # (`/services`) sur le même AsyncClient fait 404 « no Route matched » sur
     # toutes les requêtes suivantes. On isole donc le WFS sur sa propre connexion.
     try:
-        async with httpx.AsyncClient(timeout=10.0) as wfs_client:
+        async with _new_wfs_client() as wfs_client:
             resultat["batiment"] = await resolve_per_building(wfs_client, lon, lat)
     except Exception:
         # Ne doit jamais faire échouer le diagnostic : repli commune.
