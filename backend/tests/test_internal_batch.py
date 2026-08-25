@@ -1,104 +1,113 @@
-"""
-Tests de la route batch interne (Ticket 3 — insurerpagesplan).
-
-POST /diagnostic/batch + GET /diagnostic/batch/{id} : meme contrat que la
-Partner API /v1/batch, SANS cle d'API. L'analyseur est mocke (aucun reseau) :
-on verifie la soumission, le polling, une adresse en erreur qui ne tue pas
-le lot, et le 404 pour un lot inconnu.
-"""
+# =============================================================================
+#   T005 — Batch = N × le pipeline canonique (FR-20)
+#
+#   Contrat spéc :
+#     POST /diagnostic/batch        -> 200 {batch_id, n_accepted}
+#     GET  /diagnostic/batch/{id}   -> {batch_id, status: pending|done,
+#                                       results: [<DiagnosticRecord>],
+#                                       item_errors: [{adresse, erreur}]}
+#   Isolation : une adresse en échec ne tue jamais le lot.
+# =============================================================================
 
 from __future__ import annotations
 
-import asyncio
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import batch as batch_service
+from app.main import app
 
 
-@pytest.fixture(autouse=True)
-def _clean_batches():
-    batch_service._batches.clear()
-    yield
-    batch_service._batches.clear()
-
-
-class _FakeAddressError(Exception):
-    pass
-
-
-async def _fake_analyzer(address: str, scenario: str = "rcp8_5"):
-    await asyncio.sleep(0.005)
-    if "bad" in address.lower():
-        raise _FakeAddressError("adresse non trouvee")
+def _canned_record(adresse: str) -> dict:
     return {
-        "adresse": {"input": address, "label": address, "citycode": "75056", "postcode": "75000", "city": "Paris", "lat": 48.85, "lon": 2.35},
-        "score_global": 42,
-        "niveau_global": "modere",
-        "confidence": {"score": 80, "niveau": "eleve", "n_sources_disponibles": 5, "n_sources_total": 5},
-        "zones": {},
-        "risques_par_alea": {},
-        "projection_2050": {"score_global": 55, "niveau_global": "modere", "zones": {}, "risques_par_alea": {}},
-        "trajectoire": None,
-        "erreurs_sources": [],
-        "genere_le": "2026-08-14",
+        "schema_version": "1.0",
+        "adresse": {"saisie": adresse, "normalisee": adresse.upper(),
+                    "citycode": "75056", "postcode": "", "city": "",
+                    "lat": 48.85, "lon": 2.35, "geocode_score": 0.9},
+        "aleas": [{
+            "code": "inondation", "libelle": "Inondation", "present": None,
+            "present_commune": None, "zonage": None, "hauteur_eau_m": None,
+            "zone_sismique": None, "catnat_historique": None,
+            "source": "georisques", "url_detail": None, "erreur": None,
+            "resolution": "commune-level-estimate",
+        }],
+        "bdnb": None,
+        "georisques_source": {"provider": "Géorisques",
+                              "url": "https://www.georisques.gouv.fr",
+                              "attribution": "Source Géorisques — données à jour au 2026-07-01",
+                              "recuperee_le": "2026-08-25T10:00:00+00:00"},
+        "erreurs_partielles": [],
+        "genere_le": "2026-08-25T10:00:01+00:00",
     }
 
 
-def _wait_completed(batch_id: str, timeout: float = 3.0):
-    import time
+@pytest.fixture()
+def fast_pipeline(monkeypatch):
+    async def fake_build(adresse: str) -> dict:
+        return _canned_record(adresse)
 
-    elapsed = 0.0
-    while elapsed < timeout:
-        poll = batch_service.get_batch(batch_id)
-        if poll and poll["status"] in ("completed", "failed"):
-            return poll
-        time.sleep(0.02)
-        elapsed += 0.02
-    raise AssertionError("le lot n'a pas termine a temps")
+    monkeypatch.setattr("app.services.batch._analyzer_ref", fake_build,
+                        raising=False)
+    yield fake_build
 
 
-def test_internal_batch_submit_poll(monkeypatch: pytest.MonkeyPatch):
-    from app.main import app
+def _submit(client: TestClient, addresses: list[str]) -> dict:
+    resp = client.post("/diagnostic/batch", json={"addresses": addresses})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
-    original = batch_service.submit_batch
 
-    def _submit_with_fake(addresses, analyzer=None, scenario="rcp8_5"):
-        """Wrapper local : injecte l'analyseur factice (evite la recursion
-        en appelant l'original capture, pas le nom patche)."""
-        return original(addresses, analyzer=_fake_analyzer, scenario=scenario)
+def _poll_until_done(client: TestClient, batch_id: str, timeout_s: float = 10.0) -> dict:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        body = client.get(f"/diagnostic/batch/{batch_id}").json()
+        if body["status"] == "done":
+            return body
+        time.sleep(0.05)
+    raise TimeoutError("batch non terminé")
 
-    monkeypatch.setattr(batch_service, "submit_batch", _submit_with_fake)
+
+def test_batch_envelope_and_canonical_results(monkeypatch):
+    async def fake_build(adresse: str) -> dict:
+        return _canned_record(adresse)
+
+    monkeypatch.setattr("app.api.routes.diagnostic.build_diagnostic_record", fake_build)
 
     with TestClient(app) as client:
-        # Soumission sans cle d'API
-        resp = client.post(
-            "/diagnostic/batch",
-            json={"addresses": ["10 Rue Test Paris", "bad address", "20 Rue Test Paris"], "scenario": "rcp8_5"},
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["status"] == "queued"
-        assert body["total"] == 3
-        batch_id = body["batch_id"]
+        submitted = _submit(client, ["10 rue A", "10 rue B"])
+        assert set(submitted.keys()) == {"batch_id", "n_accepted"}
+        assert submitted["n_accepted"] == 2
 
-        # Polling jusqu'a completion
-        poll = _wait_completed(batch_id)
-        assert poll["status"] == "completed"
-        assert poll["completed"] == 2
-        assert poll["failed"] == 1
-
-        by_address = {it["address"]: it for it in poll["items"]}
-        assert by_address["10 Rue Test Paris"]["status"] == "completed"
-        assert by_address["10 Rue Test Paris"]["result"]["score_global"] == 42
-        assert by_address["bad address"]["status"] == "failed"
-        assert "non trouvee" in (by_address["bad address"]["error"] or "")
+        body = _poll_until_done(client, submitted["batch_id"])
+    assert body["status"] == "done"
+    assert len(body["results"]) == 2
+    assert body["item_errors"] == []
+    for r in body["results"]:
+        assert r["schema_version"] == "1.0"
+        assert len(r["aleas"]) == 1
 
 
-def test_internal_batch_unknown_returns_404():
-    from app.main import app
+def test_item_isolation_one_failure_never_kills_batch(monkeypatch):
+    async def flaky(adresse: str) -> dict:
+        if "mauvaise" in adresse:
+            raise ValueError("géocodeur introuvable")
+        return _canned_record(adresse)
 
+    monkeypatch.setattr("app.api.routes.diagnostic.build_diagnostic_record", flaky)
+
+    with TestClient(app) as client:
+        submitted = _submit(client, ["bonne adresse 1", "mauvaise adresse", "bonne adresse 2"])
+        body = _poll_until_done(client, submitted["batch_id"])
+
+    assert len(body["results"]) == 2
+    assert len(body["item_errors"]) == 1
+    err = body["item_errors"][0]
+    assert "mauvaise" in err["adresse"]
+    assert "ValueError" in err["erreur"] or "introuvable" in err["erreur"]
+
+
+def test_poll_unknown_id_404():
     with TestClient(app) as client:
         resp = client.get("/diagnostic/batch/inconnu")
-        assert resp.status_code == 404
+    assert resp.status_code == 404
