@@ -39,10 +39,32 @@ from app.schemas.diagnostic_record import (
     SourceProvenance,
 )
 from app.schemas.risque_report import AleaDetail
+from app.schemas.diagnostic_record import SCHEMA_VERSION
 from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Cache résultat (FR-26) — en processus, TTL, clé = tuple géocodé résolu.
+# Un hit saute TOUS les appels upstream ; le record servi conserve ses
+# timestamps d'origine (honnêteté sur la fraîcheur).
+# ---------------------------------------------------------------------------
+_RESULT_CACHE: dict[str, tuple[float, DiagnosticRecord]] = {}
+# Index entrée texte -> clé résolue : un hit saute même le géocodage
+# (le géocodeur est un upstream quota-lui-aussi, FR-26).
+_INPUT_INDEX: dict[str, tuple[float, str]] = {}
+
+
+def _norm_input(adresse: str) -> str:
+    return re.sub(r"\s+", " ", adresse.strip().lower())
+
+
+def _cache_key(geo: GeocodeResult) -> str:
+    return (
+        f"{geo.label}|{round(geo.lat, 5):.5f}|{round(geo.lon, 5):.5f}"
+        f"|{geo.citycode}|{SCHEMA_VERSION}"
+    )
 
 # Détecte les "adresses" fournies comme coordonnées brutes "lat,lon" (FR-05)
 _LATLON_RE = re.compile(r"^\s*(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$")
@@ -209,6 +231,18 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
     logger.info("canonical -- début diagnostic %r", adresse)
     erreurs_partielles: list[str] = []
 
+    ttl = settings.cache_ttl_seconds
+    now_mono = time.monotonic()
+    if ttl > 0:
+        input_key = _norm_input(adresse)
+        indexed = _INPUT_INDEX.get(input_key)
+        if indexed:
+            cached_at, resolved_key = indexed
+            cached = _RESULT_CACHE.get(resolved_key)
+            if cached and (now_mono - cached_at) <= ttl and (now_mono - cached[0]) <= ttl:
+                logger.info("canonical -- cache HIT (input) %s", input_key)
+                return cached[1]
+
     async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
         latlon_match = _LATLON_RE.match(adresse)
         if latlon_match:
@@ -219,6 +253,20 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
 
         if geo.score < MIN_GEOCODE_SCORE:
             raise AdresseAmbigueError(geo.label, geo.score)
+
+        if ttl > 0:
+            key = _cache_key(geo)
+            cached = _RESULT_CACHE.get(key)
+            now_mono = time.monotonic()
+            if cached and (now_mono - cached[0]) <= ttl:
+                # résolution connue mais entrée texte inédite -> indexer
+                _INPUT_INDEX[_norm_input(adresse)] = (now_mono, key)
+                logger.info("canonical -- cache HIT %s", key)
+                return cached[1]
+            input_key_pending = _norm_input(adresse)
+        else:
+            key = None
+            input_key_pending = None
 
         async def _safe_bdnb() -> dict | None:
             try:
@@ -256,6 +304,16 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
         bdnb_data,
         genere_le=datetime.now(timezone.utc).isoformat(),
     )
+    if ttl > 0 and key is not None:
+        stamp = time.monotonic()
+        _RESULT_CACHE[key] = (stamp, record)
+        if input_key_pending:
+            _INPUT_INDEX[input_key_pending] = (stamp, key)
+        # éviction simple : le cache reste borné en mémoire
+        while len(_RESULT_CACHE) > 5000:
+            _RESULT_CACHE.pop(next(iter(_RESULT_CACHE)))
+        while len(_INPUT_INDEX) > 5000:
+            _INPUT_INDEX.pop(next(iter(_INPUT_INDEX)))
     logger.info(
         "canonical -- terminé en %.2fs (%d aléas, %d erreur(s))",
         time.perf_counter() - t0, len(record.aleas), len(record.erreurs_partielles),

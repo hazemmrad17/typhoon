@@ -85,8 +85,12 @@ def test_key_precision_five_decimals(counters, monkeypatch):
 
     async def shifted_geo(client, address):
         counters.geocode += 1
-        return GeocodeResult(label="autre adresse", citycode="06088",
-                             postcode="", city="Nice", score=0.9,
+        if "rivoli" in address.lower():
+            return GeocodeResult(label="10 Rue de Rivoli 75004 Paris", citycode="75056",
+                                 postcode="75004", city="Paris", score=0.95,
+                                 lat=48.8566000, lon=2.3522000)
+        return GeocodeResult(label="Promenade des Anglais 06000 Nice", citycode="06088",
+                             postcode="06000", city="Nice", score=0.9,
                              lat=43.71020001, lon=7.26220000)
 
     monkeypatch.setattr("app.services.canonical.geocode_address", shifted_geo)

@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # unitaire interactive n'est jamais bloquée par lui en v1.
     bdnb_monthly_budget: int = 10000
 
+    # Cache résultat (FR-26) — TTL en secondes ; 0 désactive.
+    cache_ttl_seconds: int = 86400
+
     # Divers
     http_timeout_seconds: float = 15.0
 
