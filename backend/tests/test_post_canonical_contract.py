@@ -173,9 +173,8 @@ def test_wfs_down_yields_null_present_without_per_building(monkeypatch, counters
         resp = _post(client)
     assert resp.status_code == 200
     by_code = {a["code"]: a for a in resp.json()["aleas"]}
-    assert by_code["inondation"]["per_building"] is None or \
-        "per_building" not in by_code["inondation"]
     assert by_code["inondation"]["resolution"] != "per-building"
+    assert "per_building" not in by_code["inondation"]
 
 
 def test_bdnb_failure_partial_record(counters, monkeypatch):
