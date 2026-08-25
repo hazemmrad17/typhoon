@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # Cache résultat (FR-26) — TTL en secondes ; 0 désactive.
     cache_ttl_seconds: int = 86400
 
+    # Quotas upstream côté client (FR-23) — constantes vérifiées 2026-08-25.
+    bdnb_rpm: int = 120            # BDNB Open : 120 req/min/IP
+    geoplateforme_rps: int = 50    # Géoplateforme géocodage : 50 req/s/IP
+
     # Divers
     http_timeout_seconds: float = 15.0
 

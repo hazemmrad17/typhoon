@@ -42,6 +42,7 @@ from app.schemas.risque_report import AleaDetail
 from app.schemas.diagnostic_record import SCHEMA_VERSION
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.limits import BDNB_LIMIT, GEO_LIMIT
 
 logger = get_logger(__name__)
 
@@ -247,8 +248,10 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
         latlon_match = _LATLON_RE.match(adresse)
         if latlon_match:
             lat_in, lon_in = float(latlon_match.group(1)), float(latlon_match.group(2))
+            await GEO_LIMIT.acquire()
             geo: GeocodeResult = await reverse_geocode(client, lat_in, lon_in)
         else:
+            await GEO_LIMIT.acquire()
             geo = await geocode_address(client, adresse)
 
         if geo.score < MIN_GEOCODE_SCORE:
@@ -270,6 +273,7 @@ async def build_diagnostic_record(adresse: str) -> DiagnosticRecord:
 
         async def _safe_bdnb() -> dict | None:
             try:
+                await BDNB_LIMIT.acquire()
                 return await _fetch_bdnb_avec_repli(client, adresse, geo.label)
             except BdnbAdresseIntrouvable:
                 erreurs_partielles.append("bdnb: adresse non reconnue par le géocodeur BDNB")
