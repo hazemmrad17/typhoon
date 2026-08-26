@@ -21,7 +21,7 @@
 import { useState } from 'react';
 import {
   D03,
-  bandForKey,
+  bandForResolution,
   aleaScore,
   type AleaDetail,
   type Trajectoire,
@@ -51,7 +51,7 @@ function bandForValue(valeur: number | null) {
    Affiché déplié uniquement sur clic — le résumé ne devient jamais un blob. */
 function AleaDrillDown({ alea }: { alea: AleaDetail | null }) {
   if (!alea) return null;
-  const aband = alea.niveau ? bandForKey(alea.niveau) : undefined;
+  const aband = bandForResolution(alea.resolution);
   const catnat = alea.catnat_historique ?? [];
   const statut =
     alea.present === true
@@ -129,9 +129,9 @@ export function DecisionCard({
 
   const presentAleas = aleas.filter((a) => a.present === true);
   const maxScore =
-    presentAleas.length ? Math.max(...presentAleas.map((a) => aleaScore(a))) : null;
+    presentAleas.length ? Math.max(...presentAleas.map((a) => a.resolution === 'per-building' ? 3 : a.resolution === 'commune-level' ? 2 : 1)) : null
   const band = maxScore != null ? D03.find((b) => (maxScore as number) < b.max) || D03[D03.length - 1] : null;
-  const verdict = verdictFor(band);
+  const verdict = { cls: band?.cls ?? '', label: band?.label ?? 'Aucun aléa recensé', hint: "Qualité de vérification — l'interprétation appartient à l'assureur." };
 
   const perils = trajectoire?.perils ?? {};
 
@@ -148,7 +148,7 @@ export function DecisionCard({
     .slice(0, 3);
 
   const aleaDrivers = presentAleas
-    .map((a) => ({ code: a.code, label: a.libelle, value: aleaScore(a) }))
+    .map((a) => ({ code: a.code, label: a.libelle, value: a.resolution === 'per-building' ? 3 : a.resolution === 'commune-level' ? 2 : 1 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 3);
 
@@ -166,7 +166,7 @@ export function DecisionCard({
     const lines = [
       `Typhon — Synthèse souscription — ${new Date().toLocaleDateString('fr-FR')}`,
       `Verdict : ${verdict.label}${band ? ` (bande ${band.label})` : ''}`,
-      `Score global : ${scoreGlobal ?? maxScore ?? '—'} / 100`,
+      `Aléas présents : ${presentAleas.length}`,
     ];
     if (drivers.length) {
       lines.push(`Pourquoi : ${drivers.map((d) => `${d.label} ${d.value ?? '—'}/100`).join(' · ')}`);
@@ -197,7 +197,7 @@ export function DecisionCard({
         {/* Score global rétrogradé : petite ligne, jamais le héros. */}
         <div className="decision-score-line" title="Score composite — la décomposition par aléa ci-dessous fait foi">
           <span className="decision-score-num" style={{ color: band?.color }}>
-            {scoreGlobal ?? maxScore ?? '—'}
+            {presentAleas.length}
           </span>
           <span className="decision-score-label">score global /100</span>
           {band && <span className={`d03-pill ${band.cls}`}>{band.label}</span>}
@@ -235,7 +235,7 @@ export function DecisionCard({
             <span className="decision-pill decision-pill-none">Aucun aléa présent recensé</span>
           )}
           {aleas.map((a) => {
-            const aband = a.niveau ? bandForKey(a.niveau) : undefined;
+            const aband = bandForResolution(a.resolution);
             const isOpen = openAlea === a.code;
             return (
               <button

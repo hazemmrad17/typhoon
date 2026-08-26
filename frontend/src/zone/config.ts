@@ -32,6 +32,44 @@ export function bandForKey(key?: string | null): D03Band | undefined {
   return D03.find((b) => b.key === key);
 }
 
+// ---------------------------------------------------------------------------
+// Bandes de RÉSOLUTION (FR-24) — remplacent les bandes D03 comme signal
+// visuel : la qualité du fait (vérifié au bâtiment vs communal) est la seule
+// hiérarchie défendable sans score (constitution §2).
+// ---------------------------------------------------------------------------
+
+export const RESOLUTION_BANDS: D03Band[] = [
+  { key: 'per-building', label: 'Au bâtiment', color: '#B4552D', cls: 'd03-eleve', max: Infinity },
+  { key: 'commune-level', label: 'Commune (décret)', color: '#7A9187', cls: 'd03-faible', max: Infinity },
+  { key: 'commune-level-estimate', label: 'Estimation communale', color: '#8A8984', cls: 'd03-modere', max: Infinity },
+];
+
+export function bandForResolution(resolution?: string | null): D03Band | undefined {
+  return RESOLUTION_BANDS.find((b) => b.key === resolution);
+}
+
+/** Badge compact par résolution (pill des cartes d'aléa, listes de risques). */
+export const RESOLUTION_BADGES: Record<
+  string,
+  { label: string; cls: string; title: string }
+> = {
+  'per-building': {
+    label: 'Au bâtiment',
+    cls: 'chip-on',
+    title: 'Vérifié par test géométrique (polygone WFS) sur cette parcelle.',
+  },
+  'commune-level': {
+    label: 'Commune (décret)',
+    cls: 'chip-mid',
+    title: 'Zonage décrétal communal par nature — pas de résolution plus fine possible.',
+  },
+  'commune-level-estimate': {
+    label: 'Estimation communale',
+    cls: 'chip-mid',
+    title: "Commune recensée ; pas de vérification à l'adresse (source vectorielle indisponible).",
+  },
+};
+
 export function aleaScore(a: { niveau?: string | null }): number {
   const mapping: Record<string, number> = {
     tres_faible: 10,
@@ -132,12 +170,13 @@ export interface AleaDetail {
   libelle: string;
   present: boolean | null;
   present_commune?: boolean | null;
-  niveau?: string | null;
   zonage?: string | null;
   catnat_historique?: CatNatEvent[] | null;
   source?: string;
   url_detail?: string | null;
   erreur?: string | null;
+  /** FR-24 : badge de résolution — LE signal qualité du contrat canonique. */
+  resolution?: 'per-building' | 'commune-level' | 'commune-level-estimate' | null;
 }
 
 export interface RisqueReport {
@@ -151,11 +190,6 @@ export interface RisqueReport {
   aleas: AleaDetail[];
   erreurs_partielles: string[];
   bdnb?: BdnbAsset | null;
-  copernicus?: {
-    donnees?: Record<string, unknown> | null;
-    trajectoire?: Trajectoire | null;
-  } | null;
-  recommandations?: RecommandationsIA | null;
   avertissement?: string;
 }
 
@@ -476,23 +510,3 @@ export interface GeocodeSuggestion {
   lon?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Types du rapport narratif IA (backend app/recommandations/rapport_narratif.py)
-// Endpoint POST /diagnostic/adresse/rapport — body = RisqueReport → RapportNarratif
-// ---------------------------------------------------------------------------
-
-export interface SectionRapport {
-  titre: string;
-  contenu: string;
-  aleas_associes?: string[];
-}
-
-export interface RapportNarratif {
-  introduction: string;
-  sections: SectionRapport[];
-  synthese_finale: string;
-  obligations_reglementaires?: string[] | null;
-  genere_par?: string;
-  metadata?: Record<string, unknown>;
-  avertissement_ia?: string;
-}

@@ -3,11 +3,14 @@
 //     1. Adresse         — hero centré façon Gemini (champ de recherche au centre)
 //     2. Cartographie    — aléas & risques (panneau latéral rétractable) + carte unifiée
 //     3. Analyse         — fiche bâtiment BDNB (panneau latéral rétractable) + carte unifiée
-//     4. Recommandations — recommandations détaillées (RAG Mistral)
+//     4. Recommandations — recommandations détaillées
 //     5. Artisans        — professionnels associés aux travaux
-//     6. Rapport IA      — rapport narratif Mistral + export PDF
 //
-//   Stepper linéaire : les étapes 2-6 sont bloquées tant qu'aucune adresse
+//   Le contrat servi est le DiagnosticRecord canonique (POST /diagnostic/adresse),
+//   adapté en vue historique via zone/canonicalAdapter. Pas de score, pas de
+//   narration IA, pas de Copernicus (constitution §2).
+//
+//   Stepper linéaire : les étapes 2-5 sont bloquées tant qu'aucune adresse
 //   n'a été diagnostiquée — l'étape Adresse passe en état d'erreur (icône
 //   erreur + message) si l'on tente de les atteindre sans rapport.
 // =============================================================================
@@ -15,7 +18,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { UnifiedMap } from '../components/UnifiedMap';
-import { WeatherForecastMap } from '../components/WeatherForecastMap';
 import { BuildingFiche } from '../components/BuildingFiche';
 import { ZoneRecommendations } from '../components/ZoneRecommendations';
 import { ZoneArtisans } from '../components/ZoneArtisans';
@@ -23,7 +25,6 @@ import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
 import { useAuth } from '../typhoon/auth';
-import { ClimateDashboard } from '../components/ClimateDashboard';
 import {
   loadCatNatLatest,
   recordCatNatLatest,
@@ -33,16 +34,14 @@ import {
   API,
   ALEA_ICONS,
   ALEA_ICON_FALLBACK,
-  bandForKey,
   escHtml,
   type AleaDetail,
   type BatimentRisques,
-  type RisqueReport,
-  type RapportNarratif,
   type GeocodeSuggestion,
-  type Trajectoire,
+  type RisqueReport,
 } from '../zone/config';
 import type { RecommendationZone } from '../zone/recommendations';
+import { toRisqueReportView, type CanonicalRecord } from '../zone/canonicalAdapter';
 import {
   addConversation,
   loadConversations,
@@ -52,21 +51,18 @@ import {
 import {
   getCachedDiagnostic,
   putCachedDiagnostic,
-  putCachedRapport,
-  putCachedTrajectoire,
 } from '../zone/diagnosticCache';
 import '../styles/zone.css';
-import '../styles/climate-dashboard.css';
-import '../styles/weather-map.css';
 
 
 /* ── Multi-profils (Phase A) : ordre du stepper par profil.
    Le promoteur reste la vue par défaut et ne voit AUCUNE différence — seul
-   l'ordre/la visibilité des étapes change pour l'assurance et la banque. */
+   l'ordre/la visibilité des étapes change pour l'assurance et la banque.
+   Les étapes « copernicus » et « rapport IA » sont supprimées (constitution §2). */
 const STEP_ORDER: Record<string, string[]> = {
-  promoteur: ['adresse', 'carto', 'analyse', 'recommandations', 'artisans', 'rapport'],
-  assurance: ['adresse', 'analyse', 'decision', 'copernicus', 'rapport'],
-  banque: ['adresse', 'carto', 'analyse', 'rapport'],
+  promoteur: ['adresse', 'carto', 'analyse', 'recommandations', 'artisans'],
+  assurance: ['adresse', 'analyse', 'decision'],
+  banque: ['adresse', 'carto', 'analyse'],
 };
 
 /* Libellés du stepper par étape logique (le promoteur garde ses libellés actuels). */
@@ -75,21 +71,9 @@ const STEP_LABELS: Record<string, string> = {
   carto: 'Cartographie',
   decision: 'Synthèse',
   analyse: 'Bien & contexte',
-  copernicus: 'État climatique',
   recommandations: 'Recommandations',
   artisans: 'Artisans',
-  rapport: 'Rapport IA',
 };
-
-/* Erreur structurée du rapport IA — contrat backend /diagnostic/adresse/rapport :
-   { error: <code>, detail: <message utilisateur>, cause: <cause technique> } */
-interface RapportError {
-  code: string; // mistral_api_key_manquante | mistral_indisponible | reseau | http_*
-  status?: number;
-  message: string; // message lisible
-  hint?: string; // conseil actionnable (facultatif)
-  cause?: string; // détail technique (affiché dans <details>)
-}
 
 export function Zone() {
   const navigate = useNavigate();
@@ -137,12 +121,6 @@ export function Zone() {
   const [detailedRecommendationsError, setDetailedRecommendationsError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
   const [, setConversations] = useState<Conversation[]>(() => loadConversations());
-  const [rapport, setRapport] = useState<RapportNarratif | null>(null);
-  const [rapportLoading, setRapportLoading] = useState(false);
-  const [rapportError, setRapportError] = useState<RapportError | null>(null);
-  /* Export PDF du rapport IA (jsPDF côté client) — vrai bouton de téléchargement. */
-  const [exportingPdf, setExportingPdf] = useState(false);
-  const [exportPdfError, setExportPdfError] = useState<string | null>(null);
   /* Panneau latéral (aléas ou fiche) rétractable : replié → carte plein écran. */
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   /* Moteur de carte : Mapbox GL JS (unique, pas de fallback MapLibre). */
@@ -151,10 +129,6 @@ export function Zone() {
      `batiment_groupe_risques`, story D2) du bâtiment diagnostiqué : alimente
      la section Risques de la fiche BDNB et le mode carte « Risques bâtiment ». */
   const [batimentRisques, setBatimentRisques] = useState<BatimentRisques | null>(null);
-  /* Trajectoire climatique (variables brutes F par péril et par horizon) —
-     capturée depuis la réponse /diagnostic/fast (digital_twin.trajectoire),
-     la même requête qui alimente déjà les recommandations. Vue « Assurance ». */
-  const [trajectoire, setTrajectoire] = useState<Trajectoire | null>(null);
   const [, setCatNatLatest] = useState<Record<string, number>>(() => loadCatNatLatest());
 
   useEffect(() => {
@@ -189,9 +163,7 @@ export function Zone() {
     setDetailedRecommendationsError(null);
     setDetailedRecommendationZones({});
     try {
-      /* Les recommandations détaillées dépendaient de /diagnostic/fast
-         (supprimé dans le rewrite backend). La trajectoire est désormais
-         extraite directement du contrat /diagnostic/adresse (copernicus.trajectoire). */
+      /* Recommandations détaillées : source retirée avec Copernicus (OQ-4). */
       setDetailedRecommendationsError('Recommandations détaillées non disponibles (en cours de réécriture).');
     } catch (error) {
       if (requestId !== recommendationsRequestId.current) return;
@@ -247,15 +219,11 @@ export function Zone() {
     setDiagError(null);
 
     /* Cache local : si l'adresse a déjà été diagnostiquée (et est encore
-       fraîche), on restitue le rapport complet + le rapport Mistral sans
-       aucun appel réseau. */
+       fraîche), on restitue le rapport complet sans aucun appel réseau. */
     if (!opts.force) {
       const cached = getCachedDiagnostic(value);
       if (cached) {
         setReport(cached.report);
-        setRapport(cached.rapport ?? null);
-        setTrajectoire(cached.trajectoire ?? null);
-        setRapportError(null);
         setFromCache(true);
         setConversations((prev) => {
           const next = addConversation(prev, cached.report.adresse_normalisee || value);
@@ -271,16 +239,6 @@ export function Zone() {
               .map((a) => a.code)
           )
         );
-        /* Diagnostic en cache ANTÉRIEUR à la mise en service Copernicus : le
-           rapport restauré n'a pas de trajectoire. On la rattrape en
-           arrière-plan (POST /diagnostic/fast uniquement — pas de
-           re-diagnostic complet) : la restitution reste instantanée, la
-           carte de décision se remplit dès que le contrat arrive, et le
-           cache est mis à jour (putCachedTrajectoire) pour ne le faire
-           qu'une seule fois par adresse. */
-        if (!cached.trajectoire) {
-          void backfillTrajectoire(cached.report.adresse_normalisee || value);
-        }
         return;
       }
     }
@@ -289,21 +247,21 @@ export function Zone() {
     if (!opts.force) {
       /* Nouveau diagnostic : on nettoie l'ancien état pendant le chargement. */
       setReport(null);
-      setRapport(null);
-      setRapportError(null);
       setFromCache(false);
-      setTrajectoire(null);
     }
-    /* Rafraîchissement forcé : on laisse le rapport actuel (et son badge
-       éventuel) en place pendant le chargement — il n'est remplacé qu'en
-       cas de succès, jamais effacé si le réseau échoue. */
+    /* Rafraîchissement forcé : on laisse le rapport actuel en place pendant
+       le chargement — remplacé seulement en cas de succès. */
     recommendationsRequestId.current += 1;
     setDetailedRecommendationZones({});
     setDetailedRecommendationsLoading(false);
     setDetailedRecommendationsError(null);
 
     try {
-      const resp = await fetch(`${API}/diagnostic/adresse?q=${encodeURIComponent(value)}`);
+      const resp = await fetch(`${API}/diagnostic/adresse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adresse: value }),
+      });
 
       if (!resp.ok) {
         let detail = `Erreur ${resp.status}`;
@@ -317,39 +275,33 @@ export function Zone() {
         return;
       }
 
-      const r = (await resp.json()) as RisqueReport;
-      setReport(r);
-      /* Trajectoire climatique (vue Assurance) : extraite directement du contrat
-         copernicus renvoyé par GET /diagnostic/adresse. */
-      if (r.copernicus?.trajectoire && typeof r.copernicus.trajectoire === 'object') {
-        const traj = r.copernicus.trajectoire as Trajectoire;
-        setTrajectoire(traj);
-        putCachedTrajectoire(r.adresse_normalisee || value, traj);
-      }
+      const record = (await resp.json()) as CanonicalRecord;
+      const view = toRisqueReportView(record);
+      setReport(view);
       /* Watchlist : enregistre le dernier comptage CatNat observé pour cette
          adresse (données déjà fetchées — alimente le badge sans appel réseau). */
-      const catnatCount = (r.aleas || []).reduce(
+      const catnatCount = (view.aleas || []).reduce(
         (acc, a) => acc + (a.catnat_historique?.length ?? 0),
         0
       );
       setCatNatLatest((prev) => {
-        const next = recordCatNatLatest(prev, r.adresse_normalisee || value, catnatCount);
+        const next = recordCatNatLatest(prev, view.adresse_normalisee || value, catnatCount);
         saveCatNatLatest(next);
         return next;
       });
-      void loadDetailedRecommendations(r.adresse_normalisee || value);
+      void loadDetailedRecommendations(view.adresse_normalisee || value);
       setFromCache(false); // données fraîches du réseau → badge « en cache » retiré
-      putCachedDiagnostic(r); // sauvegarde le résultat pour les prochains passages
-      /* Historique « Récent » (localStorage) : adresse normalisée ou requête brute. */
+      putCachedDiagnostic(view); // sauvegarde le résultat pour les prochains passages
+      /* Historique « Récent » (localStorage). */
       setConversations((prev) => {
-        const next = addConversation(prev, r.adresse_normalisee || value);
+        const next = addConversation(prev, view.adresse_normalisee || value);
         saveConversations(next);
         return next;
       });
       setStepError(false); // l'adresse est validée → étapes suivantes débloquées
       setStep(1); // → étape Cartographie (aléas + carte unifiée)
       setVisibleLayerKeys(
-        new Set((r.aleas || []).filter((a) => a.present !== null).map((a) => a.code))
+        new Set((view.aleas || []).filter((a) => a.present !== null).map((a) => a.code))
       );
     } catch {
       setDiagError('Erreur réseau — backend inaccessible ?');
@@ -358,107 +310,10 @@ export function Zone() {
     }
   }
 
-  /* Rattrapage trajectoire pour les diagnostics en cache antérieurs à
-     Copernicus : relance GET /diagnostic/adresse pour obtenir la trajectoire
-     incluse dans le contrat copernicus. Fail-soft : si le contrat ou la
-     trajectoire manquent, on laisse la restitution en cache telle quelle. */
-  async function backfillTrajectoire(address: string) {
-    try {
-      const resp = await fetch(`${API}/diagnostic/adresse?q=${encodeURIComponent(address)}`);
-      if (!resp.ok) return;
-      const report = (await resp.json()) as RisqueReport;
-      if (report.copernicus?.trajectoire && typeof report.copernicus.trajectoire === 'object') {
-        const traj = report.copernicus.trajectoire as Trajectoire;
-        setTrajectoire(traj);
-        putCachedTrajectoire(address, traj);
-      }
-    } catch {
-      /* Non bloquant : la restitution en cache reste valable. */
-    }
-  }
-
-  /* Rafraîchissement forcé : ignore le cache et relance le diagnostic réseau,
-     puis met à jour l'entrée cachée (le rapport Mistral est conservé). */
+  /* Rafraîchissement forcé : ignore le cache et relance le diagnostic réseau. */
   function handleRefresh() {
     if (!report) return;
     void runDiagnosis(report.adresse_normalisee || report.adresse_saisie, { force: true });
-  }
-
-  /* ── Rapport narratif IA (Mistral) — POST RisqueReport → RapportNarratif ── */
-  async function loadRapport() {
-    if (!report || rapport || rapportLoading) return;
-    /* Rapport Mistral déjà généré pour cette adresse (cache) → restitution
-       immédiate, aucun appel IA. */
-    if (!fromCache) {
-      const cached = getCachedDiagnostic(report.adresse_normalisee || report.adresse_saisie);
-      if (cached?.rapport) {
-        setRapport(cached.rapport);
-        return;
-      }
-    }
-    setRapportLoading(true);
-    setRapportError(null);
-    try {
-      const resp = await fetch(`${API}/diagnostic/adresse/rapport`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(report),
-      });
-      if (!resp.ok) {
-        // Contrat backend : detail = { error, detail, cause }. On gère aussi
-        // le cas FastAPI où detail est une simple chaîne ({"detail": "..."}).
-        const err = await resp.json().catch(() => null);
-        const rawDetail = err?.detail;
-        const d =
-          rawDetail && typeof rawDetail === 'object'
-            ? rawDetail
-            : rawDetail && typeof rawDetail === 'string'
-              ? { detail: rawDetail }
-              : err ?? {};
-        setRapportError({
-          code: d.error || `http_${resp.status}`,
-          status: resp.status,
-          message:
-            d.detail ||
-            (resp.status === 503
-              ? 'Le rapport IA nécessite une clé Mistral côté serveur.'
-              : `Le service n'a pas pu générer le rapport (HTTP ${resp.status}).`),
-          hint: hintForRapportError(d.error, resp.status),
-          cause: d.cause || undefined,
-        });
-        return;
-      }
-      const r = (await resp.json()) as RapportNarratif;
-      setRapport(r);
-      putCachedRapport(report, r); // on garde le rapport IA généré (coûteux)
-    } catch (err) {
-      // fetch() a échoué : backend injoignable, CORS, DNS…
-      setRapportError({
-        code: 'reseau',
-        message: 'Impossible de joindre le serveur pour générer le rapport IA.',
-        hint: 'Vérifiez que le backend Typhon est démarré (port 8000) puis réessayez.',
-        cause: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setRapportLoading(false);
-    }
-  }
-
-  /* Conseil actionnable selon le code d'erreur renvoyé par le backend. */
-  function hintForRapportError(code: string | undefined, status: number): string | undefined {
-    if (code === 'mistral_api_key_manquante') {
-      return "Ajoutez MISTRAL_API_KEY au fichier .env du backend puis redémarrez l'API.";
-    }
-    if (code === 'mistral_indisponible' || status === 502) {
-      return 'Le service Mistral est momentanément indisponible ou a expiré — réessayez dans quelques instants.';
-    }
-    if (status === 503) {
-      return 'Le service de génération IA n\'est pas configuré côté serveur.';
-    }
-    if (status >= 500) {
-      return 'Le serveur a rencontré une erreur interne — réessayez, ou relancez le backend si cela persiste.';
-    }
-    return undefined;
   }
 
   /* ── Navigation du stepper (linéaire : impossible de sauter l'adresse) ── */
@@ -472,25 +327,6 @@ export function Zone() {
     setStepError(false);
     setStep(i);
     if (i === 0) window.setTimeout(() => heroInputRef.current?.focus(), 80);
-    if (i === 5 && report) void loadRapport();
-  }
-
-  /* ── Export PDF du rapport IA (client-side, jsPDF importé à la demande) ── */
-  async function handleExportPdf() {
-    if (!report || !rapport || exportingPdf) return;
-    setExportingPdf(true);
-    setExportPdfError(null);
-    try {
-      const { exportRapportPdf } = await import('../zone/pdf-export');
-      await exportRapportPdf(report, rapport);
-    } catch (err) {
-      console.error('Export PDF du rapport IA échoué :', err);
-      setExportPdfError(
-        "L'export PDF a échoué dans le navigateur. Réessayez — si le problème persiste, utilisez le lien « PDF officiel Géorisques »."
-      );
-    } finally {
-      setExportingPdf(false);
-    }
   }
 
   /* ── Visibilité des couches ── */
@@ -517,8 +353,7 @@ export function Zone() {
      L'index d'une étape est sa POSITION dans l'ordre du profil ; les rendus
      ci-dessous testent l'ID de l'étape courante (currentStepId), jamais la
      position brute — chaque profil peut donc réordonner librement ses étapes
-     (l'assurance est volontairement Adresse → Bien & contexte →
-     Synthèse → Projection climatique → Rapport IA). */
+     (l'assurance est volontairement Adresse → Bien & contexte → Synthèse). */
   const profileSteps = (STEP_ORDER[profile] || STEP_ORDER.promoteur).map((id, i) => ({
     id,
     label: STEP_LABELS[id] ?? id,
@@ -526,7 +361,7 @@ export function Zone() {
   }));
   const currentStepId = profileSteps[step]?.id ?? 'adresse';
   /* Étapes qui embarquent la carte unifiée (panneau latéral + carte). */
-  const isMapStep = ['carto', 'analyse', 'decision', 'copernicus'].includes(currentStepId);
+  const isMapStep = ['carto', 'analyse', 'decision'].includes(currentStepId);
 
   /* ── Dérivés du rapport ── */
   /* Aléas dont la source est disponible (présents OU absents) : les absents
@@ -541,21 +376,15 @@ export function Zone() {
   );
 
   /* « Tout masquer » n'est affiché que si TOUS les aléas à source disponible
-     sont visibles — c'est ce que la carte peut réellement montrer (les aléas
-     absents ont leurs couches communales WMS/WFS). */
+     sont visibles — c'est ce que la carte peut réellement montrer. */
   const allTogglableVisible =
     report !== null &&
     togglableAleas.length > 0 &&
     togglableAleas.every((a) => visibleLayerKeys.has(a.code));
 
   /* ── Cartographie & Synthèse : couches visibles dès l'arrivée ──
-     Sur les onglets qui affichent les aléas Géorisques (Cartographie et
-     Synthèse), toutes les couches disponibles passent visibles
-     automatiquement, une seule fois par rapport — y compris celles où
-     l'adresse n'est PAS concernée (les couches communales WMS/WFS se voient
-     ainsi sans avoir à cliquer chaque œil). Les toggles manuels du panneau
-     restent ensuite le contrôle : quitter puis revenir à l'onglet ne
-     réinitialise pas le choix de l'utilisateur. */
+     Toutes les couches disponibles passent visibles automatiquement, une
+     seule fois par rapport ; les toggles manuels reprennent ensuite la main. */
   const autoShownReportRef = useRef<string | null>(null);
   useEffect(() => {
     if ((currentStepId !== 'carto' && currentStepId !== 'decision') || !report) return;
@@ -567,16 +396,6 @@ export function Zone() {
       .map((a) => a.code);
     if (codes.length) setVisibleLayerKeys(new Set(codes));
   }, [currentStepId, report]);
-
-  /* ── Projection climatique : rattrapage auto-réparant ──
-     Si on arrive sur l'onglet sans trajectoire (diagnostic servi du cache
-     avant Copernicus, ou backfill initial échoué — backend momentanément
-     injoignable), on retente le rattrapage /diagnostic/fast. L'onglet se
-     remplit dès que le backend répond, sans re-diagnostiquer l'adresse. */
-  useEffect(() => {
-    if (currentStepId !== 'copernicus' || !report || trajectoire) return;
-    void backfillTrajectoire(report.adresse_normalisee || report.adresse_saisie);
-  }, [currentStepId, report, trajectoire]);
 
   const pdfUrl = report
     ? `${API}/diagnostic/adresse/rapport-pdf?lat=${report.lat}&lon=${report.lon}`
@@ -770,8 +589,6 @@ export function Zone() {
                   {report ? (
                     currentStepId === 'analyse' ? (
                       <BuildingFiche report={report} risques={batimentRisques} />
-                    ) : currentStepId === 'copernicus' ? (
-                      <ClimateDashboard lat={report.lat} lon={report.lon} report={report} />
                     ) : currentStepId === 'decision' || currentStepId === 'carto' ? (
                   <section className="zone-results">
                     <div className="addr-heading">
@@ -909,13 +726,6 @@ export function Zone() {
                     <md-icon>chevron_right</md-icon>
                   </md-icon-button>
                 )}
-                {currentStepId === 'copernicus' ? (
-                  <WeatherForecastMap
-                    lat={report?.lat ?? 48.8566}
-                    lon={report?.lon ?? 2.3522}
-                    data={null}
-                  />
-                ) : (
                   <UnifiedMap
                     report={report}
                     visibleLayerKeys={visibleLayerKeys}
@@ -930,7 +740,6 @@ export function Zone() {
                     buildingsLimit={currentStepId === 'carto' || currentStepId === 'decision' ? 500 : 200}
                     fitZoom={16.5}
                   />
-                )}
               </section>
             </div>
 
@@ -954,147 +763,6 @@ export function Zone() {
               />
             </section>
 
-            {/* ÉTAPE 6 — RAPPORT IA (narratif Mistral + export PDF) */}
-            <section className="zone-report" hidden={currentStepId !== 'rapport'}>
-              {!report ? (
-                <div className="report-empty">
-                  <md-icon>description</md-icon>
-                  <h2>Aucun diagnostic</h2>
-                  <p>Diagnostiquez d'abord une adresse pour générer le rapport d'analyse IA.</p>
-                  <md-filled-button onClick={() => goToStep(0)}>
-                    <md-icon slot="icon">search</md-icon> Chercher une adresse
-                  </md-filled-button>
-                </div>
-              ) : rapportLoading ? (
-                <div className="report-empty">
-                  <md-icon>psychology</md-icon>
-                  <h2>Génération du rapport IA…</h2>
-                  <p>Mistral analyse les données Géorisques de {report.adresse_normalisee}.</p>
-                  <md-linear-progress indeterminate></md-linear-progress>
-                </div>
-              ) : rapportError ? (
-                <div className="report-error" role="alert">
-                  <div className="report-error-icon">
-                    <md-icon>
-                      {rapportError.code === 'mistral_api_key_manquante'
-                        ? 'vpn_key'
-                        : rapportError.code === 'reseau'
-                          ? 'wifi_off'
-                          : 'cloud_off'}
-                    </md-icon>
-                  </div>
-                  <h2>Rapport indisponible</h2>
-                  <p className="report-error-msg">{rapportError.message}</p>
-                  {rapportError.hint ? (
-                    <p className="report-error-hint">
-                      <md-icon>lightbulb</md-icon>
-                      <span>{rapportError.hint}</span>
-                    </p>
-                  ) : null}
-                  {rapportError.cause ? (
-                    <details className="report-error-details">
-                      <summary>
-                        <md-icon>bug_report</md-icon> Détail technique
-                      </summary>
-                      <code>
-                        [{rapportError.code}
-                        {rapportError.status ? ` · HTTP ${rapportError.status}` : ''}] {rapportError.cause}
-                      </code>
-                    </details>
-                  ) : null}
-                  <div className="report-error-actions">
-                    <md-filled-button onClick={() => void loadRapport()}>
-                      <md-icon slot="icon">refresh</md-icon> Réessayer
-                    </md-filled-button>
-                    <md-text-button onClick={() => goToStep(0)}>
-                      <md-icon slot="icon">search</md-icon> Nouvelle adresse
-                    </md-text-button>
-                  </div>
-                </div>
-              ) : rapport ? (
-                <>
-                  <header className="report-header">
-                    <div className="report-title">
-                      <h2>Rapport d'analyse IA</h2>
-                      <p className="report-meta">
-                        {report.adresse_normalisee} · Code INSEE {report.code_insee} ·{' '}
-                        {report.date_generation}
-                      </p>
-                    </div>
-                    <div className="report-export-group">
-                      <md-filled-button
-                        className="pdf-btn report-export"
-                        disabled={exportingPdf}
-                        onClick={() => void handleExportPdf()}
-                      >
-                        <md-icon slot="icon">picture_as_pdf</md-icon>
-                        {exportingPdf ? 'Export en cours…' : 'Exporter en PDF'}
-                      </md-filled-button>
-                      <a
-                        className="report-export-secondary"
-                        href={pdfUrl}
-                        target="_blank"
-                        rel="noopener"
-                      >
-                        PDF officiel Géorisques (ERRIAL)
-                      </a>
-                      {exportPdfError && <p className="report-export-error">{exportPdfError}</p>}
-                    </div>
-                  </header>
-
-                  <p className="report-intro">{rapport.introduction}</p>
-
-                  <div className="report-sections">
-                    {rapport.sections.map((s, i) => (
-                      <article className="report-section" key={i}>
-                        <h3>{s.titre}</h3>
-                        <p>{s.contenu}</p>
-                      </article>
-                    ))}
-                  </div>
-
-                  <aside className="report-synthese">
-                    <md-icon>summarize</md-icon>
-                    <div>
-                      <h3>Synthèse finale</h3>
-                      <p>{rapport.synthese_finale}</p>
-                    </div>
-                  </aside>
-
-                  {rapport.obligations_reglementaires &&
-                    rapport.obligations_reglementaires.length > 0 && (
-                      <section className="report-obligations">
-                        <h3>Obligations réglementaires</h3>
-                        <ul>
-                          {rapport.obligations_reglementaires.map((o, i) => (
-                            <li key={i}>{o}</li>
-                          ))}
-                        </ul>
-                      </section>
-                    )}
-
-                  <p className="report-avertissement">
-                    <md-icon>info</md-icon>
-                    <span>
-                      {rapport.avertissement_ia ||
-                        "Ce rapport est généré automatiquement par IA à partir des données publiques Géorisques normalisées. Il ne remplace pas l'ERRIAL ni l'avis d'un expert."}
-                    </span>
-                  </p>
-                </>
-              ) : (
-                <div className="report-empty">
-                  <md-icon>description</md-icon>
-                  <h2>Prêt à générer</h2>
-                  <p>
-                    Générez le rapport narratif IA à partir du diagnostic{' '}
-                    {report.adresse_normalisee}.
-                  </p>
-                  <md-filled-button onClick={() => void loadRapport()}>
-                    <md-icon slot="icon">auto_awesome</md-icon> Générer le rapport
-                  </md-filled-button>
-                </div>
-              )}
-            </section>
           </div>
         </>
       )}
@@ -1320,6 +988,24 @@ function Suggestions({
 }
 
 /* ── Carte d'aléa ── */
+const RESOLUTION_BADGES: Record<string, { label: string; cls: string; title: string }> = {
+  'per-building': {
+    label: 'Au bâtiment',
+    cls: 'chip-on',
+    title: 'Vérifié par test géométrique (polygone WFS) sur cette parcelle.',
+  },
+  'commune-level': {
+    label: 'Commune (décret)',
+    cls: 'chip-mid',
+    title: 'Zonage décrétal communal par nature — pas de résolution plus fine possible.',
+  },
+  'commune-level-estimate': {
+    label: 'Estimation communale',
+    cls: 'chip-mid',
+    title: 'Commune recensée ; pas de vérification à l\'adresse (source vectorielle indisponible).',
+  },
+};
+
 function AleaCard({
   alea,
   visible,
@@ -1329,7 +1015,6 @@ function AleaCard({
   visible: boolean;
   onToggle: () => void;
 }) {
-  const band = alea.niveau ? bandForKey(alea.niveau) : undefined;
   const icon = ALEA_ICONS[alea.code] || ALEA_ICON_FALLBACK;
   const isError = alea.present === null;
 
@@ -1354,6 +1039,7 @@ function AleaCard({
     : communePresent
       ? { label: "Pas de risque à l'adresse", cls: 'chip-none' }
       : null;
+  const resolutionBadge = RESOLUTION_BADGES[alea.resolution ?? ''] ?? null;
   /* L'œil est actif dès que la source est disponible (présent OU absent) :
      un aléa non présent reste visualisable via la couche communale WMS/WFS.
      Seule une source indisponible (present=null) n'a rien à montrer. */
@@ -1362,12 +1048,17 @@ function AleaCard({
   return (
     <div className={`alea-card${isAbsent ? ' absent' : ''}${isError ? ' error-partial' : ''}`}>
       <div className="alea-head">
-        <span className={`alea-icon ${band ? band.cls : ''}`}>
+        <span className="alea-icon">
           <md-icon>{icon}</md-icon>
         </span>
         <span className="alea-name">{alea.libelle}</span>
-        {band && (alea.present === true || alea.present_commune === true) ? (
-          <span className={`d03-pill ${band.cls}`}>{band.label}</span>
+        {resolutionBadge ? (
+          <span
+            className={`d03-pill ${resolutionBadge.cls}`}
+            title={resolutionBadge.title}
+          >
+            {resolutionBadge.label}
+          </span>
         ) : null}
         <md-icon-button
           className="eye-btn"

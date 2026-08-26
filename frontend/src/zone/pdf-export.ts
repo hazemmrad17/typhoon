@@ -11,15 +11,7 @@
 // =============================================================================
 
 import { jsPDF } from 'jspdf';
-import {
-  D03,
-  bandForKey,
-  aleaScore,
-  type AleaDetail,
-  type RisqueReport,
-  type RapportNarratif,
-  type Trajectoire,
-} from './config';
+import { bandForResolution } from './config';
 
 /* ── Palette PDF (alignée sur la marque Typhon) ── */
 const NAVY = '#0C2233';
@@ -120,648 +112,24 @@ function sanitizePdfText(input: string): string {
     .trim();
 }
 
-export async function exportRapportPdf(report: RisqueReport, rapport: RapportNarratif): Promise<void> {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-  const wordmark = await svgToPngDataUrl(TYPHOON_WORDMARK_SVG, 674.53 / 119.6);
-
-  let y = 0;
-
-  /* ── Helpers de mise en page (mutent `y` partagé) ── */
-  const ensureSpace = (h: number) => {
-    if (y + h > SAFE_BOTTOM) {
-      doc.addPage();
-      y = 18;
-    }
-  };
-
-  /** Titre de section : barre accent à gauche + texte navy. */
-  const sectionTitle = (title: string) => {
-    ensureSpace(10);
-    doc.setFillColor(ACCENT);
-    doc.rect(M, y - 3.4, 1.7, 5.6, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12.5);
-    doc.setTextColor(NAVY);
-    doc.text(title, M + 4.6, y);
-    y += 5.6;
-  };
-
-  /** Paragraphe justifié à gauche, avec passage à la page automatique. */
-  const paragraph = (text: string, size = 10, lineH = 4.9, color = INK, style: 'normal' | 'italic' = 'normal') => {
-    doc.setFont('helvetica', style);
-    doc.setFontSize(size);
-    doc.setTextColor(color);
-    const lines = doc.splitTextToSize(sanitizePdfText(text), CW);
-    for (const ln of lines) {
-      if (y > SAFE_BOTTOM) {
-        doc.addPage();
-        y = 18;
-      }
-      doc.text(ln, M, y);
-      y += lineH;
-    }
-  };
-
-  const divider = () => {
-    doc.setDrawColor(LINE);
-    doc.setLineWidth(0.35);
-    doc.line(M, y, PAGE_W - M, y);
-    y += 7;
-  };
-
-  /* ══ Bande d'en-tête de marque ══ */
-  doc.setFillColor(NAVY);
-  doc.rect(0, 0, PAGE_W, 46, 'F');
-  doc.setFillColor(NAVY_LIGHT);
-  doc.rect(0, 0, PAGE_W, 3, 'F');
-  doc.setFillColor(ACCENT);
-  doc.rect(0, 46, PAGE_W, 2.2, 'F');
-
-  if (wordmark) {
-    doc.addImage(wordmark, 'PNG', M, 15, 52, 52 / (674.53 / 119.6));
-  } else {
-    /* Repli : si la rasterisation du SVG a échoué, la marque reste présente. */
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(24);
-    doc.setTextColor('#FFFFFF');
-    doc.text('TYPHOON', M, 23);
-  }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.setTextColor('#FFFFFF');
-  doc.text('Rapport d’analyse IA', PAGE_W - M, 17, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(WHITE_60);
-  doc.text('Diagnostic géo-risque · Résilience climatique du bâtiment', PAGE_W - M, 23, { align: 'right' });
-
-  y = 56;
-
-  /* ══ Métadonnées d'adresse ══ */
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15.5);
-  doc.setTextColor(NAVY);
-  const adresseLines = doc.splitTextToSize(sanitizePdfText(report.adresse_normalisee || report.adresse_saisie), CW);
-  doc.text(adresseLines, M, y);
-  y += adresseLines.length * 6.4;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(MUTED);
-  doc.text(
-    `Code INSEE ${report.code_insee} · GPS ${report.lat.toFixed(5)}°N, ${report.lon.toFixed(5)}°E · ${report.alea_count} aléa(s) recensé(s) · Données Géorisques (BRGM/MTE)`,
-    M,
-    y
-  );
-  y += 4.6;
-  doc.text(`Rapport généré par Typhon le ${report.date_generation} — analyse IA (Mistral)`, M, y);
-  y += 4;
-  divider();
-
-  /* ══ Score de risque global (jauge D03) ══ */
-  const presentAleas = (report.aleas || []).filter((a) => a.present === true);
-  const maxScore = presentAleas.length ? Math.max(...presentAleas.map((a) => aleaScore(a))) : null;
-  const globalBand = maxScore != null ? D03.find((b) => maxScore < b.max) || D03[D03.length - 1] : null;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11.5);
-  doc.setTextColor(NAVY);
-  doc.text('Score de risque global', M, y);
-  y += 3;
-
-  const gap = 0.9;
-  const segW = (CW - 4 * gap) / 5;
-  const gy = y;
-  D03.forEach((b, i) => {
-    doc.setFillColor(b.color);
-    doc.rect(M + i * (segW + gap), gy, segW, 4.6, 'F');
-  });
-  if (maxScore != null) {
-    const pct = Math.min(1, maxScore / 100);
-    doc.setFillColor('#FFFFFF');
-    doc.circle(M + CW * pct, gy + 2.3, 2.6, 'F');
-    doc.setFillColor(INK);
-    doc.circle(M + CW * pct, gy + 2.3, 1.7, 'F');
-  }
-  y += 8;
-
-  if (maxScore != null && globalBand) {
-    const label = `${maxScore}/100 · ${globalBand.label}`;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    const tw = doc.getTextWidth(label) + 8;
-    doc.setFillColor(globalBand.color);
-    doc.roundedRect(M, y - 3.4, tw, 6.4, 3.2, 3.2, 'F');
-    doc.setTextColor('#FFFFFF');
-    doc.text(label, M + 4, y + 0.5);
-    y += 10;
-  } else {
-    y += 3;
-  }
-
-  /* ══ Tableau des aléas recensés ══ */
-  const rows = (report.aleas || []).filter((a) => a.present !== false);
-  if (rows.length) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(NAVY);
-    doc.text('Aléas recensés — Géorisques', M, y);
-    y += 4.6;
-
-    const xB = M + 88;
-    const xC = M + 116;
-    const xD = PAGE_W - M;
-    const rowH = 6.6;
-
-    /* En-tête du tableau (redessiné après chaque saut de page). */
-    const drawTableHeader = () => {
-      doc.setFillColor(NAVY);
-      doc.rect(M, y, CW, 6.4, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor('#FFFFFF');
-      doc.text('Aléa', M + 1.5, y + 4.4);
-      doc.text('Statut', xB + 1.5, y + 4.4);
-      doc.text('Niveau', xC + 1.5, y + 4.4);
-      doc.text('Score /100', xD, y + 4.4, { align: 'right' });
-      y += 6.4;
-    };
-    drawTableHeader();
-
-    const shown = rows.slice(0, 14);
-    shown.forEach((a, i) => {
-      if (y + rowH > SAFE_BOTTOM) {
-        doc.addPage();
-        y = 18;
-        drawTableHeader();
-      }
-      if (i % 2 === 1) {
-        doc.setFillColor(ROW_ALT);
-        doc.rect(M, y, CW, rowH, 'F');
-      }
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(INK);
-      const name = doc.splitTextToSize(sanitizePdfText(a.libelle), 84)[0];
-      doc.text(name, M + 1.5, y + 4.3);
-
-      let status: string;
-      let statusColor: string;
-      if (a.present === true) {
-        status = 'Concerné';
-        statusColor = OK;
-      } else if (a.present === false) {
-        status = 'Non concerné';
-        statusColor = MUTED;
-      } else {
-        status = 'Source indisponible';
-        statusColor = MUTED;
-      }
-      doc.setTextColor(statusColor);
-      doc.text(status, xB + 1.5, y + 4.3);
-
-      const b = bandForKey(a.niveau);
-      if (a.present === true) {
-        if (b) {
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(8.5);
-          const tw = doc.getTextWidth(b.label) + 4.5;
-          doc.setFillColor(b.color);
-          doc.roundedRect(xC + 1, y + 1.6, tw, 5.2, 2.6, 2.6, 'F');
-          doc.setTextColor('#FFFFFF');
-          doc.text(b.label, xC + 3.2, y + 4.8);
-        } else {
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(MUTED);
-          doc.text('—', xC + 1.5, y + 4.3);
-        }
-      } else {
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(MUTED);
-        doc.text('—', xC + 1.5, y + 4.3);
-      }
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(INK);
-      doc.text(a.present === true ? String(aleaScore(a)) : '—', xD, y + 4.3, { align: 'right' });
-      y += rowH;
-    });
-
-    if (rows.length > 14) {
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8.5);
-      doc.setTextColor(MUTED);
-      doc.text(`+ ${rows.length - 14} autre(s) aléa(s) — détail complet sur Géorisques`, M, y + 3.5);
-      y += 8;
-    } else {
-      y += 2;
-    }
-    divider();
-  }
-
-  /* ══ Fiche du bien (BDNB) ══ */
-  const batiment = report.bdnb?.batiment;
-  if (batiment) {
-    const fields: Array<[string, string]> = (
-      [
-        ['Année de construction', batiment.annee_construction != null ? String(batiment.annee_construction) : null],
-        ['Murs', batiment.mat_mur_txt],
-        ['Toiture', batiment.mat_toit_txt],
-        ['Niveaux', batiment.nb_niveau != null ? String(batiment.nb_niveau) : null],
-        ['Hauteur', batiment.hauteur_mean != null ? `${batiment.hauteur_mean} m` : null],
-        ['Surface au sol', batiment.surface_emprise_sol != null ? `${batiment.surface_emprise_sol} m²` : null],
-        ['Usage', batiment.usage_niveau_1_txt],
-        ['Aléa argile (BDNB)', batiment.alea_argile],
-      ] as Array<[string, string | null]>
-    ).filter(([, v]) => v != null && v.trim() !== '') as Array<[string, string]>;
-
-    if (fields.length) {
-      sectionTitle('Fiche du bien — BDNB');
-      const line = fields.map(([l, v]) => `${l} : ${v}`).join('   ·   ');
-      paragraph(line);
-      y += 1;
-      divider();
-    }
-  }
-
-  /* ══ Sections du rapport IA ══ */
-  if (rapport.introduction) {
-    sectionTitle('Introduction');
-    paragraph(rapport.introduction);
-    y += 2;
-  }
-
-  (rapport.sections || []).forEach((s) => {
-    if (!s.contenu) return;
-    sectionTitle(s.titre || 'Analyse');
-    paragraph(s.contenu);
-    y += 2;
-  });
-
-  /* ══ Synthèse finale (encadrée) ══ */
-  if (rapport.synthese_finale) {
-    const synLines = doc.splitTextToSize(sanitizePdfText(rapport.synthese_finale), CW - 14);
-    const boxH = synLines.length * 4.9 + 17;
-    ensureSpace(boxH);
-    doc.setFillColor(TINT);
-    doc.roundedRect(M, y - 1, CW, boxH, 2.5, 2.5, 'F');
-    doc.setFillColor(ACCENT);
-    doc.rect(M, y - 1, 2.2, boxH, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(ACCENT);
-    doc.text('Synthèse finale', M + 6, y + 5);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(INK);
-    let ty = y + 11;
-    for (const ln of synLines) {
-      doc.text(ln, M + 6, ty);
-      ty += 4.9;
-    }
-    y += boxH + 8;
-  }
-
-  /* ══ Obligations réglementaires ══ */
-  const obligations = (rapport.obligations_reglementaires || []).filter((o) => o && o.trim());
-  if (obligations.length) {
-    sectionTitle('Obligations réglementaires');
-    obligations.forEach((o) => {
-      const lines = doc.splitTextToSize(sanitizePdfText(o), CW - 6);
-      const h = lines.length * 4.8 + 2;
-      ensureSpace(h);
-      doc.setFillColor(ACCENT);
-      doc.circle(M + 1.4, y - 1.8, 0.9, 'F');
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(INK);
-      let ly = y;
-      for (const ln of lines) {
-        doc.text(ln, M + 5, ly);
-        ly += 4.8;
-      }
-      y = ly + 1.5;
-    });
-    y += 2;
-  }
-
-  /* ══ Avertissement ══ */
-  const avert = rapport.avertissement_ia;
-  if (avert) {
-    const warnLines = doc.splitTextToSize(sanitizePdfText(avert), CW - 8);
-    const boxH = warnLines.length * 3.8 + 11;
-    ensureSpace(boxH);
-    doc.setFillColor(WARN_TINT);
-    doc.roundedRect(M, y - 1, CW, boxH, 2, 2, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(WARN_INK);
-    doc.text('Avertissement', M + 4, y + 3.6);
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8);
-    doc.setTextColor(MUTED);
-    let wy = y + 7;
-    for (const ln of warnLines) {
-      doc.text(ln, M + 4, wy);
-      wy += 3.8;
-    }
-    y = wy + 5;
-  }
-
-  /* ══ Pied de page (toutes pages) ══ */
-  const total = doc.getNumberOfPages();
-  for (let i = 1; i <= total; i++) {
-    doc.setPage(i);
-    doc.setDrawColor(LINE);
-    doc.setLineWidth(0.3);
-    doc.line(M, FOOTER_TOP, PAGE_W - M, FOOTER_TOP);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(MUTED);
-    doc.text('Généré par Typhon · Sources : Géorisques (BRGM/MTE), BDNB, Mistral', M, FOOTER_TOP + 5);
-    doc.text(`Page ${i} / ${total}`, PAGE_W - M, FOOTER_TOP + 5, { align: 'right' });
-  }
-
-  const datePart = (report.date_generation || '').slice(0, 10);
-  doc.save(`rapport_typhoon_${report.code_insee || 'adresse'}_${datePart}.pdf`);
+export interface PortfolioPdfItem {
+  address: string;
+  status: string;
+  result?: {
+    adresse?: { normalisee?: string };
+    aleas?: Array<{
+      code: string;
+      libelle: string;
+      present: boolean | null;
+      resolution?: 'per-building' | 'commune-level' | 'commune-level-estimate' | null;
+    }>;
+    erreurs_partielles?: string[];
+  } | null;
+  error?: string | null;
 }
-
-// =============================================================================
-//   Export PDF assurance (Ticket 2 — insurerpagesplan)
-//   Même système visuel que le rapport générique (bande de marque, palette,
-//   pied paginé), plus :
-//     · tableau de trajectoire décomposé par horizon (2026 / 2050 / 2100),
-//       valeurs brutes F par péril (mêmes données que la carte de décision)
-//     · champs organisation / référence (saisis sur l'étape Rapport)
-//     · disclaimer « ne remplace pas l'ERRIAL officiel » (texte bloquant :
-//       à faire valider par conformité avant usage client réel)
-// =============================================================================
-
-export interface InsurerPdfInput {
-  report: RisqueReport;
-  trajectoire: Trajectoire | null;
-  aleas: AleaDetail[];
-  /** Nom de l'organisation (assureur) — saisi sur l'étape Rapport. */
-  organisation?: string;
-  /** Référence du dossier souscription. */
-  reference?: string;
-}
-
-const DISCLAIMER = (
-  'Ce document est généré automatiquement par Typhon à partir de données ' +
-  'publiques (Géorisques/BRGM, BDNB, Open-Meteo, Copernicus CDS). Il ne ' +
-  'remplace pas l\u2019ERRIAL officiel ni l\u2019avis d\u2019un expert en ' +
-  'assurance — à faire valider par la conformité avant usage en souscription.'
-);
-
-/** Verdict de souscription — même règle que DecisionCard. */
-function insurerVerdict(band: { label: string; key: string } | null): string {
-  if (!band) return 'À expertiser';
-  if (band.key === 'critique') return 'Refus possible';
-  if (band.key === 'eleve') return 'À expertiser';
-  return 'Acceptable';
-}
-
-export async function exportInsurerPdf(input: InsurerPdfInput): Promise<void> {
-  const { report, trajectoire, aleas, organisation, reference } = input;
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-  const wordmark = await svgToPngDataUrl(TYPHOON_WORDMARK_SVG, 674.53 / 119.6);
-
-  let y = 0;
-  const ensureSpace = (h: number) => {
-    if (y + h > SAFE_BOTTOM) {
-      doc.addPage();
-      y = 18;
-    }
-  };
-  const sectionTitle = (title: string) => {
-    ensureSpace(10);
-    doc.setFillColor(ACCENT);
-    doc.rect(M, y - 3.4, 1.7, 5.6, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12.5);
-    doc.setTextColor(NAVY);
-    doc.text(title, M + 4.6, y);
-    y += 5.6;
-  };
-  const paragraph = (text: string, size = 10, lineH = 4.9, color = INK) => {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(size);
-    doc.setTextColor(color);
-    const lines = doc.splitTextToSize(sanitizePdfText(text), CW);
-    for (const ln of lines) {
-      if (y > SAFE_BOTTOM) {
-        doc.addPage();
-        y = 18;
-      }
-      doc.text(ln, M, y);
-      y += lineH;
-    }
-  };
-
-  /* ══ Bande d'en-tête de marque ══ */
-  doc.setFillColor(NAVY);
-  doc.rect(0, 0, PAGE_W, 46, 'F');
-  doc.setFillColor(NAVY_LIGHT);
-  doc.rect(0, 0, PAGE_W, 3, 'F');
-  doc.setFillColor(ACCENT);
-  doc.rect(0, 46, PAGE_W, 2.2, 'F');
-  if (wordmark) {
-    doc.addImage(wordmark, 'PNG', M, 15, 52, 52 / (674.53 / 119.6));
-  } else {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(24);
-    doc.setTextColor('#FFFFFF');
-    doc.text('TYPHOON', M, 23);
-  }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.setTextColor('#FFFFFF');
-  doc.text('Fiche de décision souscription', PAGE_W - M, 17, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(WHITE_60);
-  doc.text('Diagnostic géo-risque · Trajectoire climatique du bâtiment', PAGE_W - M, 23, { align: 'right' });
-
-  y = 56;
-
-  /* ══ Métadonnées d'adresse + organisation / référence ══ */
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15.5);
-  doc.setTextColor(NAVY);
-  const adresseLines = doc.splitTextToSize(sanitizePdfText(report.adresse_normalisee || report.adresse_saisie), CW);
-  doc.text(adresseLines, M, y);
-  y += adresseLines.length * 6.4;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(MUTED);
-  doc.text(
-    `Code INSEE ${report.code_insee} · GPS ${report.lat.toFixed(5)}°N, ${report.lon.toFixed(5)}°E · ${report.alea_count} aléa(s) recensé(s)`,
-    M,
-    y
-  );
-  y += 4.6;
-
-  if (organisation || reference) {
-    doc.text(
-      `Organisation : ${sanitizePdfText(organisation || '—')} · Référence : ${sanitizePdfText(reference || '—')}`,
-      M,
-      y
-    );
-    y += 4.6;
-  }
-  doc.text(`Généré par Typhon le ${report.date_generation}`, M, y);
-  y += 4;
-  doc.setDrawColor(LINE);
-  doc.setLineWidth(0.35);
-  doc.line(M, y, PAGE_W - M, y);
-  y += 7;
-
-  /* ══ Verdict + score ══ */
-  const presentAleas = (aleas || []).filter((a) => a.present === true);
-  const maxScore = presentAleas.length ? Math.max(...presentAleas.map((a) => aleaScore(a))) : null;
-  const globalBand = maxScore != null ? D03.find((b) => maxScore < b.max) || D03[D03.length - 1] : null;
-
-  sectionTitle('Verdict de souscription');
-  const verdictText = `${insurerVerdict(globalBand)} — score ${maxScore ?? '—'}/100${globalBand ? ` (${globalBand.label})` : ''}`;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(globalBand?.color ?? NAVY);
-  doc.text(sanitizePdfText(verdictText), M, y);
-  y += 8;
-
-  /* ══ Tableau de trajectoire : péril × horizon (valeurs brutes F) ══ */
-  const perils = trajectoire?.perils ?? {};
-  const perilEntries = Object.entries(perils);
-  if (perilEntries.length) {
-    sectionTitle('Trajectoire climatique — décomposition par péril');
-    const horizons = [2026, 2050, 2100];
-    const rowH = 7;
-    const x1 = M;
-    const x2 = M + 62;
-    const colW = (CW - 62) / horizons.length;
-
-    const drawHeader = () => {
-      doc.setFillColor(NAVY);
-      doc.rect(M, y, CW, 6.6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor('#FFFFFF');
-      doc.text('Péril', x1 + 1.5, y + 4.6);
-      horizons.forEach((h, i) => {
-        doc.text(String(h), x2 + i * colW + colW / 2, y + 4.6, { align: 'center' });
-      });
-      y += 6.6;
-    };
-    drawHeader();
-
-    perilEntries.forEach(([, p], idx) => {
-      if (y + rowH > SAFE_BOTTOM) {
-        doc.addPage();
-        y = 18;
-        drawHeader();
-      }
-      if (idx % 2 === 1) {
-        doc.setFillColor(ROW_ALT);
-        doc.rect(M, y, CW, rowH, 'F');
-      }
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(INK);
-      doc.text(doc.splitTextToSize(sanitizePdfText(p.label), 58)[0], x1 + 1.5, y + 4.6);
-      horizons.forEach((h, i) => {
-        const pt = p.points.find((x) => x.horizon === h);
-        const val = pt && pt.type !== 'indisponible' ? pt.valeur : null;
-        const cell = val != null ? String(val) : '—';
-        doc.setFont('helvetica', val != null ? 'bold' : 'normal');
-        doc.setTextColor(val != null ? NAVY : MUTED);
-        doc.text(cell, x2 + i * colW + colW / 2, y + 4.6, { align: 'center' });
-      });
-      y += rowH;
-    });
-    y += 5;
-
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8);
-    doc.setTextColor(MUTED);
-    doc.text(
-      'Valeurs brutes F (0-100) par variable d\u2019aléa — 2026 observé, 2050 projeté (Open-Meteo), 2100 projeté (Copernicus CDS, scénario RCP). Jamais combinées entre périls.',
-      M,
-      y
-    );
-    y += 8;
-  }
-
-  /* ══ Aléas présents (rappel compact) ══ */
-  if (presentAleas.length) {
-    sectionTitle('Aléas recensés');
-    const line = presentAleas
-      .map((a) => {
-        const b = bandForKey(a.niveau);
-        return `${a.libelle}${b ? ` (${b.label})` : ''}`;
-      })
-      .join('   ·   ');
-    paragraph(line);
-    y += 2;
-  }
-
-  /* ══ Disclaimer (texte bloquant — à valider conformité) ══ */
-  const warnLines = doc.splitTextToSize(DISCLAIMER, CW - 8);
-  const boxH = warnLines.length * 3.8 + 11;
-  ensureSpace(boxH);
-  doc.setFillColor(WARN_TINT);
-  doc.roundedRect(M, y - 1, CW, boxH, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(WARN_INK);
-  doc.text('Avertissement', M + 4, y + 3.6);
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(8);
-  doc.setTextColor(MUTED);
-  let wy = y + 7;
-  for (const ln of warnLines) {
-    doc.text(ln, M + 4, wy);
-    wy += 3.8;
-  }
-  y = wy + 5;
-
-  /* ══ Pied de page ══ */
-  const total = doc.getNumberOfPages();
-  for (let i = 1; i <= total; i++) {
-    doc.setPage(i);
-    doc.setDrawColor(LINE);
-    doc.setLineWidth(0.3);
-    doc.line(M, FOOTER_TOP, PAGE_W - M, FOOTER_TOP);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(MUTED);
-    doc.text('Généré par Typhon · Sources : Géorisques (BRGM/MTE), BDNB, Open-Meteo, Copernicus CDS', M, FOOTER_TOP + 5);
-    doc.text(`Page ${i} / ${total}`, PAGE_W - M, FOOTER_TOP + 5, { align: 'right' });
-  }
-
-  const datePart = (report.date_generation || '').slice(0, 10);
-  doc.save(`decision_souscription_${report.code_insee || 'adresse'}_${datePart}.pdf`);
-}
-
-// =============================================================================
-//   Export PDF de synthèse Portfolio (Ticket 4 — insurerpagesplan)
-//   Résumé du livre : total, terminées, en erreur, à expertiser + tableau des
-//   adresses par bande D03. Réutilise la bande de marque et le pied paginé.
-// =============================================================================
 
 export interface PortfolioPdfInput {
-  items: Array<{
-    address: string;
-    status: string;
-    result: {
-      adresse?: { label?: string };
-      score_global?: number | null;
-      niveau_global?: string | null;
-    } | null;
-    error?: string | null;
-  }>;
+  items: PortfolioPdfItem[];
   histogram: Array<{ key: string; label: string; color: string; count: number }>;
   total: number;
   completed: number;
@@ -803,7 +171,7 @@ export async function exportPortfolioPdf(input: PortfolioPdfInput): Promise<void
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(WHITE_60);
-  doc.text('Diagnostic géo-risque en lot · Trajectoire climatique', PW - MM, 18.5, { align: 'right' });
+  doc.text('Diagnostic géo-risque par bâtiment · faits + provenance', PW - MM, 18.5, { align: 'right' });
   doc.text(`Généré le ${new Date().toISOString().slice(0, 10)}`, PW - MM, 23, { align: 'right' });
 
   y = 44;
@@ -815,8 +183,12 @@ export async function exportPortfolioPdf(input: PortfolioPdfInput): Promise<void
   doc.text('Chiffres clés', MM, y);
   y += 5;
   const review = items.filter((it) => {
-    const k = it.result?.niveau_global;
-    return k === 'eleve' || k === 'critique';
+    const aleas = it.result?.aleas ?? [];
+    return (
+      aleas.length > 0 &&
+      aleas.every((a) => a.resolution !== 'per-building') &&
+      aleas.some((a) => a.resolution === 'commune-level-estimate')
+    );
   }).length;
   const stats: Array<[string, number | string, string]> = [
     ['Adresses', total, NAVY],
@@ -903,13 +275,18 @@ export async function exportPortfolioPdf(input: PortfolioPdfInput): Promise<void
       doc.setFillColor(ROW_ALT);
       doc.rect(MM, y, CWW, rowH, 'F');
     }
-    const band = bandForKey(it.result?.niveau_global);
+    const aleasIt = it.result?.aleas ?? [];
+    const hasPerBuilding = aleasIt.some((a) => a.resolution === 'per-building');
+    const band = bandForResolution(
+      hasPerBuilding ? 'per-building' : aleasIt[0]?.resolution ?? null
+    );
     const statusLabel = it.status === 'completed' ? 'OK' : it.status === 'failed' ? 'Erreur' : it.status;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(INK);
-    doc.text(doc.splitTextToSize(sanitizePdfText(it.result?.adresse?.label ?? it.address), CWW * 0.5 - 6)[0], MM + 2, y + 4.2);
-    doc.text(it.result?.score_global != null ? String(it.result.score_global) : '—', MM + CWW * 0.5 + 2, y + 4.2);
+    doc.text(doc.splitTextToSize(sanitizePdfText(it.result?.adresse?.normalisee ?? it.address), CWW * 0.5 - 6)[0], MM + 2, y + 4.2);
+    const nbB = aleasIt.filter((a) => a.resolution === 'per-building').length;
+    doc.text(String(nbB), MM + CWW * 0.5 + 2, y + 4.2);
     doc.setTextColor(band?.color ?? MUTED);
     doc.text(band?.label ?? '—', MM + CWW * 0.62 + 2, y + 4.2);
     doc.setTextColor(it.status === 'failed' ? WARN_INK : MUTED);

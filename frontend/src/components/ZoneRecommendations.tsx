@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from 'react';
-import { ALEA_ICON_FALLBACK, ALEA_ICONS, aleaScore, bandForKey, type RisqueReport } from '../zone/config';
+import { RESOLUTION_BADGES, ALEA_ICON_FALLBACK, ALEA_ICONS, type RisqueReport } from '../zone/config';
 import { aggregateRecommendations, formatCost, formatZoneLabel, type RecommendationZone } from '../zone/recommendations';
 
 type Props = {
@@ -31,14 +31,15 @@ export function ZoneRecommendations({ report, zones, loading, error }: Props) {
     : grouped.keys().next().value as string | undefined;
 
   if (!report) return <div className="zone-reco-empty"><md-icon>recommend</md-icon><h2>Aucun diagnostic</h2><p>Diagnostiquez une adresse pour afficher ses recommandations.</p></div>;
-  const risks = (report.aleas || []).filter((alea) => alea.present === true).sort((a, b) => aleaScore(b) - aleaScore(a));
+  const risks = (report.aleas || []).filter((alea) => alea.present === true)
+      .sort((a, b) => (a.resolution === 'per-building' ? -1 : 0) - (b.resolution === 'per-building' ? -1 : 0));
 
   return <div className="zone-recommendations-view">
     <header className="zone-reco-header"><div><span className="zone-reco-eyebrow">Plan d’adaptation du bien</span><h2>Recommandations détaillées</h2><p>{report.adresse_normalisee}</p></div><div className="zone-reco-count"><strong>{recommendations.length}</strong><span>mesures documentées</span></div></header>
 
     <section className="zone-reco-risks">
       <div className="zone-reco-section-title"><div><span>01</span><h3>Risques retenus pour cette adresse</h3></div><small>Classement par criticité calculée</small></div>
-      <div className="zone-reco-risk-grid">{risks.map((risk) => { const score = aleaScore(risk); const band = bandForKey(risk.niveau); return <article className="zone-reco-risk" key={risk.code}><md-icon>{ALEA_ICONS[risk.code] || ALEA_ICON_FALLBACK}</md-icon><div><strong>{risk.libelle}</strong><span>{risk.zonage || band?.label || 'Risque présent'}</span></div><div className={`zone-reco-score ${band?.cls || ''}`}><strong>{score}</strong><small>/100</small></div></article>; })}</div>
+      <div className="zone-reco-risk-grid">{risks.map((risk) => { const badge = RESOLUTION_BADGES[risk.resolution as string] ?? null; return <article className="zone-reco-risk" key={risk.code}><md-icon>{ALEA_ICONS[risk.code] || ALEA_ICON_FALLBACK}</md-icon><div><strong>{risk.libelle}</strong><span>{risk.zonage || badge?.label || 'Risque présent'}</span></div><div className={`zone-reco-score ${badge?.cls || ''}`}><strong>{badge?.label ?? 'Présent'}</strong></div></article>; })}</div>
     </section>
 
     <section className="zone-reco-actions">

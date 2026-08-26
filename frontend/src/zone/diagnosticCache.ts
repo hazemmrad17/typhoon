@@ -1,27 +1,20 @@
 // =============================================================================
 //   TYPHOON — /zone : cache des diagnostics (façon « historique ChatGPT »).
-//   Chaque diagnostic réussi (rapport Géorisques complet + rapport narratif
-//   Mistral) est stocké en localStorage, indexé par adresse normalisée. Un
-//   re-diagnostic de la même adresse (via « Récent » ou le champ) est servi
-//   instantanément depuis le cache — aucun appel réseau. Un TTL garde les
-//   données fraîches (arrêtés CatNat, zonages évoluent).
+//   Chaque diagnostic réussi est stocké en localStorage, indexé par adresse
+//   normalisée. Un re-diagnostic de la même adresse est servi instantanément
+//   depuis le cache — aucun appel réseau. Un TTL garde les données fraîches.
+//
+//   T014 : le rapport narratif Mistral et la trajectoire Copernicus sont
+//   supprimés (constitution §2) — le cache ne porte plus que le record.
 // =============================================================================
 
-import type { RisqueReport, RapportNarratif, Trajectoire } from './config';
+import type { RisqueReport } from './config';
 
 export interface CachedDiagnostic {
   /** Adresse normalisée (clé de recherche, minuscules). */
   key: string;
   report: RisqueReport;
-  /** Rapport narratif Mistral si déjà généré (coûteux → on le conserve). */
-  rapport: RapportNarratif | null;
-  /** Trajectoire climatique (vue Assurance) — capturée depuis /diagnostic/fast. */
-  trajectoire?: Trajectoire | null;
   createdAt: number;
-  rapportAt: number | null;
-  /** Version du prompt/rapport IA qui a généré ce rapport (RAPPORT_VERSION).
-      Un rapport plus ancien est ignoré → régénéré au prochain affichage. */
-  rapportVersion?: number | null;
 }
 
 const STORAGE_KEY = 'typhoon.zone.cache';
@@ -29,14 +22,6 @@ const STORAGE_KEY = 'typhoon.zone.cache';
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Nombre maximum d'entrées conservées (localStorage ≈ 5 Mo). */
 const MAX_ENTRIES = 30;
-
-/**
- * Version du rapport narratif IA (contrat + prompt côté backend, voir
- * backend/app/recommandations/rapport_narratif.py). À incrémenter à chaque
- * modification du prompt système : les rapports mis en cache avec une version
- * antérieure ne sont plus restitués et sont régénérés par Mistral.
- */
-export const RAPPORT_VERSION = 3;
 
 function normKey(address: string): string {
   return address
@@ -50,14 +35,15 @@ export function loadCache(): CachedDiagnostic[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (c): c is CachedDiagnostic =>
         !!c &&
-        typeof c.key === 'string' &&
-        !!c.report &&
-        typeof c.report.adresse_normalisee === 'string'
+        typeof c === 'object' &&
+        typeof (c as CachedDiagnostic).key === 'string' &&
+        !!(c as CachedDiagnostic).report &&
+        typeof (c as CachedDiagnostic).report.adresse_normalisee === 'string'
     );
   } catch {
     return [];
@@ -89,82 +75,16 @@ export function getCachedDiagnostic(address: string): CachedDiagnostic | null {
   const entry = loadCache().find((c) => c.key === key);
   if (!entry) return null;
   if (Date.now() - entry.createdAt > TTL_MS) return null; // expiré → refetch
-  // Rapport généré avec un ancien prompt → on ne le sert plus (régénéré).
-  if (entry.rapport && entry.rapportVersion !== RAPPORT_VERSION) {
-    return { ...entry, rapport: null, rapportAt: null };
-  }
   return entry;
 }
 
 /** Stocke (ou met à jour) un diagnostic complet. */
-export function putCachedDiagnostic(
-  report: RisqueReport,
-  rapport: RapportNarratif | null = null
-): void {
+export function putCachedDiagnostic(report: RisqueReport): void {
   const key = normKey(report.adresse_normalisee || report.adresse_saisie);
   if (!key) return;
   const entries = loadCache();
   const without = entries.filter((c) => c.key !== key);
-  const existing = entries.find((c) => c.key === key);
-  // Un ancien rapport n'est conservé que s'il provient du prompt actuel.
-  const existingRapport =
-    !rapport && existing?.rapport && existing.rapportVersion === RAPPORT_VERSION
-      ? existing.rapport
-      : null;
-  const existingRapportAt =
-    existingRapport && existing ? (existing.rapportAt ?? null) : null;
-  // La trajectoire climatique est rattachée PLUS TARD (réponse asynchrone
-  // /diagnostic/fast → putCachedTrajectoire) : on la conserve telle quelle.
-  // Sans ça, un re-diagnostic ou un rafraîchissement effaçait la trajectoire
-  // de l'entrée cachée jusqu'à la prochaine réponse fast — et si celle-ci
-  // échoue (backend momentanément injoignable), l'onglet « Projection
-  // climatique » restait vide à jamais pour une adresse servie du cache.
-  const existingTrajectoire = existing?.trajectoire ?? undefined;
-  saveCache([
-    {
-      key,
-      report,
-      rapport: rapport ?? existingRapport,
-      trajectoire: existingTrajectoire,
-      createdAt: Date.now(),
-      rapportAt: rapport ? Date.now() : existingRapportAt,
-      rapportVersion: rapport ? RAPPORT_VERSION : (existingRapport ? RAPPORT_VERSION : null),
-    },
-    ...without,
-  ]);
-}
-
-/** Rattache la trajectoire climatique à un diagnostic déjà caché. */
-export function putCachedTrajectoire(address: string, trajectoire: Trajectoire | null): void {
-  const key = normKey(address);
-  if (!key) return;
-  const entries = loadCache();
-  const idx = entries.findIndex((c) => c.key === key);
-  if (idx === -1) return;
-  const next = [...entries];
-  next[idx] = { ...next[idx], trajectoire };
-  saveCache(next);
-}
-
-/** Rattache un rapport narratif Mistral à un diagnostic déjà caché. */
-export function putCachedRapport(report: RisqueReport, rapport: RapportNarratif): void {
-  const key = normKey(report.adresse_normalisee || report.adresse_saisie);
-  if (!key) return;
-  const entries = loadCache();
-  const idx = entries.findIndex((c) => c.key === key);
-  if (idx === -1) {
-    putCachedDiagnostic(report, rapport);
-    return;
-  }
-  const next = [...entries];
-  next[idx] = {
-    ...next[idx],
-    rapport,
-    rapportAt: Date.now(),
-    createdAt: Date.now(),
-    rapportVersion: RAPPORT_VERSION,
-  };
-  saveCache(next);
+  saveCache([{ key, report, createdAt: Date.now() }, ...without]);
 }
 
 /** Supprime l'entrée correspondant à une adresse (suppression de l'historique). */

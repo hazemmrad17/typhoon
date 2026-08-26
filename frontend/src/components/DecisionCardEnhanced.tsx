@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import {
   D03,
-  bandForKey,
+  bandForResolution,
   aleaScore,
   type AleaDetail,
   type Trajectoire,
@@ -90,7 +90,7 @@ function dpeColor(dpe: string | null | undefined): string {
 /* Drill-down « un péril à la fois » */
 function AleaDrillDown({ alea }: { alea: AleaDetail | null }) {
   if (!alea) return null;
-  const aband = alea.niveau ? bandForKey(alea.niveau) : undefined;
+  const aband = bandForResolution(alea.resolution);
   const catnat = alea.catnat_historique ?? [];
   const statut =
     alea.present === true
@@ -259,9 +259,9 @@ export function DecisionCardEnhanced({
 
   const presentAleas = aleas.filter((a) => a.present === true);
   const maxScore =
-    presentAleas.length ? Math.max(...presentAleas.map((a) => aleaScore(a))) : null;
+    presentAleas.length ? Math.max(...presentAleas.map((a) => a.resolution === 'per-building' ? 3 : a.resolution === 'commune-level' ? 2 : 1)) : null
   const band = maxScore != null ? D03.find((b) => (maxScore as number) < b.max) || D03[D03.length - 1] : null;
-  const verdict = verdictFor(band);
+  const verdict = { cls: band?.cls ?? '', label: band?.label ?? 'Aucun aléa recensé', hint: "Qualité de vérification — l'interprétation appartient à l'assureur." };
 
   const perils = trajectoire?.perils ?? {};
 
@@ -276,7 +276,7 @@ export function DecisionCardEnhanced({
     .slice(0, 3);
 
   const aleaDrivers = presentAleas
-    .map((a) => ({ code: a.code, label: a.libelle, value: aleaScore(a) }))
+    .map((a) => ({ code: a.code, label: a.libelle, value: a.resolution === 'per-building' ? 3 : a.resolution === 'commune-level' ? 2 : 1 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 3);
 
@@ -369,7 +369,7 @@ export function DecisionCardEnhanced({
             <span className="decision-pill decision-pill-none">Aucun aléa présent recensé</span>
           )}
           {aleas.map((a) => {
-            const aband = a.niveau ? bandForKey(a.niveau) : undefined;
+            const aband = bandForResolution(a.resolution);
             const isOpen = openAlea === a.code;
             return (
               <button

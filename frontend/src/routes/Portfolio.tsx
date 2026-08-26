@@ -1,95 +1,75 @@
 // =============================================================================
-//   TYPHOON — /portfolio : vue « livre » de l'assureur (Ticket 4 — insurerpagesplan)
-//   Import CSV (une colonne : adresse) → POST /diagnostic/batch (route interne,
-//   sans clé d'API) → polling → tableau (adresse · score · bande D03 ·
-//   résolution · flag « à expertiser »), histogramme des bandes, heatmap
-//   (UnifiedMap en mode points) et exports CSV + PDF de synthèse.
+//   TYPHOON — /portfolio : analyse d'un livre d'adresses en lot (FR-20)
 //
-//   Interface refaite sur le langage Material Web des pages assureur
-//   (dashboard / watchlist) : cartes de stats, zone de dépôt CSV, tableau
-//   avec pastilles D03 et badges de statut.
+//   Import CSV (une colonne : adresse) → POST /diagnostic/batch → polling →
+//   tableau (adresse · aléas vérifiés · résolution la plus fine · flag « à
+//   expertiser »), histogramme des résolutions, heatmap, exports CSV/PDF.
 //
-//   Les résultats de lot vivent en sessionStorage (pas diagnosticCache, qui
-//   est plafonné à 30 entrées pour un historique mono-adresse).
+//   Aucun score : les colonnes portent la QUALITÉ de résolution de chaque
+//   fait (per-building / commune-level / estimation communale), pas un
+//   jugement (constitution §2). Le lot est N × le pipeline canonique.
 // =============================================================================
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { CSSProperties } from 'react';
+import { UnifiedMap } from '../components/UnifiedMap';
 import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';
-import { UnifiedMap, type PortfolioPoint } from '../components/UnifiedMap';
 import { useTyphoonTheme } from '../typhoon/useTyphoonTheme';
 import { useUserProfile } from '../typhoon/useUserProfile';
 import { useAuth } from '../typhoon/auth';
-import { API, D03, bandForKey } from '../zone/config';
-import '../styles/zone.css';
+import { API, RESOLUTION_BADGES, RESOLUTION_BANDS } from '../zone/config';
 
-/* ── Types du contrat batch interne (même forme que la Partner API) ── */
-
-interface BatchItem {
-  address: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  result: {
-    adresse: { label?: string; citycode?: string };
-    score_global?: number;
-    niveau_global?: string;
-    trajectoire?: {
-      perils?: Record<string, { points: { horizon: number; resolution?: string | null }[] }>;
-    } | null;
-  } | null;
-  error?: string | null;
+/* ── Contrat batch canonique (FR-20) ── */
+interface CanonicalResult {
+  schema_version: string;
+  adresse: {
+    saisie: string;
+    normalisee: string;
+    citycode: string;
+    postcode?: string | null;
+    city?: string | null;
+    lat: number;
+    lon: number;
+    geocode_score?: number | null;
+  };
+  aleas: Array<{
+    code: string;
+    libelle: string;
+    present: boolean | null;
+    resolution: 'per-building' | 'commune-level' | 'commune-level-estimate';
+    erreur?: string | null;
+  }>;
+  erreurs_partielles?: string[];
 }
 
 interface BatchPoll {
   batch_id: string;
-  status: string;
-  total: number;
-  completed: number;
-  failed: number;
-  items: BatchItem[];
+  status: 'pending' | 'done';
+  results: CanonicalResult[];
+  item_errors: Array<{ adresse: string; erreur: string }>;
 }
 
 const SESSION_KEY = 'typhoon.portfolio.batch';
 
-/* Découpe un CSV d'adresses (une colonne). Tolérant au BOM, aux guillemets
-   et aux virgules entre guillemets — on ne retient que les lignes non vides,
-   en prenant la première colonne de chaque ligne (l'adresse). */
-function parseAddressCsv(text: string): string[] {
-  const rows: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  const flush = () => {
-    const t = current.trim().replace(/\uFEFF/g, '');
-    if (t && t.toLowerCase() !== 'adresse') rows.push(t);
-    current = '';
-  };
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if ((ch === '\n' || ch === '\r') && !inQuotes) {
-      flush();
-      continue;
-    }
-    if (ch === ',' && !inQuotes) {
-      /* Colonnes multiples : la première colonne est l'adresse. */
-      const t = current.trim().replace(/\uFEFF/g, '');
-      if (t && t.toLowerCase() !== 'adresse') {
-        rows.push(t);
-      }
-      current = '';
-      continue;
-    }
-    current += ch;
-  }
-  flush();
-  return rows;
+interface PortfolioPoint {
+  lat: number;
+  lon: number;
+  label: string;
+  resolution: string | null;
 }
 
-function csvToDataUrl(csv: string): string {
-  return 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+/** Résolution la plus fine présente dans un record (pour histogramme/badge). */
+function finestResolution(r: CanonicalResult): string | null {
+  if (r.aleas.some((a) => a.resolution === 'per-building')) return 'per-building';
+  if (r.aleas.some((a) => a.resolution === 'commune-level')) return 'commune-level';
+  if (r.aleas.some((a) => a.resolution === 'commune-level-estimate')) return 'commune-level-estimate';
+  return null;
+}
+
+/** Estimation communale sans aucun aléa vérifié au bâtiment → à expertiser. */
+function needsExpertReview(r: CanonicalResult): boolean {
+  const finest = finestResolution(r);
+  return r.aleas.length > 0 && finest === 'commune-level-estimate';
 }
 
 export function Portfolio() {
@@ -99,110 +79,97 @@ export function Portfolio() {
   const { profile } = useUserProfile();
   const { signOut } = useAuth();
   const isMobile = useIsMobile();
-
-  const [navCollapsed, setNavCollapsed] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const sidenavRef = useRef<HTMLElement | null>(null);
 
-  /* ── État du lot ── */
-  const [csvText, setCsvText] = useState('');
-  const [csvFileName, setCsvFileName] = useState('');
+  const [batch, setBatch] = useState<BatchPoll | null>(null);
+  const [submittedCount, setSubmittedCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [batch, setBatch] = useState<BatchPoll | null>(null);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const csvAddressesRef = useRef<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
-  const pollTimer = useRef<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  /* Restauration session (rechargement de page). */
+  /* Restauration de session : le batch en cours (polling repris au montage). */
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw) as { batch: BatchPoll; csvText: string; csvFileName: string };
-        if (saved?.batch) {
-          setBatch(saved.batch);
-          setCsvText(saved.csvText || '');
-          setCsvFileName(saved.csvFileName || '');
-        }
-      }
-    } catch { /* ignore */ }
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { batch: BatchPoll };
+      if (saved?.batch) setBatch(saved.batch);
+    } catch {
+      /* entrée corrompue — ignorée */
+    }
   }, []);
 
+  /* Polling tant que le lot est pending. */
   useEffect(() => {
-    return () => {
-      if (pollTimer.current) window.clearInterval(pollTimer.current);
-    };
-  }, []);
-
-  /* Polling pendant le traitement. */
-  useEffect(() => {
-    if (!batch || batch.status === 'completed' || batch.status === 'failed') return;
-    if (pollTimer.current) window.clearInterval(pollTimer.current);
-    pollTimer.current = window.setInterval(async () => {
+    if (!batch || batch.status === 'done') return;
+    let cancelled = false;
+    const id = window.setInterval(async () => {
       try {
         const resp = await fetch(`${API}/diagnostic/batch/${batch.batch_id}`);
-        if (!resp.ok) return;
+        if (!resp.ok || cancelled) return;
         const next = (await resp.json()) as BatchPoll;
-        setBatch(next);
-        sessionStorage.setItem(
-          SESSION_KEY,
-          JSON.stringify({ batch: next, csvText, csvFileName })
-        );
-        if (next.status === 'completed' || next.status === 'failed') {
-          if (pollTimer.current) window.clearInterval(pollTimer.current);
-        }
-      } catch { /* backend down — retry next tick */ }
-    }, 2500);
+        if (!cancelled) setBatch(next);
+      } catch {
+        /* réseau momentané — on retente au tick suivant */
+      }
+    }, 1500);
     return () => {
-      if (pollTimer.current) window.clearInterval(pollTimer.current);
+      cancelled = true;
+      window.clearInterval(id);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batch?.batch_id, batch?.status]);
 
-  async function handleFile(file: File) {
-    setCsvFileName(file.name);
+  async function handleFile(f: File) {
     setError(null);
-    const text = await file.text();
-    setCsvText(text);
-    const addresses = parseAddressCsv(text);
-    if (addresses.length === 0) {
-      setError('Aucune adresse trouvée dans le fichier CSV.');
-      return;
-    }
-    if (addresses.length > 1000) {
-      setError(`Fichier trop grand : ${addresses.length} adresses. Maximum 1 000 pour cette démo.`);
-      return;
-    }
+    setCsvFileName(f.name);
+    const text = await f.text();
+    const addresses = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.toLowerCase().startsWith('adresse'));
+    csvAddressesRef.current = addresses;
     await submit(addresses);
   }
 
   async function submit(addresses: string[]) {
+    if (!addresses.length) {
+      setError('Aucune adresse dans le fichier.');
+      return;
+    }
     setSubmitting(true);
     setError(null);
-    setBatch(null);
     try {
       const resp = await fetch(`${API}/diagnostic/batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses, scenario: 'rcp8_5' }),
+        body: JSON.stringify({ addresses }),
       });
       if (!resp.ok) {
-        const err = await resp.json().catch(() => null);
-        throw new Error(err?.detail || `HTTP ${resp.status}`);
+        let detail = `Erreur ${resp.status}`;
+        try {
+          const err = await resp.json();
+          detail = err.detail?.error || err.detail?.detail || detail;
+          if (err.detail?.error === 'budget_epuise') detail = err.detail.detail || detail;
+        } catch {
+          /* corps non-JSON */
+        }
+        setError(detail);
+        return;
       }
-      const submitResp = (await resp.json()) as { batch_id: string; status: string; total: number };
-      /* Lot initial : items pending. */
+      const submitResp = (await resp.json()) as { batch_id: string; n_accepted: number };
+      setSubmittedCount(submitResp.n_accepted);
       const initial: BatchPoll = {
         batch_id: submitResp.batch_id,
-        status: submitResp.status,
-        total: submitResp.total,
-        completed: 0,
-        failed: 0,
-        items: addresses.map((a) => ({ address: a, status: 'pending' as const, result: null, error: null })),
+        status: 'pending',
+        results: [],
+        item_errors: [],
       };
       setBatch(initial);
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ batch: initial, csvText, csvFileName }));
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ batch: initial }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de soumission du lot.');
     } finally {
@@ -210,71 +177,50 @@ export function Portfolio() {
     }
   }
 
-  /* ── Dérivés du tableau ── */
-  const completedItems = batch?.items.filter((it) => it.status === 'completed') ?? [];
-  const histogram = D03.map((b) => ({
-    band: b,
-    count: completedItems.filter((it) => it.result?.niveau_global === b.key).length,
+  /* ── Dérivés ── */
+  const results = batch?.results ?? [];
+  const itemErrors = batch?.item_errors ?? [];
+  const doneCount = results.length + itemErrors.length;
+
+  const histogram = RESOLUTION_BANDS.map((band) => ({
+    band,
+    count: results.filter((r) => finestResolution(r) === band.key).length,
   }));
   const histogramMax = Math.max(1, ...histogram.map((h) => h.count));
-  const needsReview = completedItems.filter((it) => {
-    const k = it.result?.niveau_global;
-    return k === 'eleve' || k === 'critique';
-  }).length;
+  const needsReview = results.filter(needsExpertReview).length;
 
-  const points: PortfolioPoint[] = completedItems
-    .map((it) => {
-      const r = it.result;
-      const adr = r?.adresse;
-      if (!adr || adr.label == null) return null;
-      /* Résolution : première valeur non nulle des points de trajectoire. */
-      const perils = r?.trajectoire?.perils;
-      let resolution: string | null = null;
-      if (perils) {
-        for (const p of Object.values(perils)) {
-          for (const pt of p.points) {
-            if (pt.resolution) { resolution = pt.resolution; break; }
-          }
-          if (resolution) break;
-        }
-      }
-      const lat = (adr as { lat?: number }).lat;
-      const lon = (adr as { lon?: number }).lon;
-      if (typeof lat !== 'number' || typeof lon !== 'number' || !isFinite(lat) || !isFinite(lon)) return null;
-      return {
-        lat,
-        lon,
-        label: adr.label,
-        band: r?.niveau_global ?? null,
-        score: r?.score_global ?? null,
-      } as PortfolioPoint;
-    })
-    .filter((p): p is PortfolioPoint => p !== null);
+  const points: PortfolioPoint[] = results
+    .filter((r) => Number.isFinite(r.adresse.lat) && Number.isFinite(r.adresse.lon))
+    .map((r) => ({
+      lat: r.adresse.lat,
+      lon: r.adresse.lon,
+      label: r.adresse.normalisee || r.adresse.saisie,
+      resolution: finestResolution(r),
+    }));
+  const showHeatmap = points.length > 0;
 
   function exportCsv() {
     if (!batch) return;
-    const header = 'adresse;score;bande;resolution;a_expertiser;statut';
-    const rows = batch.items.map((it) => {
-      const r = it.result;
-      const band = r?.niveau_global ?? '';
-      const resolution = (() => {
-        const perils = r?.trajectoire?.perils;
-        for (const p of Object.values(perils ?? {})) {
-          for (const pt of p.points) if (pt.resolution) return pt.resolution;
-        }
-        return '';
-      })();
+    const header = 'adresse;aleas_au_batiment;resolution_la_plus_fine;a_expertiser;statut';
+    const rows = results.map((r) => {
+      const perBuilding = r.aleas.filter((a) => a.resolution === 'per-building').length;
+      const res = finestResolution(r);
+      const badge = res ? RESOLUTION_BADGES[res] : null;
       return [
-        `"${(r?.adresse?.label ?? it.address).replace(/"/g, '""')}"`,
-        r?.score_global ?? '',
-        band,
-        resolution,
-        band === 'eleve' || band === 'critique' ? 'OUI' : '',
-        it.status,
+        `"${(r.adresse.normalisee || r.adresse.saisie).replace(/"/g, '""')}"`,
+        String(perBuilding),
+        badge?.label ?? '',
+        needsExpertReview(r) ? 'OUI' : '',
+        'OK',
       ].join(';');
     });
+    for (const e of itemErrors) {
+      rows.push([`"${e.adresse.replace(/"/g, '""')}"`, '', '', '', `Erreur : ${e.erreur}`].join(';'));
+    }
     const a = document.createElement('a');
-    a.href = csvToDataUrl([header, ...rows].join('\n'));
+    a.href =
+      'data:text/csv;charset=utf-8,' +
+      encodeURIComponent('\uFEFF' + [header, ...rows].join('\n'));
     a.download = `portfolio_typhoon_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
   }
@@ -283,21 +229,41 @@ export function Portfolio() {
     if (!batch) return;
     const { exportPortfolioPdf } = await import('../zone/pdf-export');
     await exportPortfolioPdf({
-      items: batch.items,
-      histogram: histogram.map((h) => ({ key: h.band.key, label: h.band.label, color: h.band.color, count: h.count })),
-      total: batch.total,
-      completed: batch.completed,
-      failed: batch.failed,
+      items: [
+        ...results.map((r) => ({
+          address: r.adresse.saisie,
+          status: 'completed',
+          result: {
+            adresse: { normalisee: r.adresse.normalisee },
+            aleas: r.aleas.map((a) => ({
+              code: a.code,
+              libelle: a.libelle,
+              present: a.present,
+              resolution: a.resolution,
+            })),
+            erreurs_partielles: r.erreurs_partielles ?? [],
+          },
+        })),
+        ...itemErrors.map((e) => ({
+          address: e.adresse,
+          status: 'failed',
+          result: null,
+        })),
+      ],
+      histogram: histogram.map((h) => ({
+        key: h.band.key,
+        label: h.band.label,
+        color: h.band.color,
+        count: h.count,
+      })),
+      total: submittedCount || doneCount,
+      completed: results.length,
+      failed: itemErrors.length,
     });
   }
 
-  /* ── CSV : l'adresse est une simple colonne — les points n'ont pas de
-     coordonnées GPS dans le CSV, on n'affiche donc la heatmap que si les
-     résultats portent des coordonnées (trajectoire non garantie). Pour cette
-     version, la heatmap affiche les adresses résolues par bande. */
-  const showHeatmap = points.length > 0;
-
-  const progressPct = batch && batch.total > 0 ? Math.round(((batch.completed + batch.failed) / batch.total) * 100) : 0;
+  const progressPct =
+    submittedCount > 0 ? Math.round((doneCount / submittedCount) * 100) : 0;
 
   return (
     <main
@@ -307,7 +273,7 @@ export function Portfolio() {
       style={{ '--accent': accent } as CSSProperties}
     >
       <ZoneSidenav
-        sidenavRef={sidenavRef}
+        sidenavRef={useRef<HTMLElement | null>(null)}
         collapsed={navCollapsed && !isMobile}
         mobile={isMobile}
         hidden={isMobile && !drawerOpen}
@@ -318,11 +284,11 @@ export function Portfolio() {
         onThemeModeChange={setThemeMode}
         onToggleCollapse={() => (isMobile ? setDrawerOpen(false) : setNavCollapsed((c) => !c))}
         onOpenAccount={() => { setDrawerOpen(false); navigate('/settings/account'); }}
-        onNavigateSettings={(tab) => { setDrawerOpen(false); navigate(`/settings/${tab}`); }}
+        onNavigateSettings={(tab: string) => { setDrawerOpen(false); navigate(`/settings/${tab}`); }}
         onSignOut={() => { void signOut(); setDrawerOpen(false); navigate('/'); }}
         onCloseDrawer={() => setDrawerOpen(false)}
         onNewDiagnostic={() => { setDrawerOpen(false); navigate('/zone'); }}
-        onNavigate={(path) => { setDrawerOpen(false); navigate(path); }}
+        onNavigate={(path: string) => { setDrawerOpen(false); navigate(path); }}
       />
 
       <div className="zone-main">
@@ -338,8 +304,8 @@ export function Portfolio() {
             <div className="account-settings-title">
               <h1>Portfolio</h1>
               <p>
-                Analysez un livre d'adresses en lot : import CSV, bandes D03,
-                cartographie et exports.
+                Analysez un livre d'adresses en lot : import CSV, résolutions
+                par bâtiment, cartographie et exports.
               </p>
             </div>
             <md-filled-button onClick={() => navigate('/zone')}>
@@ -413,31 +379,31 @@ export function Portfolio() {
                 <div className="dash-stat-card">
                   <span className="dash-stat-icon dash-icon-blue"><md-icon>inbox</md-icon></span>
                   <span className="dash-stat-label">Adresses</span>
-                  <span className="dash-stat-value">{batch.total}</span>
+                  <span className="dash-stat-value">{submittedCount || doneCount}</span>
                   <span className="dash-stat-sub">dans le lot</span>
                 </div>
                 <div className="dash-stat-card">
                   <span className="dash-stat-icon dash-icon-green"><md-icon>check_circle</md-icon></span>
-                  <span className="dash-stat-label">Terminées</span>
-                  <span className="dash-stat-value">{batch.completed}</span>
-                  <span className="dash-stat-sub">analysées</span>
+                  <span className="dash-stat-label">Diagnostiquées</span>
+                  <span className="dash-stat-value">{results.length}</span>
+                  <span className="dash-stat-sub">enregistrements complets</span>
                 </div>
                 <div className="dash-stat-card">
                   <span className="dash-stat-icon dash-icon-orange"><md-icon>warning</md-icon></span>
                   <span className="dash-stat-label">À expertiser</span>
                   <span className="dash-stat-value">{needsReview}</span>
-                  <span className="dash-stat-sub">bande Élevé / Critique</span>
+                  <span className="dash-stat-sub">estimation communale uniquement</span>
                 </div>
                 <div className="dash-stat-card">
                   <span className="dash-stat-icon dash-icon-red"><md-icon>error</md-icon></span>
                   <span className="dash-stat-label">En erreur</span>
-                  <span className="dash-stat-value">{batch.failed}</span>
+                  <span className="dash-stat-value">{itemErrors.length}</span>
                   <span className="dash-stat-sub">adresse non reconnue</span>
                 </div>
               </section>
 
               {/* Progression */}
-              {(batch.status === 'processing' || batch.status === 'queued' || batch.status === 'pending') && (
+              {batch.status === 'pending' && (
                 <div className="portfolio-progress">
                   <div className="portfolio-progress-row">
                     <span><md-icon>sync</md-icon> Traitement du lot en cours…</span>
@@ -448,19 +414,19 @@ export function Portfolio() {
                   </div>
                 </div>
               )}
-              {batch.status === 'completed' && (
+              {batch.status === 'done' && (
                 <div className="portfolio-progress done">
                   <div className="portfolio-progress-row">
                     <span><md-icon>check_circle</md-icon> Lot terminé</span>
-                    <strong>{batch.completed}/{batch.total}</strong>
+                    <strong>{doneCount}/{submittedCount || doneCount}</strong>
                   </div>
                 </div>
               )}
 
-              {/* ── Histogramme D03 ── */}
-              <section className="portfolio-histogram" aria-label="Histogramme des bandes D03">
+              {/* ── Histogramme des résolutions ── */}
+              <section className="portfolio-histogram" aria-label="Histogramme des résolutions">
                 <div className="dash-panel-head">
-                  <h2>Répartition par bande D03</h2>
+                  <h2>Répartition par qualité de résolution</h2>
                   <div className="portfolio-export-actions">
                     <md-text-button onClick={exportCsv}>
                       <md-icon slot="icon">file_download</md-icon>
@@ -485,7 +451,7 @@ export function Portfolio() {
                     </div>
                   ))}
                 </div>
-                {histogramMax <= 1 && batch.completed === 0 && (
+                {histogramMax <= 1 && results.length === 0 && (
                   <p className="portfolio-hist-empty">Aucun résultat terminé pour l'instant.</p>
                 )}
               </section>
@@ -493,7 +459,7 @@ export function Portfolio() {
               {/* ── Heatmap ── */}
               {showHeatmap && (
                 <section className="portfolio-map">
-                  <h2>Cartographie des risques</h2>
+                  <h2>Cartographie du livre</h2>
                   <div className="portfolio-map-wrap">
                     <UnifiedMap report={null} points={points} initial3D={false} />
                   </div>
@@ -505,10 +471,8 @@ export function Portfolio() {
                 <div className="portfolio-table-head">
                   <h2>Détail par adresse</h2>
                   <span className={`portfolio-status ${batch.status}`}>
-                    {batch.status === 'completed' ? (
+                    {batch.status === 'done' ? (
                       <><md-icon>check_circle</md-icon> Terminé</>
-                    ) : batch.status === 'failed' ? (
-                      <><md-icon>error</md-icon> Échec partiel</>
                     ) : (
                       <><md-icon>sync</md-icon> En cours…</>
                     )}
@@ -519,58 +483,52 @@ export function Portfolio() {
                     <thead>
                       <tr>
                         <th>Adresse</th>
-                        <th>Score</th>
-                        <th>Bande D03</th>
-                        <th>Résolution</th>
+                        <th>Aléas au bâtiment</th>
+                        <th>Résolution la plus fine</th>
                         <th>À expertiser</th>
                         <th>Statut</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {batch.items.map((it, i) => {
-                        const r = it.result;
-                        const band = r?.niveau_global ? bandForKey(r.niveau_global) : undefined;
-                        let resolution = '—';
-                        const perils = r?.trajectoire?.perils;
-                        if (perils) {
-                          for (const p of Object.values(perils)) {
-                            for (const pt of p.points) {
-                              if (pt.resolution) { resolution = pt.resolution; break; }
-                            }
-                            if (resolution !== '—') break;
-                          }
-                        }
-                        const review = band?.key === 'eleve' || band?.key === 'critique';
+                      {results.map((r, i) => {
+                        const perBuilding = r.aleas.filter((a) => a.resolution === 'per-building').length;
+                        const res = finestResolution(r);
+                        const badge = res ? RESOLUTION_BADGES[res] : null;
+                        const review = needsExpertReview(r);
                         return (
-                          <tr key={i}>
-                            <td className="portfolio-cell-addr" title={r?.adresse?.label ?? it.address}>
-                              {r?.adresse?.label ?? it.address}
+                          <tr key={`${r.adresse.citycode}-${i}`}>
+                            <td className="portfolio-cell-addr" title={r.adresse.normalisee}>
+                              {r.adresse.normalisee || r.adresse.saisie}
                             </td>
-                            <td className="portfolio-cell-score">{r?.score_global ?? '—'}</td>
+                            <td>{perBuilding}</td>
                             <td>
-                              {band ? (
-                                <span className={`d03-pill ${band.cls}`}>{band.label}</span>
+                              {badge ? (
+                                <span className={`d03-pill ${badge.cls}`} title={badge.title}>{badge.label}</span>
                               ) : (
                                 '—'
                               )}
                             </td>
-                            <td>{resolution === 'per-building' ? 'Par bâtiment' : resolution === 'commune-level' ? 'Communale' : resolution === 'grid-cell' ? 'Grille' : resolution}</td>
                             <td>{review ? <span className="portfolio-review-flag">À expertiser</span> : ''}</td>
-                            <td>
-                              <span className={`portfolio-item-status ${it.status}`}>
-                                {it.status === 'completed' ? 'OK' : it.status === 'failed' ? 'Erreur' : it.status}
-                              </span>
-                            </td>
+                            <td><span className="portfolio-item-status completed">OK</span></td>
                           </tr>
                         );
                       })}
+                      {itemErrors.map((e, i) => (
+                        <tr key={`err-${i}`}>
+                          <td className="portfolio-cell-addr">{e.adresse}</td>
+                          <td>—</td>
+                          <td>—</td>
+                          <td></td>
+                          <td><span className="portfolio-item-status failed">Erreur</span></td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
-                {batch.items.some((it) => it.status === 'failed') && (
+                {itemErrors.length > 0 && (
                   <p className="portfolio-partial-note">
-                    Certaines adresses n'ont pas pu être analysées (adresse non reconnue) — elles
-                    n'affectent pas le reste du lot.
+                    Certaines adresses n'ont pas pu être analysées — elles n'affectent pas le reste
+                    du lot.
                   </p>
                 )}
               </section>
@@ -581,9 +539,7 @@ export function Portfolio() {
             <section className="portfolio-empty">
               <md-icon>dashboard</md-icon>
               <h2>Aucun lot chargé</h2>
-              <p>
-                Déposez un fichier CSV d'adresses pour lancer l'analyse du livre.
-              </p>
+              <p>Déposez un fichier CSV d'adresses pour lancer l'analyse du livre.</p>
             </section>
           )}
         </div>

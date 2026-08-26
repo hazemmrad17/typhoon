@@ -26,11 +26,12 @@ import {
   type BdnbBatiment,
   type D03Band,
   type RisqueReport,
+  D03,
+  RESOLUTION_BANDS,
+  bandForResolution,
   WMS_LAYER_MAP,
   WFS_LAYER_MAP,
-  D03,
   ALEA_ICONS,
-  bandForKey,
   escHtml,
 } from '../zone/config';
 import {
@@ -685,11 +686,11 @@ export function UnifiedMap({
     if (!rep) return;
 
     const aleaRows = (rep.aleas || [])
-      .filter((a) => a.present === true && a.niveau)
+      .filter((a) => a.present === true && a.resolution)
       .map((a) => {
-        const band = bandForKey(a.niveau);
+        const band = bandForResolution(a.resolution);
         const color = band?.color ?? '#8A8984';
-        const label = band?.label ?? a.niveau ?? '';
+        const label = band?.label ?? '';
         const icon = ALEA_ICONS[a.code] ?? 'crisis_alert';
         return (
           `<div class="mb-risk-row">` +
@@ -737,7 +738,7 @@ export function UnifiedMap({
            leurs couches WMS/WFS montrent la donnée communale — l'utilisateur
            peut visualiser le risque même s'il n'est pas présent à l'adresse. */
         if (a.present === null) continue;
-        const band = a.niveau ? bandForKey(a.niveau) : undefined;
+        const band = bandForResolution(a.resolution);
         const color = band?.color || '#7A9187';
         // Aplats au sol, pas d'extrusion — restent visibles en 3D (cf.
         // applyRiskLayersVisibility) même si moins lisibles en caméra inclinée
@@ -763,7 +764,7 @@ export function UnifiedMap({
           if (merged.length) {
             const data = {
               type: 'FeatureCollection' as const,
-              features: merged.map((f) => ({ ...f, properties: { ...(f.properties || {}), niveau: a.niveau } })),
+              features: merged.map((f) => ({ ...f, properties: { ...(f.properties || {}), resolution: a.resolution ?? null } })),
             };
             map.addSource(sourceId, { type: 'geojson', data });
             const outlineId = `${layerId}-outline`;
@@ -779,7 +780,7 @@ export function UnifiedMap({
                 layout: { visibility: visible ? 'visible' : 'none' },
                 paint: {
                   'line-color': color,
-                  'line-width': a.niveau === 'critique' ? 2.5 : 1.8,
+                  'line-width': 1.8,
                   'line-opacity': 0.9,
                   'line-dasharray': [4, 3],
                 },
@@ -800,7 +801,7 @@ export function UnifiedMap({
                 layout: { visibility: visible ? 'visible' : 'none' },
                 paint: {
                   'line-color': color,
-                  'line-width': a.niveau === 'critique' ? 3 : a.niveau === 'eleve' ? 2 : 1.2,
+                  'line-width': 1.4,
                   'line-opacity': 0.6,
                 },
               });
@@ -828,9 +829,9 @@ export function UnifiedMap({
           data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [rep.lon, rep.lat] }, properties: {} }] },
         });
         const circle: any = { 'circle-radius': 10, 'circle-color': color, 'circle-opacity': 0.65 };
-        if (a.niveau && D03.find((d) => d.key === a.niveau)) {
+        if (a.resolution === 'per-building') {
           circle['circle-stroke-color'] = color;
-          circle['circle-stroke-width'] = a.niveau === 'critique' ? 3 : 1;
+          circle['circle-stroke-width'] = 2;
         }
         map.addLayer({ id: layerId, type: 'circle', source: sourceId, layout: { visibility: visible ? 'visible' : 'none' }, paint: circle });
         track(layerId);
@@ -1085,7 +1086,7 @@ export function UnifiedMap({
    * absents — un aléa absent activé montre sa couche communale WMS/WFS et
    * compte donc dans la légende), pas la liste fixe des 5 bandes. */
   const visibleAleas = showRisks && report ? (report.aleas || []).filter((a) => visibleLayerKeys.has(a.code)) : [];
-  const activeLegendBands: D03Band[] = D03.filter((b) => visibleAleas.some((a) => a.niveau === b.key));
+  const activeLegendBands: D03Band[] = RESOLUTION_BANDS.filter((b) => visibleAleas.some((a) => a.resolution === b.key));
 
   return (
     <div className="mb-demo-wrap">
