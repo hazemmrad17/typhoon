@@ -18,7 +18,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_serializer, model_validator
 from typing_extensions import Annotated
 
 SCHEMA_VERSION = "1.0"
@@ -113,10 +113,12 @@ class AleaRecord(_Strict):
             )
         return self
 
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler) -> dict[str, Any]:
         """Optionnels toujours présents (null) ; carve-out unique et explicite :
-        `per_building` n'est sérialisé que si un test géométrique a eu lieu."""
-        data = super().model_dump(**kwargs)
+        `per_building` n'est sérialisé que si un test géométrique a eu lieu.
+        mode='wrap' : s'applique aussi quand le parent sérialise ses enfants."""
+        data = handler(self)
         if data.get("per_building") is None:
             data.pop("per_building", None)
         return data
