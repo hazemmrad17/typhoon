@@ -31,11 +31,11 @@ def test_percentile_rejects_empty_and_bounds():
 
 
 def test_build_report_verdict_against_budget():
-    report = build_report([1.0] * 10 + [20.0], budget_s=10.0)  # un outlier
-    assert report["n"] == 11
+    # 100 mesures à 1 s + un outlier à 20 s : le p95 reste dans la masse.
+    report = build_report([1.0] * 100 + [20.0], budget_s=10.0)
+    assert report["n"] == 101
     assert report["p50_s"] == 1.0
     assert report["max_s"] == 20.0
-    # l'outlier ne doit pas faire échouer le budget si le p95 tient
     assert report["budget_respected"] is True
 
 
