@@ -1,7 +1,7 @@
 # Plan — Typhoon v1: Per-Building Hazard × Vulnerability Contract
 
 **Spec:** `docs/workflow/spec.md` (approved 2026-08-25)
-**Status:** approved
+**Status:** in-progress — T001–T016,T018 terminés · T008 qualification humaine en attente · T017 non déclenché
 **Conventions:** one task = one branch = one PR; task ID prefixes commits (`feat(T004): …`). Tests are written before implementation (constitution §4); existing tests are never modified during feature work — deletions happen only inside the T001/T002 change sets.
 
 ---
