@@ -28,7 +28,7 @@ from app.core.config import settings
 _LIMITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/diagnostic/batch"),
-        ("GET", "/diagnostic/adresse"),
+        ("POST", "/diagnostic/adresse"),
     }
 )
 

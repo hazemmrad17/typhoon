@@ -23,6 +23,10 @@ def _make_app() -> FastAPI:
     async def batch() -> dict:
         return {"ok": True}
 
+    @app.post("/diagnostic/adresse")
+    async def adresse() -> dict:
+        return {"ok": True}
+
     @app.get("/health")
     async def health() -> dict:
         return {"ok": True}
@@ -63,4 +67,4 @@ def test_limit_is_per_route_key(monkeypatch):
     n'est jamais throttlé, même s'il ressemble à une route limitée."""
     assert ("POST", "/diagnostic") not in rl._LIMITED_ROUTES
     assert ("POST", "/diagnostic/batch") in rl._LIMITED_ROUTES
-    assert ("GET", "/diagnostic/adresse") in rl._LIMITED_ROUTES
+    assert ("POST", "/diagnostic/adresse") in rl._LIMITED_ROUTES

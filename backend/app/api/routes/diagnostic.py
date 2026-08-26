@@ -34,7 +34,6 @@ from app.connectors.bdnb import (
     fetch_buildings_in_bbox,
 )
 from app.connectors.geocoding import GeocodingError, geocode_address
-from app.connectors.georisques import get_risque_report
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services import batch as batch_service
@@ -101,103 +100,6 @@ async def diagnostic_adresse_post(payload: DiagnosticRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Ancienne route GET (compatibilité frontend)
-# ---------------------------------------------------------------------------
-
-async def _fetch_bdnb_avec_repli(
-    client: httpx.AsyncClient, address: str, label_ban: str
-) -> dict | None:
-    """Interroge BDNB avec repli de géocodage."""
-    try:
-        return await fetch_bdnb(client, label_ban)
-    except BdnbAdresseIntrouvable:
-        if label_ban == address:
-            raise
-        logger.info(
-            "  [bdnb] libellé BAN non trouvé (%r), nouvel essai avec l'adresse brute (%r)",
-            label_ban, address,
-        )
-        return await fetch_bdnb(client, address)
-
-
-@router.get("/diagnostic/adresse")
-async def diagnostic_adresse_get(
-    q: str = Query(..., min_length=3, description="Adresse française (texte libre)")
-) -> dict:
-    """
-    Flux souverain : adresse saisie → géocodage IGN → Géorisques → contrat brut.
-
-    Codes de retour :
-      200 : rapport complet (peut contenir erreurs_partielles si une sous-API a échoué)
-      422 : adresse non trouvée par l'IGN
-      502 : Géorisques totalement indisponible
-    """
-    logger.info("GET /diagnostic/adresse  q=%r", q)
-    t0 = time.perf_counter()
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                geo = await geocode_address(client, q)
-            except GeocodingError as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"error": "adresse_non_trouvee", "detail": str(exc)},
-                ) from exc
-            except httpx.HTTPError as exc:
-                raise HTTPException(
-                    status_code=502,
-                    detail={"error": "geocodage_indisponible", "detail": str(exc)},
-                ) from exc
-
-            if geo.score < 0.4:
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error": "adresse_ambigue",
-                        "detail": f"Score de géocodage trop faible ({geo.score:.2f}) pour «{q}». Précisez la ville ou le code postal.",
-                        "label_propose": geo.label,
-                    },
-                )
-
-            report = await get_risque_report(
-                client=client,
-                adresse_saisie=q,
-                adresse_normalisee=geo.label,
-                lat=geo.lat,
-                lon=geo.lon,
-                code_insee=geo.citycode,
-            )
-
-            # BDNB — fiche bâtiment (non bloquant)
-            try:
-                report.bdnb = await _fetch_bdnb_avec_repli(client, q, geo.label)
-            except BdnbAdresseIntrouvable:
-                report.erreurs_partielles.append(
-                    "bdnb: adresse non reconnue par le géocodeur BDNB"
-                )
-            except Exception as exc:
-                logger.warning("  [bdnb] ECHEC pour %r -> %s: %s", q, type(exc).__name__, exc)
-                report.erreurs_partielles.append(f"bdnb: {type(exc).__name__}: {exc}")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("diagnostic/adresse -- Échec du diagnostic pour %r", q)
-        raise HTTPException(
-            status_code=502,
-            detail={"error": "source_indisponible", "source": "georisques", "detail": str(exc)},
-        ) from exc
-
-    elapsed = time.perf_counter() - t0
-    logger.info(
-        "diagnostic/adresse OK en %.2fs — %d aléas, %d erreurs partielles, bdnb=%s",
-        elapsed, report.alea_count, len(report.erreurs_partielles),
-        "ok" if report.bdnb else "none",
-    )
-
-    return report.model_dump()
-
-
 # ---------------------------------------------------------------------------
 # Batch interne (Portfolio)
 # ---------------------------------------------------------------------------
