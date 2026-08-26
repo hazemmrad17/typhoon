@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "spec-driven-development": {
+      "source": "janfrl/spec-driven-development",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "cf75eda8711b65d2f237c03ef75d8b1b1c8196a84b5079a465324757a3b57a83"
+    }
+  }
+}
