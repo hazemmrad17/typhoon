@@ -1,19 +1,18 @@
 // =============================================================================
 //   TYPHOON — UnifiedMap : carte unique Mapbox GL JS v3 (pas de fallback
-//   MapLibre) utilisée par /zone (Cartographie & Analyse).
+//   MapLibre) utilisée par /zone (tableau de bord inondation).
 //   Fond de carte : Mapbox Standard seul, en 2D comme en 3D (éclairage
 //   « dusk » + landmarks 3D). Le fond sombre CARTO hérité de MapLibre a été
 //   retiré : Mapbox est l'unique moteur de fond de carte.
+//   · Vue France plein écran (mode overview) : régions, recentrage sur
+//     l'adresse diagnostiquée, objets 3D natifs du style Standard.
 //   · Bâtiments 3D (BDNB, extrusion par hauteur réelle) + surlignage accent
 //     de l'empreinte du bâtiment diagnostiqué (extrusion 3D et teinte 2D)
-//   · Couches de risque BRGM (WMS) + WFS Géorisques, à plat (pas de volumes
-//     3D) — visibilité pilotée par les toggles œil du panneau latéral
-//     (step Cartographie uniquement)
-//   · Parcelles cadastrales IGN (toggle, step Analyse uniquement)
-//   · Popup de l'adresse avec les aléas présents (step Cartographie)
-//   · Resize différé pour suivre la transition du panneau latéral
-//   · (Pas de sélection au clic : on étudie uniquement le bâtiment de
-//     l'adresse diagnostiquée — le surlignage suit le rapport.)
+//   · Couches de risque BRGM (WMS) + WFS Géorisques, à plat — visibilité
+//     pilotée par les toggles œil du panneau latéral.
+//   · Parcelles cadastrales IGN (toggle).
+//   · Particules de vent GFS (raster-particle) selon la carte météo « Wind ».
+//   · Resize différé pour suivre les changements de layout.
 // =============================================================================
 
 import { useEffect, useRef, useState } from 'react';
@@ -81,6 +80,32 @@ const NATIVE_BUILDINGS_LAYER = 'mb-native-buildings';
 const CADASTRE_LAYER = 'mb-cadastre';
 const CADASTRE_SOURCE = 'mb-cadastre-src';
 
+/* Vents GFS — particules animées (raster-particle, doc Mapbox) activées
+ * quand la carte météo « Wind » est sélectionnée dans la console. */
+const WIND_LAYER = 'mb-wind-particles';
+const WIND_SOURCE = 'mb-wind-raster-array';
+
+/* Emprise de la France métropolitaine — vue d'ensemble de l'étape Adresse
+ * (carte derrière le hero tant qu'aucune adresse n'est diagnostiquée). */
+const FRANCE_BOUNDS: [[number, number], [number, number]] = [
+  [-5.2, 41.2],
+  [9.8, 51.2],
+];
+
+/* ── Régions françaises (façon carte EVpin) — GeoJSON embarqué ──
+   Contours des 13 régions métropolitaines (jeu data.gouv.fr « Contours
+   administratifs » 2025 — IGN Admin Express, généralisation 1000 m,
+   licence ODbL 1.0), servis en statique depuis /data (public Vite).
+   Le tileset Mapbox « Boundaries v4 » (adm1 + admPoints) n'est pas inclus
+   dans le plan du jeton (HTTP 402) : on dessine donc nous-mêmes le
+   remplissage, les contours et les libellés en capitales. ── */
+const REGIONS_SRC = 'mb-fr-regions';
+const REGIONS_CENTROIDS_SRC = 'mb-fr-regions-centroids';
+const REGIONS_FILL = 'mb-fr-regions-fill';
+const REGIONS_LINE = 'mb-fr-regions-line';
+const REGIONS_LABEL = 'mb-fr-regions-label';
+const REGIONS_URL = `${(import.meta as any).env?.BASE_URL || '/'}data/regions-france.geojson`;
+
 /** Accent courant (--accent sur .zone-app). */
 function currentAccent(): string {
   let v = '';
@@ -121,6 +146,204 @@ function batimentRiskBand(risques: BatimentRisques | null | undefined): D03Band 
   return bandForBatimentScore(Math.max(...scores));
 }
 
+/* ── Vue d'ensemble (étape Adresse) — régions façon EVpin ──
+   Remplit les 13 régions d'une teinte discrète, trace leurs contours et pose
+   leur nom en capitales (centroïde du plus grand polygone). Non bloquant : si
+   le GeoJSON n'est pas disponible, la carte standard reste intacte. */
+async function addFranceOverviewLayers(
+  map: mapboxgl.Map,
+  onRegionSelect?: (nom: string) => void
+) {
+  try {
+    if (map.getLayer(REGIONS_FILL)) return;
+    const res = await fetch(REGIONS_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const fc = await res.json();
+    if (!fc?.features?.length) return;
+    drawFranceRegions(map, fc, onRegionSelect);
+  } catch (err) {
+    // Fichier absent (réseau, dist…) : la vue d'ensemble reste la carte
+    // standard. Jamais bloquant.
+    console.warn('[mapbox] régions France indisponibles:', err);
+  }
+}
+
+/** #rrggbb → rgba() (le style Mapbox refuse le hex à 8 chiffres). */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace(/^#/, '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** Centre approché d'un polygone (centroïde du plus grand anneau). */
+function regionLabelPoint(feature: any): [number, number] | null {
+  const geom = feature?.geometry;
+  const polys: any[] =
+    geom?.type === 'Polygon'
+      ? [geom.coordinates]
+      : geom?.type === 'MultiPolygon'
+        ? geom.coordinates
+        : [];
+  let best: [number, number] | null = null;
+  let bestArea = -1;
+  for (const poly of polys) {
+    const ring: number[][] = poly?.[0];
+    if (!ring || ring.length < 4) continue;
+    let a2 = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const x1 = ring[i][0];
+      const y1 = ring[i][1];
+      const x2 = ring[i + 1][0];
+      const y2 = ring[i + 1][1];
+      const cross = x1 * y2 - x2 * y1;
+      a2 += cross;
+      cx += (x1 + x2) * cross;
+      cy += (y1 + y2) * cross;
+    }
+    if (Math.abs(a2) > bestArea) {
+      bestArea = Math.abs(a2);
+      best = [cx / (3 * a2), cy / (3 * a2)];
+    }
+  }
+  return best;
+}
+
+function drawFranceRegions(
+  map: mapboxgl.Map,
+  fc: any,
+  onRegionSelect?: (nom: string) => void
+) {
+  try {
+    if (map.getSource(REGIONS_SRC)) return;
+    const light = !!document.querySelector('.zone-app')?.classList.contains('theme-light');
+    const accent = currentAccent();
+    const tint = hexToRgba(accent, light ? 0.28 : 0.36);
+    const hover = hexToRgba(accent, light ? 0.55 : 0.6);
+    const lineColor = light ? '#5b6470' : '#9fafc2';
+    const labelColor = light ? '#1c222b' : '#f2f6fc';
+    const halo = light ? 'rgba(255,255,255,0.92)' : 'rgba(8,12,18,0.85)';
+    const layerBase: any = {
+      source: REGIONS_SRC,
+      slot: IS_STANDARD_STYLE ? 'middle' : undefined,
+      minzoom: 3,
+      maxzoom: 8,
+    };
+
+    map.addSource(REGIONS_SRC, {
+      type: 'geojson',
+      data: fc,
+      // Ids numériques pour le feature-state de survol.
+      generateId: true,
+    });
+
+    map.addLayer({
+      ...layerBase,
+      id: REGIONS_FILL,
+      type: 'fill',
+      paint: {
+        'fill-color': [
+          'case',
+          ['boolean', ['feature-state', 'hover'], false],
+          hover,
+          tint,
+        ],
+      },
+    } as any);
+
+    map.addLayer({
+      ...layerBase,
+      id: REGIONS_LINE,
+      type: 'line',
+      paint: {
+        'line-color': lineColor,
+        'line-width': 1.2,
+        'line-opacity': light ? 0.7 : 0.85,
+      },
+    } as any);
+
+    /* Libellés : un point par région (centroïde du plus grand polygone),
+       rendu en capitales espacées — comme les « états » d'EVpin. */
+    const pts: any[] = [];
+    for (const f of fc.features || []) {
+      const c = regionLabelPoint(f);
+      if (!c) continue;
+      pts.push({
+        type: 'Feature',
+        properties: { nom: f.properties?.nom ?? '' },
+        geometry: { type: 'Point', coordinates: c },
+      });
+    }
+    map.addSource(REGIONS_CENTROIDS_SRC, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: pts },
+    });
+    map.addLayer({
+      id: REGIONS_LABEL,
+      type: 'symbol',
+      source: REGIONS_CENTROIDS_SRC,
+      slot: IS_STANDARD_STYLE ? 'middle' : undefined,
+      minzoom: 4,
+      maxzoom: 9,
+      layout: {
+        'text-field': ['get', 'nom'],
+        'text-font': ['DIN Pro Bold', 'Arial Unicode MS Regular'],
+        'text-size': 12,
+        'text-transform': 'uppercase',
+        'text-max-width': 9,
+        'text-letter-spacing': 0.14,
+        /* Toutes les régions sont nommées en toutes lettres, par-dessus la
+           cartographie (façon EVpin) : on force le chevauchement — le halo
+           garde la lecture propre. */
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': labelColor,
+        'text-halo-color': halo,
+        'text-halo-width': 1.2,
+      },
+    } as any);
+
+    /* Survol : la région sous le pointeur passe en aplat accent (façon
+       « état sélectionné » d'EVpin). */
+    let hovered: number | string | null = null;
+    const clearHover = () => {
+      if (hovered == null) return;
+      map.setFeatureState({ source: REGIONS_SRC, id: hovered }, { hover: false });
+      hovered = null;
+    };
+    map.on('mousemove', REGIONS_FILL, (e) => {
+      const f = e.features && e.features[0];
+      if (!f || f.id == null) return;
+      if (hovered !== f.id) {
+        clearHover();
+        hovered = f.id;
+        map.setFeatureState({ source: REGIONS_SRC, id: f.id }, { hover: true });
+      }
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', REGIONS_FILL, () => {
+      clearHover();
+      map.getCanvas().style.cursor = '';
+    });
+
+    /* Clic sur une région : remonte le nom (placeholder de recherche). */
+    if (onRegionSelect) {
+      map.on('click', REGIONS_FILL, (e) => {
+        const f = e.features && e.features[0];
+        const nom = f?.properties?.nom;
+        if (nom) onRegionSelect(nom);
+      });
+    }
+  } catch (err) {
+    console.warn('[mapbox] rendu régions France:', err);
+  }
+}
+
 /* ── Props ── */
 
 /** Point du Portfolio (Ticket 4) : une adresse diagnostiquée en lot, avec
@@ -153,8 +376,9 @@ interface UnifiedMapProps {
    *  manuel reste actif tant que l'étape ne change pas. */
   defaultParcels?: boolean;
   /** Défaut d'éclairage du style Standard à l'arrivée sur l'étape — « jour »
-   *  (day) demandé pour « Bien & contexte » ; undefined = ne rien forcer. */
-  defaultLightPreset?: 'day' | 'dusk';
+   *  (day) demandé pour « Bien & contexte » ; « night » pour la vue France
+   *  de l'étape Adresse (thème sombre) ; undefined = ne rien forcer. */
+  defaultLightPreset?: 'day' | 'dusk' | 'dawn' | 'night';
   /** Nombre max de bâtiments chargés par bbox (0 = tous, jusqu'à épuisement).
    *  Cartographie : tous. Analyse : 200 (la carte y est secondaire). */
   buildingsLimit?: number;
@@ -164,6 +388,18 @@ interface UnifiedMapProps {
   /** Mode « points » (Portfolio) : une pastille par adresse colorée par
    *  bande D03. Quand fourni (non vide), remplace le rendu rapport. */
   points?: PortfolioPoint[];
+  /** Mode « vue d'ensemble » (étape Adresse) : carte France sans chrome ni
+   *  couches, en arrière-plan du hero de recherche. Aucun rapport requis. */
+  overview?: boolean;
+  /** Clic sur une région de la carte France (mode overview) — Zone.tsx
+   *  s'en sert pour afficher la région dans le placeholder de recherche. */
+  onRegionSelect?: (nom: string) => void;
+  /** Point à recentrer en mode overview (adresse diagnostiquée) : la carte
+   *  vole sur le point avec une pastille ; null = retour au cadrage France. */
+  focus?: { lat: number; lon: number } | null;
+  /** Afficher les particules de vent (raster-particle GFS) sur la carte —
+   *  piloté par la carte météo « Wind » de la console. */
+  showWind?: boolean;
 }
 
 /* ── Composant ── */
@@ -181,6 +417,10 @@ export function UnifiedMap({
   initial3D = false,
   fitZoom = 16.5,
   points,
+  overview = false,
+  onRegionSelect,
+  focus = null,
+  showWind = false,
 }: UnifiedMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -213,6 +453,10 @@ export function UnifiedMap({
   /* Indicateur du bâtiment cible (épingle accrochée à la géométrie BDNB),
    * visible en 2D comme en 3D. */
   const buildingPinRef = useRef<mapboxgl.Marker | null>(null);
+  /* Pastille du point recentré en mode overview (adresse diagnostiquée). */
+  const focusMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
 
   const [is3d, setIs3d] = useState(initial3D);
   const [showParcels, setShowParcels] = useState(defaultParcels);
@@ -222,11 +466,15 @@ export function UnifiedMap({
    * « jour » (day) sur l'étape « Bien & contexte » via `defaultLightPreset`
    * — toggle manuel via setConfigProperty. Le ref sert à la création de la
    * carte (le handler de load est une fermeture du premier rendu). */
-  const [lightPreset, setLightPreset] = useState<'day' | 'dusk'>(defaultLightPreset ?? 'dusk');
+  const [lightPreset, setLightPreset] = useState<'day' | 'dusk' | 'dawn' | 'night'>(defaultLightPreset ?? 'dusk');
   const lightPresetRef = useRef(lightPreset);
   lightPresetRef.current = lightPreset;
   const showParcelsRef = useRef(showParcels);
   showParcelsRef.current = showParcels;
+  const showWindRef = useRef(showWind);
+  showWindRef.current = showWind;
+  const onRegionSelectRef = useRef(onRegionSelect);
+  onRegionSelectRef.current = onRegionSelect;
   const showRisksRef = useRef(showRisks);
   showRisksRef.current = showRisks;
 
@@ -270,6 +518,11 @@ export function UnifiedMap({
         basemap: {
           ...STANDARD_CONFIG.basemap,
           lightPreset: lightPresetRef.current,
+          /* Vue France de l'étape Adresse : les régions sont dessinées par nos
+           * propres couches GeoJSON (addFranceOverviewLayers). Les objets 3D
+           * natifs du style Standard (bâtiments) restent actifs : ils
+           * apparaissent dès qu'on zoome sur une ville (toggle 3D/2D inclus). */
+          show3dObjects: true,
         },
       },
       center,
@@ -281,7 +534,9 @@ export function UnifiedMap({
       maxZoom: 19,
       attributionControl: true,
     });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+    if (!overview) {
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+    }
     mapRef.current = map;
 
     map.on('error', (e) => {
@@ -317,6 +572,40 @@ export function UnifiedMap({
       const pts = pointsRef.current;
       if (pts?.length) {
         renderPortfolioPoints(map, pts);
+        return;
+      }
+      // Vue d'ensemble (étape Adresse) : caler la France, sans couches
+      // métier ni bâtiments BDNB — le rendu rapport n'a rien à afficher.
+      if (overview) {
+        if (IS_STANDARD_STYLE) {
+          try {
+            // Rappel au load : éclairage garanti même si la config de
+            // création n'a pas été prise en compte par le style.
+            map.setConfigProperty('basemap', 'lightPreset', lightPresetRef.current);
+          } catch {
+            /* style classique : config ignorée, rien à faire */
+          }
+        }
+        // Régions françaises (GeoJSON embarqué) puis cadrage : la France
+        // occupe la vue (marge réduite), façon carte EVpin — sauf si un
+        // focus (adresse diagnostiquée avant le load) est déjà en attente.
+        void addFranceOverviewLayers(map, onRegionSelectRef.current);
+        const f0 = focusRef.current;
+        if (f0) {
+          if (!focusMarkerRef.current) {
+            const el = document.createElement('div');
+            el.className = 'fr-focus-marker';
+            focusMarkerRef.current = new mapboxgl.Marker({ element: el })
+              .setLngLat([f0.lon, f0.lat])
+              .addTo(map);
+          }
+          map.easeTo({ center: [f0.lon, f0.lat], zoom: 14.5, duration: 600 });
+        } else {
+          map.fitBounds(FRANCE_BOUNDS, { padding: 12, duration: 0 });
+        }
+        // Particules de vent si la carte météo « Wind » est déjà active
+        // au montage (le ref lit l'état courant, fermeture du 1er rendu).
+        applyWindLayer(map, showWindRef.current);
         return;
       }
       ensureCadastreLayer(map);
@@ -369,10 +658,40 @@ export function UnifiedMap({
       pinElRef.current = null;
       buildingPinRef.current?.remove();
       buildingPinRef.current = null;
+      focusMarkerRef.current?.remove();
+      focusMarkerRef.current = null;
       map.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ── Mode overview : recentrage sur l'adresse diagnostiquée (focus) ──
+     Clé stable (lat,lon) : un même point ne relance pas le vol ; null
+     (focusKey vide) ramène la vue sur la France entière. */
+  const focusKey = focus ? `${focus.lat.toFixed(5)},${focus.lon.toFixed(5)}` : '';
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current || !overview) return;
+    if (focusKey) {
+      const f = focus;
+      if (!f) return;
+      if (!focusMarkerRef.current) {
+        const el = document.createElement('div');
+        el.className = 'fr-focus-marker';
+        focusMarkerRef.current = new mapboxgl.Marker({ element: el })
+          .setLngLat([f.lon, f.lat])
+          .addTo(map);
+      } else {
+        focusMarkerRef.current.setLngLat([f.lon, f.lat]);
+      }
+      map.easeTo({ center: [f.lon, f.lat], zoom: 14.5, duration: 900 });
+    } else {
+      focusMarkerRef.current?.remove();
+      focusMarkerRef.current = null;
+      map.fitBounds(FRANCE_BOUNDS, { padding: 12, duration: 900 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overview, focusKey]);
 
   /* ── Changement de bâtiment/adresse ── */
   useEffect(() => {
@@ -439,6 +758,16 @@ export function UnifiedMap({
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRisks, report]);
+
+  /* ── Particules de vent GFS (carte météo « Wind ») ──
+     Ajoute/supprime la couche raster-particle selon `showWind`. Si la carte
+     n'est pas encore prête (montage), le handler onload applique l'état via
+     le ref. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    applyWindLayer(map, showWindRef.current);
+  }, [showWind]);
 
   /* ── visibleLayerKeys → masquer/afficher les couches WMS/WFS ──
      Ne s'applique que quand showRisks est vrai (étape Cartographie/Synthèse).
@@ -562,6 +891,72 @@ export function UnifiedMap({
       layout: { visibility: showParcelsRef.current ? 'visible' : 'none' },
       paint: { 'raster-opacity': 1 },
     });
+  }
+
+  /** Particules de vent GFS (raster-particle, doc Mapbox) — activées quand
+   *  la carte météo « Wind » est sélectionnée. La source raster-array fournit
+   *  les bandes de vitesse ; la couche raster-particle anime les trajectoires.
+   *  On l'ajoute/supprime selon `show` (idempotent). */
+  function applyWindLayer(map: mapboxgl.Map, show: boolean) {
+    if (show) {
+      if (!map.getSource(WIND_SOURCE)) {
+        map.addSource(WIND_SOURCE, {
+          type: 'raster-array',
+          url: 'mapbox://rasterarrayexamples.gfs-winds',
+          tileSize: 512,
+        });
+      }
+      if (!map.getLayer(WIND_LAYER)) {
+        map.addLayer({
+          id: WIND_LAYER,
+          type: 'raster-particle',
+          source: WIND_SOURCE,
+          'source-layer': '10winds',
+          paint: {
+            'raster-particle-speed-factor': 0.4,
+            'raster-particle-fade-opacity-factor': 0.9,
+            'raster-particle-reset-rate-factor': 0.4,
+            'raster-particle-count': 4000,
+            'raster-particle-max-speed': 40,
+            'raster-particle-color': [
+              'interpolate', ['linear'], ['raster-particle-speed'],
+              1.5, 'rgba(134,163,171,256)',
+              2.5, 'rgba(126,152,188,256)',
+              4.12, 'rgba(110,143,208,256)',
+              4.63, 'rgba(110,143,208,256)',
+              6.17, 'rgba(15,147,167,256)',
+              7.72, 'rgba(15,147,167,256)',
+              9.26, 'rgba(57,163,57,256)',
+              10.29, 'rgba(57,163,57,256)',
+              11.83, 'rgba(194,134,62,256)',
+              13.37, 'rgba(194,134,63,256)',
+              14.92, 'rgba(200,66,13,256)',
+              16.46, 'rgba(200,66,13,256)',
+              18.0, 'rgba(210,0,50,256)',
+              20.06, 'rgba(215,0,50,256)',
+              21.6, 'rgba(175,80,136,256)',
+              23.66, 'rgba(175,80,136,256)',
+              25.21, 'rgba(117,74,147,256)',
+              27.78, 'rgba(117,74,147,256)',
+              29.32, 'rgba(68,105,141,256)',
+              31.89, 'rgba(68,105,141,256)',
+              33.44, 'rgba(194,251,119,256)',
+              42.18, 'rgba(194,251,119,256)',
+              43.72, 'rgba(241,255,109,256)',
+              48.87, 'rgba(241,255,109,256)',
+              50.41, 'rgba(256,256,256,256)',
+              57.61, 'rgba(256,256,256,256)',
+              59.16, 'rgba(0,256,256,256)',
+              68.93, 'rgba(0,256,256,256)',
+              69.44, 'rgba(256,37,256,256)',
+            ],
+          },
+        });
+      }
+    } else {
+      if (map.getLayer(WIND_LAYER)) map.removeLayer(WIND_LAYER);
+      if (map.getSource(WIND_SOURCE)) map.removeSource(WIND_SOURCE);
+    }
   }
 
   function ensureBuildingsLayer(map: mapboxgl.Map) {
@@ -1041,10 +1436,12 @@ export function UnifiedMap({
     if (map.getLayer(BUILDINGS_2D_LAYER)) {
       map.setLayoutProperty(BUILDINGS_2D_LAYER, 'visibility', enabled ? 'none' : 'visible');
     }
-    if (enabled) updateBuildingsTarget(map); // filtre BDNB → bâtiment cible
+    if (enabled && !overview) updateBuildingsTarget(map); // filtre BDNB → bâtiment cible
     applyRiskLayersVisibility(map); // couches de risque : 2D uniquement
     map.easeTo({ pitch: enabled ? 55 : 0, duration: 800 });
-    if (enabled) void loadBuildings(map);
+    // En mode overview (France) les bâtiments 3D sont natifs du style
+    // Standard — pas de chargement BDNB pour tout le pays.
+    if (enabled && !overview) void loadBuildings(map);
   }
 
   function toggleParcels(enabled: boolean) {
@@ -1095,7 +1492,7 @@ export function UnifiedMap({
       ) : (
         <div ref={containerRef} className="mb-demo-map" />
       )}
-      {!mapError && !(points?.length) && activeLegendBands.length > 0 && (
+      {!mapError && !overview && !(points?.length) && activeLegendBands.length > 0 && (
         <div className="mb-map-legend" aria-hidden="true">
           <div className="mb-map-legend-head">
             <md-icon>layers</md-icon>

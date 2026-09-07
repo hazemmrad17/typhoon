@@ -73,7 +73,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
  * Application Typhon — toutes les pages sont autonomes (plein écran) :
  *   /                  → landing page
  *   /login             → authentification Supabase
- *   /zone              → diagnostic géo-risque (stepper + carte)
+ *   /zone              → tableau de bord inondation (carte France plein écran + panels)
  *   /faq, /contact     → pages typhoon
  *   /account, /settings → page « Paramètres du compte » (même chrome que /zone)
  *   /dashboard         → vue d'ensemble (assureur)

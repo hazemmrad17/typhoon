@@ -2,10 +2,9 @@
 //   Adaptateur contrat canonique → vue RisqueReport (T014, FR-24)
 //
 //   Le backend sert le DiagnosticRecord canonique (POST /diagnostic/adresse).
-//   Les composants de présentation (UnifiedMap, BuildingFiche, AleaCard…)
-//   consomment la vue historique : cet adaptateur fait la traduction UNE
-//   fois, à l'entrée — aucune donnée n'est inventée, tout champ provient du
-//   record canonique.
+//   Les composants de présentation (UnifiedMap…) consomment la vue historique :
+//   cet adaptateur fait la traduction UNE fois, à l'entrée — aucune donnée
+//   n'est inventée, tout champ provient du record canonique.
 //
 //   Champs interdits (niveau/score/recommandations/copernicus) : absents du
 //   record par construction (constitution §2) — l'adaptateur ne les recrée
