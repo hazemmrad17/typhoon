@@ -94,6 +94,15 @@ export interface MeteoData {
   rain_total_mm?: number | null;
   rain_peak_mm_h?: number | null;
   dry?: boolean | null;
+  /* Vent / rafales horaires RÉELS (km/h) — même axe que la pluie. */
+  wind_gusts_hourly?: MeteoPoint[];
+  wind_speed_hourly?: MeteoPoint[];
+  wind_gust_peak_kmh?: number | null;
+  wind_gust_peak_time?: string | null;
+  wind_gust_peak_dir_deg?: number | null;
+  soil_moisture_hourly?: MeteoPoint[];
+  soil_moisture_min?: number | null;
+  soil_moisture_max?: number | null;
   discharge?: {
     unit: string;
     series: MeteoPoint[];
@@ -135,19 +144,6 @@ export async function fetchHydroRoute(
     ...(budget ? { budget: String(budget) } : {}),
   });
   return getJson<HydroRoute>(`${API}/api/hydro?${q.toString()}`, signal);
-}
-
-/** Poursuite d'un parcours borné (curseur renvoyé par un stop « budget »). */
-export async function extendHydroStretch(
-  cursor: string,
-  budget?: number,
-  signal?: AbortSignal
-): Promise<HydroStretch | null> {
-  const q = new URLSearchParams({
-    cursor,
-    ...(budget ? { budget: String(budget) } : {}),
-  });
-  return getJson<HydroStretch>(`${API}/api/hydro/extend?${q.toString()}`, signal);
 }
 
 /** Référence réelle météo / hydrologie (Open-Meteo, GloFAS). */
@@ -350,9 +346,4 @@ export function fmtHours(h: number): string {
   if (h < 1) return `${Math.round(h * 60)} min`;
   if (h < 24) return `${h.toFixed(1)} h`;
   return `${(h / 24).toFixed(1)} j`;
-}
-
-/** Course en amont (`up`), en aval (`down`) ou aux deux extrémités. */
-export function hasAnyRoute(route: HydroRoute | null): boolean {
-  return !!route && (stretchCoords(route.upstream).length >= 2 || stretchCoords(route.downstream).length >= 2);
 }

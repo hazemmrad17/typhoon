@@ -7,37 +7,37 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { RisqueReport } from '../zone/config';
+import { INFRA_THRESHOLD_M, impactState } from '../zone/impactModel';
 import {
-  MAX_RAIN,
-  computeDamage,
-  exposureFromReport,
-  scenarioFor,
-  timeProfileAt,
-} from '../zone/damageModel';
-import { INFRA_THRESHOLD_M, impactAt } from '../zone/impactModel';
+  accumFracAt,
+  curveIsHypothesis,
+  rainProfileFrom,
+  scenarioDepthAt,
+  type RainProfile,
+} from '../zone/floodSim';
 import type { MeteoData } from '../zone/hydroRoute';
+import {
+  gustAt,
+  gustBand,
+  gustProfileFrom,
+  type GustProfile,
+} from '../zone/windSim';
 
 /* ══════════════════════════════════════════════════════════════════════════
-   TYPHOON — /zone : CONSOLE D'ÉVALUATION DES RISQUES (mode « étape suivante »)
+   TYPHOON — /zone : CONSOLE DE SIMULATION DE CRUE (données réelles)
    Rangée basse du mode risk-open :
-     · .risk-console-status   : bande de suivi — trois compteurs RECALCULÉS
-                                depuis la même estimation que le panneau
-                                gauche (aucune valeur de démonstration) ;
+     · .risk-console-status   : hauteur d'eau à l'instant t (pluie réelle ×
+                                classe TRI) + références réelles ;
      · .risk-console-timeline : lecture/pause + règle temporelle de la journée
-                                avec repères heure + pluie (mm) de l'ENVELOPPE
-                                DE SCÉNARIO (l'axe qui pilote le moteur de
-                                dommages) ; une aiguille + une capsule
-                                (heure · mm) marquent le curseur. Ce panneau
-                                n'est atteignable qu'avec une adresse
-                                diagnostiquée (le stepper bloque l'étape 2).
+                                avec l'HISTOGRAMME DE PLUIE RÉELLE Open-Meteo
+                                (l'axe qui pilote la montée des eaux).
 
-   Trois natures de faits, jamais confondues :
-     · MODÈLE    — les compteurs et la piste de pluie (scénario × instant t) ;
-     · RÉFÉRENCE — pluie prévue (Open-Meteo) et débit estimé (GloFAS), affichés
-                   À CÔTÉ, jamais fusionnés avec le modèle.
+   Règle d'honnêteté : sans prévision horaire réelle ou sans classe TRI au
+   point, la console affiche explicitement l'indisponibilité — elle n'invente
+   ni profil de pluie ni profondeur.
 ══════════════════════════════════════════════════════════════════════════ */
 
-/* Minute de la journée affichée (0 → 1440). Défaut : 3 h 15 (console du haut). */
+/* Minute de la journée affichée (0 → 1440). Défaut : 3 h 15. */
 const DAY_MIN = 24 * 60;
 const fmtMin = (m: number) => {
   const h = Math.floor(m / 60);
@@ -45,14 +45,7 @@ const fmtMin = (m: number) => {
   return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 };
 
-/* Pluie horaire de l'ENVELOPPE DE SCÉNARIO (mm) — axe partagé avec le moteur
-   de dommages : la console pilote l'instant t, le panneau gauche recale ses
-   estimations sur ce même profil. */
-const mmAt = (m: number) => timeProfileAt(m / 60).rain;
-
-/* Vitesses de lecture proposées. À 1× la journée défile en ~67 s (15 min par
-   pas de 700 ms) — bien trop lent pour lire une montée des eaux ; à 16× la
-   fenêtre d'événement se lit en quelques secondes. */
+/* Vitesses de lecture proposées (cycle 1× → 4× → 16×). */
 const RATES = [1, 4, 16];
 
 /* Repères horaires : toutes les 3 h de 00:00 à 24:00 (9 repères). */
@@ -61,124 +54,152 @@ const HOUR_MARKS = Array.from({ length: 9 }, (_, i) => i * 3 * 60);
 /* Piste façon règle : segments par heure (rectangles fins). */
 const TRACK_SEGMENTS = Array.from({ length: 24 }, (_, i) => i);
 
-const fmtInt = (v: number) => Math.round(v).toLocaleString('fr-FR');
-
-/** Pluie prévue sur les prochaines 24 h + heure du pic (référence réelle). */
-function forecastRain(meteo: MeteoData | null) {
-  const series = (meteo?.rain_hourly ?? []).filter((p) => p.v != null).slice(0, 24);
-  if (series.length === 0) return null;
-  const values = series.map((p) => p.v as number);
-  const peak = Math.max(...values);
-  const peakIdx = values.indexOf(peak);
-  const total = meteo?.rain_total_mm ?? values.reduce((a, b) => a + b, 0);
-  return { total, peak, peakTime: series[peakIdx]?.t ?? null, dry: !!meteo?.dry };
-}
-
 const hourLabel = (iso: string | null): string => {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? ''
-    : `${String(d.getHours()).padStart(2, '0')}h`;
+  return Number.isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2, '0')}h`;
+};
+
+/** Libellé d'heure de prévision (« 14h ») → minute de la journée (840).
+ *  `null` si le libellé n'est pas exploitable : on ne devine pas une heure. */
+const hourLabelToMin = (label: string | null | undefined): number | null => {
+  if (!label) return null;
+  const n = Number.parseInt(label, 10);
+  return Number.isFinite(n) ? n * 60 : null;
 };
 
 export function RiskConsole({
   report,
-  scenarioKey,
   timeMin,
   onTimeChange,
   meteo,
+  triPeak = null,
+  triLabel = null,
+  triAbsenceLabel = null,
+  hazardEvent = 'FLOODING',
+  gustProfile = null,
+  windBand = null,
 }: {
   place?: string | null;
   report: RisqueReport | null;
-  /* Scénario sélectionné (panneau droit) → bande d'intensité du modèle. */
-  scenarioKey: string;
-  /* Heure du curseur (0 → 1440 min) — état partagé (pilote le moteur). */
+  /* Heure du curseur (0 → 1440 min) — état partagé (pilote la carte). */
   timeMin: number;
   onTimeChange: (m: number | ((prev: number) => number)) => void;
-  /* Référence météo/hydrologique réelle (Open-Meteo, GloFAS) — jamais fusionnée
-     avec l'enveloppe de scénario. */
+  /* Prévision RÉELLE (Open-Meteo, GloFAS) : l'axe ET la référence. */
   meteo: MeteoData | null;
+  /* Pic d'eau de la CLASSE TRI officielle (null = hors TRI → pas de simulation). */
+  triPeak?: number | null;
+  triLabel?: string | null;
+  /* Formulation partagée de l'absence de classe quand AUCUNE classe n'est
+     cartographiée au point (panne / dans un TRI sans classe / hors TRI) —
+     fournie par le parent, pour que la console ne se contredise pas avec le
+     panneau des scénarios. `null` = une autre classe existe : la console dit
+     alors « non cartographié POUR CE SCÉNARIO », une vérité locale. */
+  triAbsenceLabel?: string | null;
+  /* Type d'aléa actif (FLOODING | HURRICANE) — partagé avec le panneau. */
+  hazardEvent?: string;
+  gustProfile?: GustProfile | null;
+  windBand?: { key: string; label: string; color: string } | null;
 }) {
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const scaleRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
 
-  /* Même moteur que le panneau gauche : exposition BDNB × scénario × instant t.
-     Les trois compteurs ci-dessous en sont donc directement dérivés. */
-  const exposure = useMemo(() => exposureFromReport(report), [report]);
-  const time = timeProfileAt(timeMin / 60);
-  const scenario = scenarioFor(scenarioKey);
-  const est = useMemo(
-    () => computeDamage(exposure, scenario, time),
-    [exposure, scenario, time]
+  /* Profil de pluie RÉEL — la colonne vertébrale de la simulation. */
+  const profile: RainProfile | null = useMemo(() => rainProfileFrom(meteo), [meteo]);
+
+  /* Heure du curseur → index horaire du profil (0..23). */
+  const hourIndex = timeMin / 60;
+
+  /* Profondeur à l'instant t : le SCÉNARIO fixe le pic (classe TRI officielle),
+     la pluie prévue n'en fixe que la forme. Sans pluie, la console continue
+     d'afficher le niveau du scénario via une rampe documentée. */
+  const depth = useMemo(
+    () => scenarioDepthAt(profile, hourIndex, triPeak),
+    [profile, hourIndex, triPeak]
+  );
+  /* La courbe est-elle une hypothèse (aucune prévision ne la pilote) ? */
+  const curveHypothesis = curveIsHypothesis(profile);
+  const impact = useMemo(
+    () => impactState(depth, triPeak ?? 0),
+    [depth, triPeak]
   );
 
-  /* Même enveloppe que celle peinte sur la carte (bande de couleur comprise) :
-     un seul calcul pilote le volume d'eau de la vue et ce compteur. Le seuil
-     d'infrastructure du moteur (0,3 m) est une frontière — en dessous, il ne
-     compte aucun dommage, donc la carte ne peint rien : le compteur le dit. */
-  const impact = useMemo(() => impactAt(scenario, time.accum), [scenario, time]);
+  const isWind = hazardEvent === 'HURRICANE';
+  const windNow = isWind ? gustAt(gustProfile, timeMin / 60) : 0;
+  const wBand = isWind ? windBand ?? gustBand(windNow) : null;
+
+  /* Une simulation existe dès qu'un PIC est disponible : classe TRI en crue,
+     prévision de rafales en vent. Elle ne dépend plus de la pluie du jour —
+     c'était la cause du bouton « Play » grisé par temps sec. */
+  const hasSim = isWind
+    ? !!gustProfile
+    : typeof triPeak === 'number' && triPeak > 0;
 
   const stats = useMemo(
-    () => [
-      {
-        key: 'water',
-        icon: 'water',
-        value: impact.depthM.toFixed(2),
-        unit: 'm',
-        label: 'Hauteur d\u2019eau (scénario)',
-        color: impact.band.color,
-        band: impact.overThreshold
-          ? `Enveloppe carte · ${impact.band.label}`
-          : `Sous le seuil du moteur (${INFRA_THRESHOLD_M.toFixed(1).replace('.', ',')} m)`,
-      },
-      {
-        key: 'buildings',
-        icon: 'home',
-        value: fmtInt(est.damagedBuildings.v),
-        unit: '',
-        label: 'Bâtiments touchés',
-        color: '#ff3b30',
-        band: '',
-      },
-      {
-        key: 'roads',
-        icon: 'road',
-        value: fmtInt(est.damagedRoadsM.v),
-        unit: 'm',
-        label: 'Voirie inondée',
-        color: '#f0c33c',
-        band: '',
-      },
-    ],
-    [est, impact]
+    () =>
+      isWind
+        ? [
+            {
+              key: 'wind',
+              icon: 'storm',
+              value: gustProfile ? String(Math.round(windNow)) : '—',
+              unit: gustProfile ? 'km/h' : '',
+              label: 'Rafale prévue (réelle)',
+              color: wBand?.color ?? '#4da3ff',
+              band: !gustProfile
+                ? 'Prévision de vent indisponible'
+                : `Seuils documentés · ${wBand?.label ?? '—'}`,
+            } as const,
+          ]
+        : [
+            {
+              key: 'water',
+              icon: 'water',
+              value: hasSim ? impact.depthM.toFixed(2) : '—',
+              unit: hasSim ? 'm' : '',
+              label: 'Hauteur d\u2019eau (simulation)',
+              color: impact.band.color,
+              band: !hasSim
+                ? 'Simulation indisponible — aucune classe TRI cartographiée au point'
+                : curveHypothesis
+                  ? `Classe officielle ${impact.band.label} · montée : hypothèse (aucune pluie prévue)`
+                  : impact.overThreshold
+                    ? `Enveloppe carte · ${impact.band.label} · montée pilotée par la pluie prévue`
+                    : `Sous le seuil (${INFRA_THRESHOLD_M.toFixed(1).replace('.', ',')} m) · montée pilotée par la pluie prévue`,
+            } as const,
+          ],
+    [isWind, gustProfile, windNow, wBand, impact, hasSim, curveHypothesis]
   );
 
-  const rain = useMemo(() => forecastRain(meteo), [meteo]);
+  const rain = profile;
   const discharge = meteo?.discharge ?? null;
 
-  /* Cartes de référence : réelles quand le service répond, sinon repli explicite
-     sur l'enveloppe du scénario (jamais une valeur de démonstration figée). */
+  /* Message de repli quand AUCUNE classe n'est cartographiée POUR LE SCÉNARIO
+     SÉLECTIONNÉ — distinct de « service indisponible », et sans nier les
+     classes qui existent au point pour d'autres scénarios. */
+  const triFallback =
+    typeof triPeak === 'number' && triPeak > 0
+      ? 'classe en cours de chargement'
+      : 'non cartographié pour ce scénario';
+
   const wxCards = useMemo(() => {
     const rainCard = rain
       ? {
           key: 'rain',
           icon: 'water_drop',
-          line1: 'Pluie prévue',
-          line2: rain.dry
-            ? 'aucune pluie prévue'
-            : `${rain.total.toFixed(0)} mm / 24 h · pic ${rain.peak.toFixed(0)} mm/h${rain.peakTime ? ` ${hourLabel(rain.peakTime)}` : ''}`,
+          line1: 'Pluie prévue (réelle)',
+          line2: `${rain.totalMm.toFixed(0)} mm / 24 h · pic ${rain.peakMmH.toFixed(0)} mm/h à ${rain.hours[rain.peakIndex]}`,
           title: meteo?.sources?.rain ?? 'Open-Meteo',
         }
       : {
           key: 'rain',
           icon: 'water_drop',
-          line1: 'Pluie (scénario)',
-          line2: `pic ${MAX_RAIN} mm/h — enveloppe modélisée`,
-          title: 'Modèle (Open-Meteo indisponible)',
-        };
+          line1: 'Pluie prévue',
+          line2: 'aucune pluie prévue — montée du scénario non pilotée par la pluie',
+          title: meteo?.sources?.rain ?? 'Open-Meteo',
+        } as const;
 
     const riverCard = discharge
       ? {
@@ -203,25 +224,73 @@ export function RiskConsole({
       rainCard,
       riverCard,
       {
-        key: 'wind',
-        icon: 'air',
-        line1: 'Vent (scénario)',
-        line2: `${Math.round(scenario.windPeakKmh)} km/h — bande ${scenario.pct} %`,
-        title: 'Modèle : bande de scénario sélectionnée',
+        key: 'tri',
+        icon: 'fact_check',
+        line1: 'Classe TRI (Directive Inondation)',
+        /* Deux absences distinctes, deux messages : « non cartographié pour ce
+           scénario » (une autre classe peut exister au point) vs « service
+           indisponible ». Dire « point non cartographié » alors qu'une classe
+           est cartographiée pour un autre scénario était faux. */
+        line2: triLabel ?? triAbsenceLabel ?? triFallback,
+        title: 'Repère réglementaire du pic d\u2019eau',
       },
     ];
-  }, [rain, discharge, meteo, scenario]);
+  },    [rain, discharge, meteo, triLabel, triAbsenceLabel, triFallback]
+  );
 
-  /* Lecture auto : déroule la journée (pas de 15 min, boucle à 00:00) au
-     rythme choisi. La cadence pilote l'instant t du moteur de dommages, donc
-     la montée des eaux sur la carte suit directement cette vitesse. */
+  /* SCN-011 — « Play scenario » : la lecture part de minuit et déroule la
+     journée jusqu'au PIC de la prévision RÉELLE (pluie en mode crue, rafale en
+     mode vent) — pas de boucle infinie : le moteur s'arrête sur le pic, s'y
+     tient 2 s, puis se met en pause. Sans simulation, le bouton est inactif. */
+  const peakMin = useMemo(() => {
+    if (isWind) {
+      return gustProfile ? hourLabelToMin(gustProfile.hours[gustProfile.peakIndex]) : null;
+    }
+    if (profile) return hourLabelToMin(profile.hours[profile.peakIndex]);
+    /* Aucune prévision de pluie : la rampe documentée culmine à 24 h — sans
+       quoi « Play » n'aurait aucune cible et resterait sans effet. */
+    return typeof triPeak === 'number' && triPeak > 0 ? DAY_MIN : null;
+  }, [isWind, gustProfile, profile, triPeak]);
+
+  const holdRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!playing) return;
+    if (peakMin == null) {
+      /* Pas de pic réel (prévision vide) : rien à dérouler. */
+      setPlaying(false);
+      return;
+    }
     const id = window.setInterval(() => {
-      onTimeChange((m) => (m + 15 >= DAY_MIN ? 0 : m + 15));
+      onTimeChange((m) => {
+        const next = m + 15;
+        if (next >= peakMin) {
+          window.clearInterval(id);
+          holdRef.current = window.setTimeout(() => setPlaying(false), 2000);
+          return peakMin;
+        }
+        return next;
+      });
     }, Math.round(700 / rate));
-    return () => window.clearInterval(id);
-  }, [playing, rate, onTimeChange]);
+    return () => {
+      window.clearInterval(id);
+      if (holdRef.current) window.clearTimeout(holdRef.current);
+    };
+    /* peakMin est calculé en minutes ; l'effet ne doit PAS redémarrer quand
+       l'intervalle modifie l'heure courante (sinon la lecture se réarme). */
+  }, [playing, rate, peakMin, onTimeChange]);
+
+  /* Bascule lecture/pause : repart de minuit si le curseur est déjà au-delà du
+     pic (sinon « Play » ne produirait aucun mouvement). */
+  const togglePlay = () => {
+    if (!hasSim) return;
+    if (playing) {
+      setPlaying(false);
+      return;
+    }
+    if (peakMin != null && timeMin >= peakMin) onTimeChange(0);
+    setPlaying(true);
+  };
 
   /* ── Scrubber : pointer → minute de la journée ── */
   const minuteFromClientX = (clientX: number) => {
@@ -249,18 +318,38 @@ export function RiskConsole({
 
   const pct = (timeMin / DAY_MIN) * 100;
 
-  const hourBars = useMemo(
-    () =>
-      Array.from({ length: 24 }, (_, i) => {
-        const v = timeProfileAt(i).rain;
-        return { v, h: 10 + (v / MAX_RAIN) * 100 };
-      }),
-    []
-  );
+  /* Histogramme : pluie RÉELLE (mode crue) ou rafales RÉELLES (mode vent). */
+  const hourBars = useMemo(() => {
+    if (isWind) {
+      const arr = gustProfile?.gust ?? [];
+      const maxG = gustProfile?.peakKmh ?? 0;
+      return Array.from({ length: 24 }, (_, i) => {
+        const v = arr[i] ?? 0;
+        return { v, h: maxG > 0 ? 4 + (v / maxG) * 96 : 2 };
+      });
+    }
+    const rainArr = profile?.rain ?? [];
+    const maxRain = profile?.peakMmH ?? 0;
+    return Array.from({ length: 24 }, (_, i) => {
+      const v = rainArr[i] ?? 0;
+      return { v, h: maxRain > 0 ? 4 + (v / maxRain) * 96 : 2 };
+    });
+  }, [isWind, gustProfile, profile]);
+
+  const unitAt = (m: number) => {
+    if (isWind) {
+      if (!gustProfile) return null;
+      return `${Math.round(gustAt(gustProfile, m / 60))} km/h`;
+    }
+    if (!profile) return null;
+    const i = Math.max(0, Math.min(profile.rain.length - 1, Math.floor(m / 60)));
+    return `${profile.rain[i]} mm`;
+  };
+  const unitName = isWind ? 'km/h' : 'mm';
 
   return (
     <div className="risk-console" aria-label="Simulation des risques de la zone">
-      {/* ── Bande de suivi : compteurs dérivés de l'estimation + référence ── */}
+      {/* ── Bande de suivi : compteur d'eau (réel × TRI) + références ── */}
       <div className="risk-console-status">
         <div className="risk-console-stats">
           {stats.map((s) => (
@@ -307,19 +396,25 @@ export function RiskConsole({
         </div>
       </div>
 
-      {/* ── Règle temporelle : lecture/pause + scrubber ── */}
+      {/* ── Règle temporelle : lecture/pause + scrubber sur la pluie réelle ── */}
       <div className="risk-console-timeline">
         <button
           type="button"
           className={`risk-console-play${playing ? ' playing' : ''}`}
           aria-label={playing ? 'Pause' : 'Lecture de la simulation'}
-          title={playing ? 'Pause' : 'Lire la simulation'}
-          onClick={() => setPlaying((v) => !v)}
+          title={
+            !hasSim
+              ? 'Simulation indisponible (prévision ou classe TRI manquante)'
+              : playing
+                ? 'Pause'
+                : 'Lire la simulation jusqu\u2019au pic prévu'
+          }
+          disabled={!hasSim}
+          onClick={togglePlay}
         >
           <md-icon aria-hidden="true">{playing ? 'pause' : 'play_arrow'}</md-icon>
         </button>
 
-        {/* Vitesse de lecture (cycle 1× → 4× → 16×). */}
         <button
           type="button"
           className="risk-console-rate"
@@ -338,9 +433,9 @@ export function RiskConsole({
           aria-valuemin={0}
           aria-valuemax={DAY_MIN}
           aria-valuenow={timeMin}
-          aria-valuetext={`${fmtMin(timeMin)}, ${mmAt(timeMin)} mm (enveloppe de scénario)`}
+          aria-valuetext={`${fmtMin(timeMin)}${unitAt(timeMin) != null ? `, ${unitAt(timeMin)} ${isWind ? 'de rafale prévue' : 'de pluie prévue'}` : ''}`}
           tabIndex={0}
-          title="Piste : enveloppe de pluie du scénario (axe qui pilote le moteur de dommages)"
+          title={isWind ? 'Piste : rafales horaires PRÉVUES (Open-Meteo)' : "Piste : pluie horaire PRÉVUE (Open-Meteo) — l'axe qui pilote la montée des eaux"}
           onKeyDown={(e) => {
             const step =
               e.key === 'ArrowRight' || e.key === 'ArrowUp'
@@ -358,7 +453,7 @@ export function RiskConsole({
           onPointerUp={onUp}
           onPointerCancel={onUp}
         >
-          {/* Barres d'intensité (mm/h) du scénario — histogramme de la piste */}
+          {/* Barres d'intensité : pluie RÉELLE par heure */}
           <div className="risk-console-bars" aria-hidden="true">
             {TRACK_SEGMENTS.map((i) => {
               const lit = (i + 0.5) / TRACK_SEGMENTS.length <= pct / 100;
@@ -373,28 +468,25 @@ export function RiskConsole({
             })}
           </div>
 
-          {/* Partie parcourue : lueur d'alerte */}
           <span className="risk-console-progress" style={{ width: `${pct}%` }} aria-hidden="true" />
 
-          {/* Aiguille + capsule (heure · mm) à la position courante */}
-          <span className="risk-console-needle" style={{ left: `${pct}%` }} aria-hidden="true" />
-          <span
-            className="risk-console-capsule"
+          <span className="risk-console-needle" style={{ left: `${pct}%` }} aria-hidden="true" />          <span className="risk-console-capsule"
             style={{
               left: `${Math.min(97, Math.max(3, pct))}%`,
               transform: 'translateX(-50%)',
             }}
           >
             <b>{fmtMin(timeMin)}</b>
-            <i>{mmAt(timeMin)} mm</i>
+            <i>{unitAt(timeMin) ?? `— ${unitName}`}</i>
           </span>
 
-          {/* Repères horaires sous la piste : heure + pluie du scénario (mm) */}
           <div className="risk-console-marks" aria-hidden="true">
             {HOUR_MARKS.map((m) => (
               <span className="risk-console-mark" key={m}>
                 <span className="risk-console-mark-time">{fmtMin(m)}</span>
-                <span className="risk-console-mark-mm">{mmAt(m)} mm</span>
+                <span className="risk-console-mark-mm">
+                  {unitAt(m) ?? '—'}
+                </span>
               </span>
             ))}
           </div>

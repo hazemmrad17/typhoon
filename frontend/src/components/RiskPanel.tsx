@@ -19,15 +19,6 @@
 import { useMemo, useState } from 'react';
 import type { RisqueReport, AleaDetail } from '../zone/config';
 import { geomToWgs84, firstRing } from '../zone/mapHelpers';
-import {
-  scenarioFor,
-  computeDamage,
-  exposureFromReport,
-  timeProfileAt,
-  fmtRange,
-  fmtMoneyEUR,
-} from '../zone/damageModel';
-
 /* ── Géométrie BDNB → polyline SVG (blueprint 2D) ──
    Convertit geom_groupe (Lambert-93) en WGS84, prend l'anneau extérieur du
    premier polygone et le projette dans une viewBox en remettant Y à l'endroit
@@ -106,28 +97,11 @@ function aleaTone(a: AleaDetail): 'present' | 'commune' | 'absent' | 'unknown' {
 export function RiskPanel({
   place,
   report,
-  scenarioKey,
-  timeMin,
 }: {
   place: string | null;
   report: RisqueReport | null;
-  /* Scénario sélectionné (panneau droit) → bande d'intensité. */
-  scenarioKey: string;
-  /* Minute de la journée (console basse) → instant t de l'événement. */
-  timeMin: number;
 }) {
   const b = report?.bdnb?.batiment ?? null;
-
-  /* Moteur de dommages : exposition BDNB × scénario × instant t de la
-     timeline → estimation calculée (avec fourchette d'incertitude). */
-  const exposure = useMemo(() => exposureFromReport(report), [report]);
-  const time = timeProfileAt(timeMin / 60);
-  /* Scénario actif (référence stable : SCENARIOS est un tableau constant). */
-  const scenario = scenarioFor(scenarioKey);
-  const est = useMemo(
-    () => computeDamage(exposure, scenario, time),
-    [exposure, scenario, time]
-  );
 
   /* Réels : aléas du rapport + bâtiments BDNB à l'adresse. */
   const aleas = useMemo(() => report?.aleas ?? [], [report]);
@@ -205,66 +179,6 @@ export function RiskPanel({
           <span className="risk-metric-label">Emprise</span>
         </div>
       </div>
-
-      {/* ── Dommages estimés (modélisés) — recalés sur le scénario actif et
-          l'instant t de la timeline. Chaque widget = estimation + fourchette
-          (±) : valeurs calculées, pas mesurées. N'apparaît qu'après un
-          diagnostic (sinon pas de bâtiment à modéliser). ── */}
-      {report ? (
-      <section className="risk-block">
-        <div className="risk-title-row">
-          <h2 className="risk-title">Dommages estimés</h2>
-          <span className="risk-dmg-scenario">{scenario.risk}</span>
-        </div>
-        <div className="risk-loss-grid">
-          <div className="risk-loss">
-            <md-icon aria-hidden="true">park</md-icon>
-            <span className="risk-loss-val">{fmtRange(est.brokenTrees)}</span>
-            <span className="risk-loss-label">Arbres cassés</span>
-          </div>
-          <div className="risk-loss">
-            <md-icon aria-hidden="true">directions_car</md-icon>
-            <span className="risk-loss-val">{fmtRange(est.damagedVehicles)}</span>
-            <span className="risk-loss-label">Véhicules endommagés</span>
-          </div>
-          <div className="risk-loss">
-            <md-icon aria-hidden="true">bolt</md-icon>
-            <span className="risk-loss-val">{fmtRange(est.downedPowerLines)}</span>
-            <span className="risk-loss-label">Lignes coupées (km)</span>
-          </div>
-          <div className="risk-loss">
-            <md-icon aria-hidden="true">water_damage</md-icon>
-            <span className="risk-loss-val">{fmtRange(est.floodedConduitM)}</span>
-            <span className="risk-loss-label">Conduites inondées (m)</span>
-          </div>
-          <div className="risk-loss">
-            <md-icon aria-hidden="true">location_city</md-icon>
-            <span className="risk-loss-val">{fmtRange(est.damagedBuildings)}</span>
-            <span className="risk-loss-label">Bâtiments touchés</span>
-          </div>
-          <div className="risk-loss">
-            <md-icon aria-hidden="true">road</md-icon>
-            <span className="risk-loss-val">{fmtRange(est.damagedRoadsM)}</span>
-            <span className="risk-loss-label">Voirie inondée (m)</span>
-          </div>
-        </div>
-        <div className="risk-loss-totals">
-          <div className="risk-loss-total">
-            <span className="risk-loss-total-label">Niveau d'eau</span>
-            <span className="risk-loss-total-val">{fmtRange(est.waterLevelFt)} ft</span>
-          </div>
-          <div className="risk-loss-total">
-            <span className="risk-loss-total-label">Dommages estimés</span>
-            <span className="risk-loss-total-val">{fmtMoneyEUR(est.damageEUR)}</span>
-          </div>
-        </div>
-        <div className="risk-loss-note">
-          Estimations modélisées : vent/eau du scénario × exposition BDNB ×
-          courbes de vulnérabilité. Fourchettes ± d'incertitude. Ne sont pas
-          des données mesurées.
-        </div>
-      </section>
-      ) : null}
 
       {/* ── Aléas détectés (Géorisques, données réelles) ── */}
       <section className="risk-block">

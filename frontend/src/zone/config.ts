@@ -70,17 +70,6 @@ export const RESOLUTION_BADGES: Record<
   },
 };
 
-export function aleaScore(a: { niveau?: string | null }): number {
-  const mapping: Record<string, number> = {
-    tres_faible: 10,
-    faible: 30,
-    modere: 50,
-    eleve: 70,
-    critique: 90,
-  };
-  return mapping[a.niveau || ''] || 0;
-}
-
 export function escHtml(s: unknown): string {
   if (s == null) return '';
   return String(s)
@@ -89,28 +78,6 @@ export function escHtml(s: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
-
-// ---------------------------------------------------------------------------
-// Icônes Material Symbols par aléa
-// ---------------------------------------------------------------------------
-
-export const ALEA_ICONS: Record<string, string> = {
-  inondation: 'flood',
-  rga: 'grass',
-  sismicite: 'crisis_alert',
-  radon: 'science',
-  feu_foret: 'local_fire_department',
-  mouvement_terrain: 'landslide',
-  ppr: 'gpp_maybe',
-  ssp: 'factory',
-  cavite: 'landscape',
-  avalanche: 'terrain',
-  icpe: 'apartment',
-  canalisations: 'plumbing',
-  vent_cyclonique: 'cyclone',
-  territoires: 'map',
-};
-export const ALEA_ICON_FALLBACK = 'warning';
 
 // ---------------------------------------------------------------------------
 // Couches cartographiques (WMS BRGM confirmé + WFS Géorisques)
@@ -182,6 +149,8 @@ export interface AleaDetail {
   present: boolean | null;
   present_commune?: boolean | null;
   zonage?: string | null;
+  /** Spécifique sismicité : zone du zonage national (1..5, décret 2010-1255). */
+  zone_sismique?: string | null;
   catnat_historique?: CatNatEvent[] | null;
   source?: string;
   url_detail?: string | null;
@@ -202,174 +171,6 @@ export interface RisqueReport {
   erreurs_partielles: string[];
   bdnb?: BdnbAsset | null;
   avertissement?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Trajectoire climatique (Phase 1 — risk_model.compute_trajectoire)
-// Variables brutes F par péril et par horizon, jamais combinées, avec
-// provenance. Portée par la réponse /diagnostic/fast (digital_twin.trajectoire)
-// et la Partner API /v1/analyze.
-// ---------------------------------------------------------------------------
-
-export interface TrajectoirePoint {
-  horizon: number;            // 2026 (observe) / 2050 (projete) / 2100
-  type: 'observe' | 'projete' | 'indisponible';
-  scenario: string | null;    // scénario sélectionné (rcp4_5 / rcp8_5) quand connu, sinon null
-  valeur: number | null;      // variable brute F 0-100 sous le scénario sélectionné, jamais combinée
-  scenarios?: Record<string, number | null> | null;  // F brut sous chaque RCP téléchargé (comparaison sans relancer)
-  unite: string;
-  resolution: string | null;  // per-building | commune-level | grid-cell
-  confiance: string | null;   // elevee | moyenne | faible | null
-  source: string | null;
-  date_source: string | null;
-}
-
-/* Scénarios climatiques RCP — le CDS télécharge les deux (rcp4_5 + rcp8_5) ;
-   le sélecteur de la carte de décision bascule la comparaison. */
-export const SCENARIOS: { key: string; label: string; hint: string }[] = [
-  { key: 'rcp4_5', label: 'RCP 4.5', hint: 'Trajectoire modérée (atténuation des émissions)' },
-  { key: 'rcp8_5', label: 'RCP 8.5', hint: 'Trajectoire haute (statu quo des émissions)' },
-];
-
-export interface TrajectoirePeril {
-  label: string;
-  category?: string;    // temperature | precipitation | drought | wind
-  points: TrajectoirePoint[];
-}
-
-export interface Trajectoire {
-  horizons: number[];
-  note: string;
-  perils: Record<string, TrajectoirePeril>;
-}
-
-export interface RecommandationsIA {
-  resume: string;
-  actions_prioritaires: string[];
-  points_vigilance?: string[];
-  modele?: string;
-  metadata?: Record<string, unknown>;
-}
-
-// ---------------------------------------------------------------------------
-// Données climatiques opérationnelles (GET /api/climate)
-// Sources : Open-Meteo (GloFAS v4, FWI) + ERA5-Land (CDS)
-// ---------------------------------------------------------------------------
-
-export interface FloodRisk {
-  current_discharge_m3s: number | null;
-  percentile: number;
-  return_period: string;
-  risk_level: string;
-  risk_label: string;
-  risk_color: string;
-  mean_discharge_m3s: number;
-  min_discharge_m3s: number;
-  max_discharge_m3s: number;
-  forecast_30day: { date: string; discharge_m3s: number }[];
-  source: string;
-  unit: string;
-}
-
-export interface FireDanger {
-  current_fwi: number;
-  risk_level: string;
-  risk_label: string;
-  risk_color: string;
-  avg_fwi_92d: number;
-  max_fwi_92d: number;
-  forecast_16day: { date: string; fwi: number; level: string; label: string; color: string }[];
-  source: string;
-  unit: string;
-}
-
-export interface SoilMoisture {
-  current_value: number;
-  unit: string;
-  source: string;
-  status: string;
-  risk_label?: string;
-  risk_color?: string;
-  avg_value_30d?: number;
-  monthly_series?: { date: string; value: number; unit: string }[];
-}
-
-export interface HeatStress {
-  current_hi: number;
-  current_temp: number;
-  current_rh: number;
-  risk_level: string;
-  risk_label: string;
-  risk_color: string;
-  avg_hi_92d: number;
-  max_hi_92d: number;
-  hot_days_92d: number;
-  danger_days_92d: number;
-  forecast_16day: { date: string; hi: number; temp_max: number; rh_min: number; level: string; label: string; color: string }[];
-  source: string;
-  unit: string;
-}
-
-export interface WindRisk {
-  current_speed: number;
-  current_gusts: number;
-  risk_level: string;
-  risk_label: string;
-  risk_color: string;
-  avg_speed_92d: number;
-  max_speed_92d: number;
-  storm_days_92d: number;
-  strong_days_92d: number;
-  forecast_16day: { date: string; speed: number; gusts: number; level: string; label: string; color: string }[];
-  source: string;
-  unit: string;
-}
-
-export interface SeasonalForecast {
-  months: { month: string; month_name: string; avg_temp: number | null; total_precip: number | null }[];
-  temp_anomaly: number;
-  precip_anomaly: number;
-  temp_range: { min: number | null; max: number | null; avg: number | null };
-  precip_range: { min: number | null; max: number | null; total: number | null };
-  source: string;
-  ensemble_members: number;
-}
-
-export interface ClimateData {
-  lat: number;
-  lon: number;
-  flood: FloodRisk | null;
-  fire_danger: FireDanger | null;
-  soil_moisture: SoilMoisture | null;
-  heat_stress: HeatStress | null;
-  wind_risk: WindRisk | null;
-  seasonal: SeasonalForecast | null;
-  metadata: {
-    elapsed_ms: number;
-    sources: Record<string, string>;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Risques principaux (panneau « Comprendre les risques »)
-// Contrat backend app/agents/risques_principaux.py — top 3 par aléa, scores
-// déterministes du moteur (F×V) + narration LLM (explication, facteurs
-// aggravants, zone la plus exposée). `niveau` utilise les clés D03.
-// ---------------------------------------------------------------------------
-
-export interface RisquePrincipal {
-  code: string;
-  libelle: string;
-  score: number;
-  niveau?: string | null;
-  explication?: string;
-  facteurs_aggravants?: string[];
-  zone_la_plus_exposee?: string | null;
-}
-
-export interface RisquesPrincipaux {
-  risques: RisquePrincipal[];
-  source?: string; // moteur_deterministe | moteur_deterministe_et_llm
 }
 
 // ---------------------------------------------------------------------------
@@ -502,12 +303,6 @@ export interface BatimentRisques {
   alea_radon?: string | null;
   alea_sismique?: string | null;
   code_departement_insee?: string | null;
-}
-
-/** Contrat GET /diagnostic/zone/building (fiche complète au clic — story A2). */
-export interface BatimentFiche {
-  batiment?: BdnbBatiment | null;
-  risques?: BatimentRisques | null;
 }
 
 export interface GeocodeSuggestion {

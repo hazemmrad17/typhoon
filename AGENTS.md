@@ -18,6 +18,45 @@ Workflow spec-driven : `.agents/skills/spec-driven-development/`.
 - `docs/workflow/` — brainstorm, concept, spec, plan (+ notes).
 - Un changement de contrat passe d'abord par la constitution (amendement),
   puis la spec — jamais l'inverse.
+- Mode VFX `/zone` (simulation visuelle non contractuelle) : `constitution.md`
+  §2.1 · spec `docs/workflow/vfx-spec.md` · plan `docs/workflow/vfx-plan.md`.
+- Boucle scénario → carte de `/zone` (référence FuseLab) :
+  `docs/workflow/scenario-plan.md`. **Invariant acquis (SCN-001)** : les clés de
+  scénario du moteur (`damageModel.SCENARIOS[].key` = `extreme | moyen |
+  frequent | faible`) SONT les clés réglementaires TRI — ne pas réintroduire de
+  table de correspondance locale. Les anciennes clés
+  (`direct | west | east | offshore`) ne sont que des alias dépréciés.
+- **Deux seuils, jamais confondus (SCN-002)** : `INFRA_THRESHOLD_M` (0,3 m)
+  gouverne les DOMMAGES (compteurs, tuiles) ; `mapImpactFromDepth` gouverne ce
+  que la CARTE peint (dès une profondeur > 0).
+- **Le scénario pilote le niveau, la pluie ne pilote que la forme** (SCN-004) :
+  `scenarioDepthAt(profile, hourIndex, peakM)` — la classe TRI officielle fixe
+  le pic (fait réglementaire), la prévision de pluie n'en fixe que la courbe.
+  Journée sèche → rampe divergée documentée + libellé « montée : hypothèse ».
+  Ne JAMAIS réintroduire un `depthAt` météo-dépendant comme source du niveau :
+  cela rendait tout scénario invisible par temps sec, ce qui se lit comme une
+  panne. Hors TRI reste strictement 0 m.
+- **Sélection par défaut = classe la plus intense cartographiée**
+  (`mostIntenseMappedScenario`) : une fois par diagnostic, et seulement si le
+  scénario courant n'est pas cartographié. Les rangs non cartographiés sont
+  `disabled` (un clic sans effet se lit comme un bug).
+- **Absence ≠ panne (SCN-003)** : « hors TRI » est un fait, « service
+  indisponible » est un échec de source — deux messages distincts. Le
+  connecteur porte cinq vérités distinctes (`triAbsenceKind`) : chargement,
+  panne, dans un TRI **sans classe** au point, hors TRI, appartenance non
+  vérifiée. Formulation unique partagée (`triAbsenceText`) entre panneau,
+  console et rapport.
+- **TRI : BBOX à l'échelle du POINT** (`POINT_MARGIN_DEG` ≈ 55 m, jamais la
+  taille d'un quartier) : mesuré à Nantes, une boîte large remplit le cap
+  `count` de polygones 2 km plus loin, donc le polygone couvrant l'adresse
+  n'est jamais dans la page → « hors TRI » sur un quai. Tout polygone
+  contenant le point coupe une boîte centrée sur lui : élargir ne gagne rien
+  et perd des réponses. `ms:LIMITETRI_FXX` (périmètre, sans `ht_min`/`ht_max`)
+  n'est JAMAIS dans `SCENARIO_QUERY` — elle ne sert qu'à trancher
+  « dans un TRI ? » (`in_tri`), via le parseur GML générique.
+- Mode VFX : le rendu cinématique passe par `zone/vfx/vfxInputs.ts` et rien
+  d'autre ; le repli illustratif n'existe qu'en VFX et porte toujours
+  `partial` (libellé §2.1). `impactModel` ne doit JAMAIS importer ce module.
 
 ## Commandes
 
@@ -58,7 +97,7 @@ npm test                            # vitest run
 ## Où regarder
 
 - Spécification : `docs/workflow/spec.md` (statut, FR-xx)
-- Plan & tâches : `docs/workflow/plan.md`
+- Plan & tâches : `docs/workflow/plan.md` (+ scénarios : `docs/workflow/scenario-plan.md` · VFX : `docs/workflow/vfx-plan.md`)
 - Décisions : `docs/workflow/01-brainstorm-notes.md`, `concept.md`
 - Schéma du contrat : `backend/app/schemas/diagnostic_record.py`
 

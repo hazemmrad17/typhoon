@@ -164,20 +164,35 @@ def _polygon_from_el(el: ET.Element, inherited_srs: str | None = None) -> list[l
     return rings
 
 
-def _geometry_from_el(el: ET.Element) -> dict[str, Any] | None:
+def _geometry_from_el(el: ET.Element, inherited_srs: str | None = None) -> dict[str, Any] | None:
     kind = el.tag.rsplit("}", 1)[-1]
     if kind == "Polygon":
-        rings = _polygon_from_el(el)
+        rings = _polygon_from_el(el, el.get("srsName") or inherited_srs)
         return {"type": "Polygon", "coordinates": rings} if rings else None
     if kind == "MultiSurface":
         polys: list[list[list[tuple[float, float]]]] = []
         srs = el.get("srsName")
-        for member in _children_local(el, "surfaceMember"):
+        # GML 3.2 admet deux emboîtements : `surfaceMember` (singulier, un par
+        # polygone) ET `surfaceMembers` (pluriel, conteneur — mesuré sur
+        # ms:LIMITETRI_FXX). Sans le pluriel, la couche TRI ne rend RIEN et le
+        # test point-dans-périmètre répond « hors TRI » à tort.
+        members = list(_children_local(el, "surfaceMember"))
+        for wrapper in _children_local(el, "surfaceMembers"):
+            members.extend(_children_local(wrapper, "surfaceMember"))
+            members.extend(_children_local(wrapper, "Polygon"))
+        if not members:
+            # Polygons directement sous MultiSurface (variante MapServer).
+            members = _children_local(el, "Polygon")
+        for member in members:
             poly = _local(member, "Polygon")
             if poly is None:
-                poly = _local(member, "Surface")
+                poly = member if member.tag.rsplit("}", 1)[-1] == "Polygon" else _local(member, "Surface")
             if poly is not None:
-                rings = _polygon_from_el(poly, srs)
+                # srsName URN (axes lat, lon) peut vivre sur la MultiSurface
+                # sans se répéter sur le Polygon — hériter, sinon les
+                # coordonnées restent (lat, lon) et le point-in-polygon ne
+                # matche jamais (bug silencieux « hors TRI partout »).
+                rings = _polygon_from_el(poly, poly.get("srsName") or srs)
                 if rings:
                     polys.append(rings)
         return {"type": "MultiPolygon", "coordinates": polys} if polys else None
@@ -197,12 +212,19 @@ def _geometry_from_el(el: ET.Element) -> dict[str, Any] | None:
 
 def _feature_geometry(feature_el: ET.Element) -> dict[str, Any] | None:
     """Cherche la géométrie d'une feature (wfs:member > ms:Type > ms:msGeometry)."""
+    # srsName de portée membre : le service le porte sur l'`Envelope` ou la
+    # `MultiSurface` SANS le répéter sur chaque `Polygon` (mesuré sur
+    # ms:LIMITETRI_FXX) — sans héritage, les coordonnées restent (lat, lon)
+    # et le point-in-polygon ne matche jamais (« hors TRI partout »).
+    member_srs = next(
+        (e.get("srsName") for e in feature_el.iter() if e.get("srsName")), None
+    )
     # Descend d'abord vers l'élément portant la géométrie : on prend la première
     # balise de géométrie GML en largeur (évite de prendre un polygone imbriqué
     # dans un MultiSurface à la place du MultiSurface).
     for el in feature_el.iter():
         if el.tag.rsplit("}", 1)[-1] in _GEOM_TYPES:
-            geom = _geometry_from_el(el)
+            geom = _geometry_from_el(el, member_srs)
             if geom:
                 return geom
     return None

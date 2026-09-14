@@ -15,15 +15,15 @@
 //
 //   Trois conséquences assumées et affichées :
 //     · la profondeur est UNIFORME sur le secteur (pas de variation de
-//       terrain) : c'est une enveloppe, pas une emprise inondée ;
-//     · le seuil de 0,3 m est celui du moteur (`submergedFrac`) — en dessous,
-//       il ne compte aucun dommage d'infrastructure : la carte ne doit pas
-//       peindre d'eau là où le modèle n'en compte pas ;
+//       terrain) : c'est une enveloppe, pas une emprise inondée ;//     · le seuil de 0,3 m est celui du moteur (`submergedFrac`) — en dessous,
+//       il ne compte aucun dommage d'infrastructure : les COMPTEURS et les
+//       tuiles de scénario restent donc « sous le seuil » (SCN-002) ; la
+//       CARTE, elle, peint l'eau dès `mapImpactFromDepth(...) !== null`, parce
+//       qu'un seuil de dommages n'est pas un seuil de visibilité ;
 //     · la hauteur dessinée est plafonnée par la hauteur RÉELLE du bâti (BDNB) :
 //       au-delà, c'est une ruine, pas un immeuble noyé jusqu'au toit.
 // =============================================================================
 
-import { effectiveDepthM, type ScenarioDef } from './damageModel';
 
 /** Seuil d'infrastructure du moteur (cf. `submergedFrac` dans damageModel). */
 export const INFRA_THRESHOLD_M = 0.3;
@@ -73,7 +73,8 @@ export interface ImpactState {
   peakPct: number;
 }
 
-/** Décrit un état d'inondation à partir d'une profondeur déjà calculée. */
+/** État d'inondation à un instant de la simulation RÉELLE (cf. floodSim) :
+ *  la profondeur vient de pluie prévue × classe TRI, jamais d'un pic inventé. */
 export function impactState(depthM: number, peakM: number): ImpactState {
   const d = Number.isFinite(depthM) ? Math.max(0, depthM) : 0;
   const peak = Number.isFinite(peakM) && peakM > 0 ? peakM : 0;
@@ -86,9 +87,53 @@ export function impactState(depthM: number, peakM: number): ImpactState {
   };
 }
 
-/** État d'inondation du scénario à un avancement donné (0..1). */
-export function impactAt(scenario: ScenarioDef, accum: number): ImpactState {
-  return impactState(effectiveDepthM(scenario, accum), scenario.depthPeakM);
+/* ── SCN-002 — seuil de la CARTE ≠ seuil des DOMMAGES ──
+
+   Le seuil de 0,3 m (`INFRA_THRESHOLD_M`, cf. `submergedFrac`) reste la
+   frontière des DOMMAGES : en dessous, le moteur ne compte aucune
+   infrastructure touchée, et les compteurs/tuiles de scénario ne doivent pas
+   annoncer de dégât. Il n'a en revanche jamais été un seuil de VISIBILITÉ :
+   FuseLab montre l'eau monter dès le début. La carte peint donc dès que la
+   profondeur modélisée dépasse zéro, à faible opacité.
+
+   Deux seuils, deux usages — assumés et documentés, jamais confondus. */
+
+/** Profondeur (m) en dessous de laquelle la carte ne peint rien : un résidu
+ *  numérique ne doit pas allumer une nappe d'eau. */
+export const MAP_MIN_DEPTH_M = 0.02;
+
+export interface MapImpact {
+  /** Volume d'eau dessinable, arrondi au pas de 5 cm (m). */
+  slabM: number;
+  /** Couleur de la bande d'affichage. */
+  color: string;
+  band: FloodBand;
+  /** La carte doit-elle peindre l'enveloppe ? */
+  visible: boolean;
+  /** Seuil de DOMMAGES franchi ? (0,3 m — inchange) */
+  overThreshold: boolean;
+}
+
+/** Ce que la carte a le droit de dessiner à l'instant t. `null` quand rien
+ *  n'est modélisé (hors TRI, pas de prévision, profondeur nulle). */
+export function mapImpactFromDepth(
+  depthM: number,
+  peakM = 0
+): MapImpact | null {
+  void peakM; /* la carte ne dépend pas du pic : seule la profondeur courante */
+  const d = Number.isFinite(depthM) ? Math.max(0, depthM) : 0;
+  if (d < MAP_MIN_DEPTH_M) return null;
+  const slabM = quantiseSlab(d);
+  /* Un pas de 5 cm peut arrondir une profondeur de 2 cm à 0 : ne pas peindre
+     une nappe de hauteur nulle. */
+  if (slabM <= 0) return null;
+  return {
+    slabM,
+    color: floodBand(d).color,
+    band: floodBand(d),
+    visible: true,
+    overThreshold: d > INFRA_THRESHOLD_M,
+  };
 }
 
 /**

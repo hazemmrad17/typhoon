@@ -71,6 +71,8 @@
      au lieu d'étirer la liste ; les items se centrent horizontalement. */
   --sidenav-w: 220px;
   --sidenav-w-collapsed: 72px;
+  /* Tiroir MINI (mobile/offcanvas) : largeur ajustée aux icônes seules. */
+  --sidenav-w-drawer-mini: 64px;
 
   /* Rangées interactives de la sidenav : rayon (pilule) et hauteur unifiés
      en mode déplié comme en mode replié (rail) — même gabarit partout. */
@@ -194,6 +196,25 @@
   min-height: 0;
 }
 
+/* ── Figures de simulation par aléa (SVG dans le panneau scénarios) ── */
+.scenario-hazard-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 2px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant, #46505c) 50%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container, #17202b) 70%, transparent);
+}
+
+.scenario-fig-title {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rp-muted, #9aa7b4);
+}
+
 /* ============================================================================
    PAGE « PARAMÈTRES DU COMPTE » (/settings) — corps de page
    La page occupe toute la largeur de .zone-main ; en-tête titre + bouton sur
@@ -286,6 +307,17 @@
   background-color: var(--md-sys-color-primary);
   -webkit-mask: url('/bastion/wordmark-light.svg') no-repeat center / contain;
   mask: url('/bastion/wordmark-light.svg') no-repeat center / contain;
+}
+/* Icon mark (logo icône seul) — version MINI du tiroir : carré, teinté par
+   le même jeton que le wordmark. aspect-ratio = viewBox (237.49 × 237.97). */
+.sidenav-iconmark-img {
+  display: block;
+  flex-shrink: 0;
+  height: 28px;
+  aspect-ratio: 237.49 / 237.97;
+  background-color: var(--md-sys-color-primary);
+  -webkit-mask: url('/bastion/icon-light.svg') no-repeat center / contain;
+  mask: url('/bastion/icon-light.svg') no-repeat center / contain;
 }
 /* Thème clair : la sidenav suit les jetons M3 clairs (surface-container-low
    = #f1f5f8, texte sombre) — pas de surcharge sombre. Le wordmark masqué
@@ -3106,12 +3138,18 @@
     transform: translateX(-100%);
     transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
   }
+  /* Tiroir MINI par défaut : la largeur suit les icônes (rail compact),
+     PAS la largeur pleine de 304px. Déplié (drawer-expanded) → pleine. */
   .zone-app.nav-collapsed .zone-sidenav {
     width: min(304px, 86vw);
   }
   .zone-app.drawer-open .zone-sidenav {
     transform: translateX(0);
     box-shadow: 12px 0 40px rgba(0, 0, 0, 0.4);
+    width: var(--sidenav-w-drawer-mini, 64px);
+  }
+  .zone-app.drawer-open.drawer-expanded .zone-sidenav {
+    width: min(304px, 86vw);
   }
   .sidenav-hamburger {
     display: inline-flex;
@@ -3683,6 +3721,10 @@
   .zone-app.nav-offcanvas.drawer-open .zone-sidenav {
     transform: translateX(0);
     box-shadow: 12px 0 40px rgba(0, 0, 0, 0.4);
+    width: var(--sidenav-w-drawer-mini, 64px);
+  }
+  .zone-app.nav-offcanvas.drawer-open.drawer-expanded .zone-sidenav {
+    width: min(320px, 86vw);
   }
 
   /* Le hamburger du topbar rouvre le drawer, comme en mobile. */
@@ -3759,6 +3801,14 @@
   top: 12px; /* = padding haut du bandeau en mobile */
   right: 14px; /* = padding droit du bandeau en mobile */
   z-index: 2;
+}
+
+/* Bouton retour (étape précédente) : miroir du bouton simulation, épinglé
+   au coin supérieur GAUCHE de la topbar. La règle générique ci-dessus cible
+   les deux (.zone-topbar > .sim-indicator) — on ré-ancre celui-ci à gauche. */
+.zone-topbar > .sim-indicator.step-back {
+  right: auto;
+  left: 14px;
 }
 
 /* Statut diagnostic (en cours / erreur) : ligne entière sous la recherche. */
@@ -6572,6 +6622,97 @@
   --md-icon-size: 11px;
 }
 
+/* ── Sélecteur d'aléa : liste à icônes (inondation active ; ouragan, RGA et
+    feu grisés « coming soon » tant qu'aucun moteur ne les soutient) ── */
+.scenario-hazards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.scenario-hazard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 75%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s,
+    opacity 0.15s;
+}
+.scenario-hazard:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 80%, transparent);
+}
+.scenario-hazard.active {
+  border-color: rgba(77, 163, 255, 0.55);
+  background: color-mix(in srgb, #4da3ff 8%, var(--md-sys-color-surface-container));
+  box-shadow: 0 0 0 1px rgba(77, 163, 255, 0.22), 0 4px 14px rgba(77, 163, 255, 0.14);
+}
+.scenario-hazard.active .scenario-hazard-ico {
+  color: #4da3ff;
+}
+.scenario-hazard:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+.scenario-hazard.soon {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: grayscale(0.9);
+}
+.scenario-hazard-ico {
+  --md-icon-size: 20px;
+  flex-shrink: 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.scenario-hazard-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.scenario-hazard-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface);
+}
+.scenario-hazard-hint {
+  font-size: 0.66rem;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scenario-hazard-soon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 10%, transparent);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.scenario-hazard-soon md-icon {
+  --md-icon-size: 11px;
+}
+
 /* ── Grille « 16 possible scenarios » + bouton Simulate ── */
 .scenario-grid-head {
   display: flex;
@@ -7656,4 +7797,89 @@
 .risk-console-res {
   color: var(--md-sys-color-on-surface-variant);
   opacity: 0.85;
+}
+
+/* ── Tiroir MINI : menus contextuels hors du rail étroit ──
+   À 64px, les dropdowns (thème / utilisateur) attachés au pied débordent du
+   viewport : on les ancre à droite de la sidenav, largeur de carte fixe. */
+.zone-app.nav-collapsed.drawer-open .sidenav-user-menu,
+.zone-app.nav-collapsed.drawer-open .sidenav-theme-menu {
+  left: auto;
+  right: calc(100% + 10px);
+  width: 220px;
+}
+
+/* ═══ VFX-002 — bandeau de disclaimer du mode cinématique (§2.1) ═══
+   Toujours visible en VFX, jamais en mode data. Le libellé principal est
+   volontairement lisible : un rendu illustratif ne doit jamais pouvoir être
+   pris pour une donnée contractuelle. */
+.vfx-disclaimer {
+  position: absolute;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(20, 20, 22, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+  max-width: min(520px, 90vw);
+}
+.vfx-disclaimer-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.vfx-disclaimer-sub {
+  opacity: 0.75;
+  font-size: 11px;
+}
+
+/* En mode VFX, les panneaux se minimisent pour laisser la carte respirer.
+   (Classes réelles : `scenario-panel`, `side-panels`, `right-alerts-panel`.) */
+.zone-vfx-active .scenario-panel,
+.zone-vfx-active .side-panels,
+.zone-vfx-active .right-alerts-panel {
+  opacity: 0.35;
+  transition: opacity 240ms ease;
+}
+.zone-vfx-active .scenario-panel:hover,
+.zone-vfx-active .side-panels:hover,
+.zone-vfx-active .right-alerts-panel:hover {
+  opacity: 1;
+}
+
+/* ═══ VFX-002 — bascule de mode (pill de la topbar) ═══ */
+.vfx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  margin-right: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vfx-toggle:hover {
+  border-color: var(--accent);
+}
+.vfx-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }

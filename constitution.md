@@ -4,20 +4,21 @@
 >
 > Enforcement tags: **[CI]** = automated check · **[test]** = asserted in test suite · **[review]** = human/code-review checkpoint
 
-**Version:** 0.1
-**Last amended:** 2026-08-25
+**Version:** 0.2
+**Last amended:** 2026-09-14
 
 ---
 
 ## §1 — Tech stack
 
 - Backend: Python (version pinned in CI config — the CI version is the only supported one), FastAPI, Pydantic v2, httpx (async), pyproj, uvicorn.
-- Frontend: MapLibre GL for all map rendering; turf for client-side geometry.
+- Frontend: Mapbox GL JS for map rendering on `/zone` and portfolio surfaces; turf for client-side geometry; Three.js (presentation-tier VFX only — see §2.1).
 - Tests: pytest + pytest-asyncio. Lint/format: ruff.
 
 **Rules:**
 - New HTTP calls use `httpx.AsyncClient`. `requests` appears nowhere in new code. **[review]**
 - No new runtime dependency without an explicit decision recorded in this repo. **[review]**
+- **Approved presentation dependencies (2026-09-14):** `three` + `@types/three` for the `/zone` VFX custom layer (§2.1). No other Three.js usage without a further amendment. **[review]**
 
 ## §2 — Product invariants
 
@@ -29,7 +30,34 @@ These encode what the *product* is. Violating any of them means building a diffe
 - **One canonical shape.** Exactly one response schema per route. Two live shapes for the same resource is a defect (this happened once — see OQ-1 in `docs/workflow/concept.md`). **[review]**
 - **Batch is N singles.** `/diagnostic/batch` processes addresses through the identical single-address pipeline. No parallel bulk implementation, no snapshot/versioned-extract code path. **[review]**
 - **RGA honesty.** Until a polygon vector source is wired, RGA ships with `resolution: "commune-level estimate"` and nothing may claim per-building resolution for it. **[test]**
-- **No dormant code.** Retired features (Copernicus, Open-Meteo, scoring, 3D extrusions) are deleted, not commented out or left unreferenced. Git history is the archive. **[review]**
+- **No dormant code.** Retired features (Copernicus, Open-Meteo, scoring, undifferentiated 3D decoration) are deleted, not commented out or left unreferenced. Git history is the archive. Presentation-tier VFX (§2.1) is an explicit, maintained surface — not dormant decoration. **[review]**
+
+### §2.1 — Presentation-tier cinematic simulation (VFX mode)
+
+The `/zone` map may run a **visual-effects demo mode** alongside the existing data-honest rendering. This is a *presentation* surface only: it must never change API semantics or leak into the canonical contract.
+
+**Scope**
+- Applies to frontend presentation only (`/zone`, screenshots/PDF exports derived from it).
+- Zero backend routes, schema fields, or batch payloads may carry VFX geometry, scores, or synthetic hazard judgments.
+
+**Dual modes (mandatory)**
+- **`data`** — current behavior: honest envelopes (`impactModel`), SVG vignettes, Mapbox fill-extrusion on building footprints, explicit unavailability when inputs are missing.
+- **`vfx`** — cinematic rendering: Three.js custom layer on Mapbox, terrain-following water, particles, post-processing, camera director. User-selectable; default remains **`data`** until explicitly toggled.
+
+**Labeling (mandatory in VFX mode)**
+- A persistent, visible banner: *« Simulation visuelle — non contractuelle »* (or equivalent i18n key).
+- When real inputs are partial, secondary label: *« Données partielles — rendu illustratif »*.
+- VFX must not reuse contract vocabulary (`resolution`, `present`, D03 band labels) as if the render were a sourced fact.
+
+**Input rules**
+- VFX **must** consume the same client-side drivers as the data mode when available: `timeMin`, Open-Meteo profiles, TRI depth bands (`floodAlea`), hydro journey (`waterFlight` path), BDNB building height/footprint.
+- VFX **may** exaggerate appearance (smooth rise, terrain flood plane, bloom, camera motion) but **must not** claim hydraulic accuracy.
+- Illustrative fallbacks (e.g. reference-depth preview when meteo is dry) are allowed **only** in VFX mode and **only** with the partial-data label above.
+
+**Performance & integration**
+- Windy overlay and VFX 3D camera are mutually exclusive while VFX is active (Windy forces flat mercator). **[test]**
+- VFX layer mounts/unmounts cleanly on mode toggle; no WebGL context leak on route change. **[test]**
+- Target: ≥ 30 fps on a mid-range laptop at building zoom with water plane enabled; degrade gracefully (disable post-FX first). **[review]**
 
 ## §3 — Architecture
 
@@ -79,3 +107,4 @@ These encode what the *product* is. Violating any of them means building a diffe
 | Date | Change | Rationale |
 |------|--------|-----------|
 | 2026-08-25 | Initial constitution derived from brainstorm + concept phases | Product recentering on per-building hazard × vulnerability join |
+| 2026-09-14 | §1: Mapbox GL JS + approved `three` dep; §2.1: dual `data`/`vfx` presentation modes on `/zone` | Enable cinematic demo without compromising API facts-only invariants |

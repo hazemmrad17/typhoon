@@ -51,8 +51,3 @@ export function addConversation(list: Conversation[], address: string): Conversa
   ];
   return next.slice(0, MAX_ITEMS);
 }
-
-/** Supprime une conversation de l'historique. */
-export function removeConversation(list: Conversation[], id: string): Conversation[] {
-  return list.filter((c) => c.id !== id);
-}

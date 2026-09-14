@@ -53,11 +53,8 @@ def _request(sector: str = "8 Boulevard de Sébastopol 75004 Paris") -> ReportRe
     return ReportRequest(
         sector=sector,
         scenario=ScenarioModel(
-            key="direct",
-            pct=81,
-            risk="HIGH DAMAGE RISK",
-            windPeakKmh=125,
-            rainPeakMmH=26,
+            key="extreme",
+            risk="EXTREME — ~500 ans",
             depthPeakM=1.1,
         ),
         timestamp="2026-09-09T15:00:00",
@@ -378,7 +375,7 @@ async def test_without_hydro_nothing_changes(tmp_path, monkeypatch):
     assert "5. Annexe" in resp.markdown
     assert "6. Annexe" not in resp.markdown
     assert "Trajet de l'eau" not in resp.markdown
-    assert "| Indicateur | Estimation ± |" in resp.markdown
+    assert "| Indicateur | Valeur |" in resp.markdown
     # Déterminisme : même requête → même document.
     again = await report_agent.generate_report(_request("Secteur témoin"))
     assert again.markdown == resp.markdown
@@ -448,4 +445,90 @@ async def test_hydro_summary_rejects_hallucinated_number(tmp_path, monkeypatch):
     )
     # Le repli template est ancré sur la même donnée (39 km en aval).
     summary = [e["data"] for e in events2 if e["type"] == "hydro_summary"][0]
-    assert "39" in summary["summary"]
+    assert "39" in summary["summary"]
+
+# ---------------------------------------------------------------------------
+# Absence de classe TRI ≠ « pic d'eau 0,0 m »
+#
+# `depthPeakM == 0` signifie « aucune classe cartographiée au point ». Imprimer
+# « 0,0 m » faisait passer une absence de donnée pour une mesure — ce que
+# l'invariant « faits + provenance » interdit dans les deux sens (ni chiffre
+# inventé, ni absence déguisée en chiffre).
+# ---------------------------------------------------------------------------
+
+
+def _request_without_tri_class() -> ReportRequest:
+    req = _request()
+    req.scenario = ScenarioModel(
+        key="extreme",
+        risk="EXTREME — ~500 ans",
+        depthPeakM=0.0,
+    )
+    req.damage = None
+    return req
+
+
+def test_unmapped_class_never_prints_zero_depth():
+    req = _request_without_tri_class()
+    summary = report_agent._exec_summary_template(req)
+    appendix = report_agent._appendix_rows(req)
+
+    assert "0.0 m" not in summary
+    assert "0,0 m" not in summary
+    assert "AUCUNE classe de hauteur d'eau n'est cartographiée" in summary
+    # Le garde-fou de sens est explicite : hors TRI ≠ jamais inondé.
+    assert "jamais inondé" in summary
+
+    flat = [f"{k} : {v}" for k, v in appendix]
+    assert not any("0.0 m" in row for row in flat)
+    assert any("non cartographiée au point" in row for row in flat)
+
+
+def test_unmapped_class_says_dans_un_tri_when_the_point_is_in_one():
+    """Mesuré à Orléans (3 quai du Châtelet) et Lyon (10 quai Victor Augagneur) :
+    le point est DANS le périmètre d'un TRI, sans classe de hauteur à cet
+    emplacement. Le rapport ne doit pas lui coller « hors TRI »."""
+    req = _request_without_tri_class()
+    req.scenario = ScenarioModel(
+        key="extreme", risk="EXTREME — ~500 ans", depthPeakM=0.0, inTri=True
+    )
+    summary = report_agent._exec_summary_template(req)
+    appendix = report_agent._appendix_rows(req)
+
+    assert "DANS le périmètre d'un TRI" in summary
+    assert "hors TRI" not in summary
+    assert any("dans un TRI" in row for row in [f"{k} : {v}" for k, v in appendix])
+
+
+def test_unmapped_class_says_hors_tri_only_when_it_is_true():
+    req = _request_without_tri_class()
+    req.scenario = ScenarioModel(
+        key="extreme", risk="EXTREME — ~500 ans", depthPeakM=0.0, inTri=False
+    )
+    summary = report_agent._exec_summary_template(req)
+    appendix = report_agent._appendix_rows(req)
+
+    assert "Hors TRI n'équivaut pas" in summary
+    assert "DANS le périmètre d'un TRI" not in summary
+    assert any("(hors TRI)" in row for row in [f"{k} : {v}" for k, v in appendix])
+
+
+def test_unmapped_class_with_unknown_perimeter_does_not_claim_hors_tri():
+    """Sans vérification du périmètre, ni « hors TRI » ni « dans un TRI »."""
+    req = _request_without_tri_class()
+    summary = report_agent._exec_summary_template(req)
+    appendix = report_agent._appendix_rows(req)
+
+    assert "n'a pas pu être vérifiée" in summary
+    assert "DANS le périmètre d'un TRI" not in summary
+    assert any("non vérifiée" in row for row in [f"{k} : {v}" for k, v in appendix])
+
+
+def test_mapped_class_still_prints_its_depth():
+    req = _hydro_request()
+    req.damage = None
+    summary = report_agent._exec_summary_template(req)
+    appendix = report_agent._appendix_rows(req)
+
+    assert "1.1 m" in summary
+    assert any("1.1 m" in v for _, v in appendix)

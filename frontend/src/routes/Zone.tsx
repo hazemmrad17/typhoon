@@ -63,8 +63,24 @@ import {
   type MeteoData,
 } from '../zone/hydroRoute';
 import { fetchSitePhoto, type SitePhoto } from '../zone/sitePhoto';
-import { scenarioFor, timeProfileAt } from '../zone/damageModel';
-import { impactAt } from '../zone/impactModel';
+import {
+  fetchFloodAlea,
+  bandPeakM,
+  mostIntenseMappedScenario,
+  triAbsenceKind,
+  triAbsenceText,
+  triDepthForScenario,
+  triProvenanceLabel,
+  type FloodAleaResult,
+} from '../zone/floodAlea';
+import { mapImpactFromDepth } from '../zone/impactModel';
+import { curveIsHypothesis, rainProfileFrom, scenarioDepthAt } from '../zone/floodSim';
+import { SCENARIOS } from '../zone/damageModel';
+import { gustProfileFrom, gustAt, gustBand } from '../zone/windSim';
+import { fireConePolygon } from '../zone/hazardSim';
+import { vfxWaterLevel } from '../zone/vfx/vfxInputs';
+import { VfxDisclaimer } from '../components/VfxDisclaimer';
+import { ReportPage } from './ReportPage';
 import '../styles/zone.css';
 
 
@@ -80,6 +96,8 @@ export function Zone() {
      navigation vit dans un drawer à la demande, ouvert via le hamburger du
      stepper — même principe qu'en mobile. */
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /* Tiroir en version MINI (icônes seules) — état par défaut à l'ouverture. */
+  const [drawerMini, setDrawerMini] = useState(true);
   const sidenavRef = useRef<HTMLElement | null>(null);
 
   /* Drawer ouvert : amener le focus dans la navigation. */
@@ -145,8 +163,9 @@ export function Zone() {
      voir. Aucun allumage automatique au diagnostic : c'est lui qui décide. */
   const [visibleAleas, setVisibleAleas] = useState<Set<string>>(new Set());
   /* Parcours en 3 étapes : 1 = carte / crues, 2 = analyse des risques,
-     3 = rapport (page autonome /report). La flèche de la topbar avance
-     d'une étape à l'autre.
+     3 = rapport — rendu comme PANNEAU INTÉGRÉ par-dessus la vue risques
+     (pas une page séparée). La flèche de la topbar avance d'une étape à
+     l'autre.
 
      La classe risk-open est posée dès l'étape 2 et change la composition :
        · la console météo de l'étape 1 s'escamote, remplacée en bas par la
@@ -201,8 +220,17 @@ export function Zone() {
        d'intensité des estimations du panneau gauche ;
      · riskTimeMin  — minute de la journée (console basse) qui pilote l'instant
        t de l'événement. Les deux déclenchent le recalcul des deux panneaux. */
-  const [scenarioKey, setScenarioKey] = useState('direct');
+  const [scenarioKey, setScenarioKey] = useState('extreme');
   const [riskTimeMin, setRiskTimeMin] = useState(195);
+  /* Type d'aléa actif du mode risques (inondation ou vent) — état partagé
+     par les deux panneaux (sélection à droite, console en bas). */
+  const [hazardEvent, setHazardEvent] = useState<string>('FLOODING');
+
+  /* VFX-002 — mode de rendu (constitution §2.1) : `data` par défaut, jamais
+     l'inverse. Le mode VFX est une couche de PRÉSENTATION : il ne modifie ni
+     les appels d'API ni le contrat canonique — seulement ce qui est peint. */
+  const [viewMode, setViewMode] = useState<'data' | 'vfx'>('data');
+  const vfx = viewMode === 'vfx' && isRiskView;
 
   /* ── Trajet de l'eau (étape 2) : GÉOGRAPHIE RÉELLE, reconstruite côté
      serveur (réseau hydrographique IGN BD TOPO, cf. zone/hydroRoute.ts).
@@ -221,17 +249,137 @@ export function Zone() {
      `photo` est null ou `available === false` et les cartes gardent leur visuel
      abstrait. Rien n'est substitué en silence. */
   const [photo, setPhoto] = useState<SitePhoto | null>(null);
+  /* Repère réglementaire TRI (Directive Inondation) — cf. zone/floodAlea.ts. */
+  const [floodAlea, setFloodAlea] = useState<FloodAleaResult | null>(null);
 
-  /* Enveloppe d'inondation portée à la carte (étape 2) : la profondeur du
-     MOTEUR (scénario × instant de la timeline), dans l'empreinte réelle du
-     bâti de la vue. Le seuil d'infrastructure du moteur (0,3 m) est une
-     frontière : en dessous, il ne compte aucun dommage, donc la carte ne
-     peint aucune eau — `null` plutôt qu'un volume symbolique. */
+  /* Pic d'eau issu de la classe TRI de la bande UI sélectionnée (ou null),
+     et son libellé de provenance — partagés par tous les panneaux. */
+  const triPeak = useMemo(() => {
+    const scen = triDepthForScenario(floodAlea, scenarioKey);
+    return scen ? bandPeakM(scen.depth_band!) : null;
+  }, [floodAlea, scenarioKey]);
+  const triLabel = useMemo(
+    () => triProvenanceLabel(triDepthForScenario(floodAlea, scenarioKey)),
+    [floodAlea, scenarioKey]
+  );
+
+  /* Profil de pluie RÉEL (Open-Meteo) qui pilote la simulation de crue.
+     Sans prévision → null : la timeline et la carte ne peignent rien. */
+  const rainProfile = useMemo(() => rainProfileFrom(meteo), [meteo]);
+
+  /* Profil de rafales RÉEL (Open-Meteo) pour le mode vent — même source,
+     même règle : pas de prévision → pas de simulation. */
+  const gustProfile = useMemo(() => gustProfileFrom(meteo), [meteo]);
+
+  /* Enveloppe d'inondation portée à la carte (étape 2) : profondeur = pluie
+     prévue RÉELLE (accumulation) × pic de la CLASSE TRI officielle. Sans
+     prévision ou hors TRI → aucune eau peinte (`null`), jamais un volume
+     inventé.
+
+     SCN-002 — seuil de la CARTE ≠ seuil des DOMMAGES : la carte peint dès que
+     la profondeur dépasse zéro (`mapImpactFromDepth`), pour que le scrub de
+     timeline montre la montée de l'eau ; le seuil de 0,3 m continue de
+     gouverner les compteurs de dommages et les tuiles de scénario.
+     Mode vent : la carte ne peint pas d'enveloppe (pas de surface délimitée
+     sans zone réglementaire) — la grandeur pilotée reste la rafale réelle. */
   const riskImpact = useMemo(() => {
-    if (!isRiskView) return null;
-    const state = impactAt(scenarioFor(scenarioKey), timeProfileAt(riskTimeMin / 60).accum);
-    return state.overThreshold ? { slabM: state.slabM, color: state.band.color } : null;
-  }, [isRiskView, scenarioKey, riskTimeMin]);
+    if (!isRiskView || hazardEvent !== 'FLOODING') return null;
+    const hourIndex = riskTimeMin / 60;
+    /* Le SCÉNARIO pilote le niveau : la classe officielle fixe le pic, la
+       prévision de pluie n'en fixe que la forme. Sans pluie prévue, le pic du
+       scénario s'affiche quand même (rampe documentée, libellée comme
+       hypothèse) — sinon choisir « EXTREME » ne produisait rien les jours
+       secs et se lisait comme une panne. Hors TRI : toujours aucune eau. */
+    const depth = scenarioDepthAt(rainProfile, hourIndex, triPeak);
+    const m = mapImpactFromDepth(depth, triPeak ?? 0);
+    return m ? { slabM: m.slabM, color: m.color } : null;
+  }, [isRiskView, hazardEvent, rainProfile, riskTimeMin, triPeak]);
+
+  /* Le régime de courbe affiché : piloté par la pluie réelle, ou hypothèse
+     documentée (journée sèche). Partagé par la console et le panneau. */
+  const curveHypothesis = curveIsHypothesis(rainProfile);
+
+  /* Sélection utile : dès que la cartographie TRI arrive, si le scénario
+     sélectionné n'est PAS cartographié au point, basculer sur la classe la
+     plus INTENSE qui l'est. Sans cela l'écran reste sec et l'utilisateur lit
+     une panne là où il y a simplement une autre classe disponible
+     (ex. Paris : seule « faible » est cartographiée). */
+  /* `scenarioKeyRef` évite de relancer la bascule à chaque clic : la sélection
+     par défaut ne se produit qu'À L'ARRIVÉE d'une nouvelle cartographie, pour
+     ne pas annuler un choix explicite de l'utilisateur. */
+  const scenarioKeyRef = useRef(scenarioKey);
+  scenarioKeyRef.current = scenarioKey;
+  const autoPickedFor = useRef<FloodAleaResult | null>(null);
+
+  useEffect(() => {
+    if (!floodAlea || autoPickedFor.current === floodAlea) return;
+    autoPickedFor.current = floodAlea;
+    if (triDepthForScenario(floodAlea, scenarioKeyRef.current)) return;
+    const best = mostIntenseMappedScenario(
+      floodAlea,
+      SCENARIOS.map((s) => s.key)
+    );
+    if (best) setScenarioKey(best);
+  }, [floodAlea]);
+
+  /* SCN-003 — état explicite de la source TRI : « ok » (la route a répondu,
+     cartographié ou explicitement hors TRI) vs « unavailable » (service
+     injoignable). Le panneau affiche alors un message de PANNE, distinct du
+     message « hors TRI » : une absence de risque et un échec de source ne se
+     confondent pas.
+
+     La météo n'a pas d'état équivalent : son absence est déjà lisible dans la
+     donnée elle-même (`meteo === null`, `dry`), et la console comme le panneau
+     en dérivent « Simulation indisponible » — un second drapeau serait
+     redondant. */
+  const [triStatus, setTriStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading');
+
+  /* Quand AUCUNE classe n'est cartographiée au point, la console affiche la
+     même formulation que le panneau des scénarios (panne / dans un TRI sans
+     classe / hors TRI) — la même absence ne peut pas se dire de deux façons.
+     Si une autre classe existe, on laisse la console dire « non cartographié
+     POUR CE SCÉNARIO » : c'est alors une vérité locale, pas une absence. */
+  const triAbsenceLabel = useMemo(() => {
+    const anyMapped = SCENARIOS.some((s) => triDepthForScenario(floodAlea, s.key) != null);
+    if (anyMapped) return null;
+    return triAbsenceText(triAbsenceKind(floodAlea, triStatus === 'unavailable')).label;
+  }, [floodAlea, triStatus]);
+
+  /* Grandeur du mode vent à l'instant t : rafale RÉELLE prévue (km/h) et sa
+     bande d'effets (seuils documentés Beaufort/Carpenter). */
+  const windNow = useMemo(
+    () => (hazardEvent === 'HURRICANE' ? gustAt(gustProfile, riskTimeMin / 60) : 0),
+    [hazardEvent, gustProfile, riskTimeMin]
+  );
+  const windBand = useMemo(
+    () => (hazardEvent === 'HURRICANE' ? gustBand(windNow) : null),
+    [hazardEvent, windNow]
+  );
+
+  /* SCN-021 — cône de feu (géométrie de carte) : produit uniquement si le
+     diagnostic a trouvé l'aléa feu à l'adresse. Pas de météo → null → la
+     carte ne dessine rien (le panneau dit pourquoi). */
+  const fireConeGeometry = useMemo(() => {
+    const present = (report?.aleas ?? []).some(
+      (a) => a.code === 'feu_foret' && a.present === true
+    );
+    if (!present || !report || report.lat == null || report.lon == null) return null;
+    return fireConePolygon(meteo, { lon: report.lon, lat: report.lat });
+  }, [report, meteo]);
+
+  /* VFX-003 — entrées du rendu cinématique : mêmes drivers que le mode data
+     (heure × pluie réelle × classe TRI). Le repli illustratif n'existe qu'en
+     VFX, et il est signalé (`partial`). */
+  const vfxLevel = useMemo(
+    () =>
+      vfxWaterLevel({
+        rainProfile,
+        hourIndex: riskTimeMin / 60,
+        triPeak,
+        allowFallback: vfx,
+      }),
+    [rainProfile, riskTimeMin, triPeak, vfx]
+  );
 
   const journey = useMemo(() => (hydro ? buildJourney(hydro) : null), [hydro]);
   const basinGeometry = hydro?.basin?.geometry ?? null;
@@ -277,27 +425,37 @@ export function Zone() {
     return () => ctrl.abort();
   }, [report]);
 
-  /* Étape 3 = page rapport autonome (/report) : on y accède directement, sans
-     bouton intermédiaire. On emporte l'état courant (lieu + rapport + scénario
-     + instant t + trajet). Le rapport reprend le scénario et l'heure choisis à
-     l'étape 2 : changer de bande d'intensité ou déplacer le curseur change le
-     document produit, plutôt que d'en produire un indépendant. */
+  /* Repère réglementaire TRI (Directive Inondation) : pour le point analysé,
+     la classe officielle de hauteur d'eau par scénario (fréquent / moyen /
+     extrême / faible). C'est le calage RÉEL du pic d'eau des scénarios du
+     moteur — l'équivalent français du « depth by probability » de Flood
+     Factor. Hors TRI (ou service indisponible) : null → le moteur garde son
+     enveloppe synthétique, sans rien inventer. */
   useEffect(() => {
-    if (step === 3 && report) {
-      navigate('/report', {
-        state: {
-          place: selectedPlace,
-          report,
-          scenarioKey,
-          timeMin: riskTimeMin,
-          /* Le rapport reprend le trajet RÉEL en cours (résumé du parcours
-             reconstruit) — aucune hypothèse simulée n'est transmise. */
-          hydro,
-        },
-      });
+    if (!report) {
+      setFloodAlea(null);
+      setTriStatus('loading');
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+    const ctrl = new AbortController();
+    setTriStatus('loading');
+    fetchFloodAlea(report.lat, report.lon, ctrl.signal).then((res) => {
+      if (ctrl.signal.aborted) return;
+      setFloodAlea(res);
+      /* SCN-003 — « ok » : la route a répondu (cartographié OU explicitement
+         hors TRI). « unavailable » : service injoignable — l'UI le dit, elle
+         ne laisse pas une grille silencieuse à 0 m. */
+      setTriStatus(res ? 'ok' : 'unavailable');
+    });
+    return () => ctrl.abort();
+  }, [report]);
+
+  /* Étape 3 = rapport en PANNEAU INTÉGRÉ (sur la vue risques) : plus de
+     navigation vers /report. On rend <ReportPage> par-dessus l'écran avec
+     l'état courant (lieu + rapport + scénario + instant t + trajet) ;
+     « Retour à la carte » referme le panneau sans quitter /zone. La route
+     /report autonome reste disponible (lien direct, partage). */
+  const reportOpen = step === 3 && !!report;
 
   /* Champ de recherche de l'écran France (étape Adresse) : input natif. */
   const heroInputRef = useRef<HTMLInputElement>(null);
@@ -432,20 +590,32 @@ export function Zone() {
   return (
     <main
       className={`zone-app nav-offcanvas${theme === 'light' ? ' theme-light' : ''}${drawerOpen ? ' drawer-open' : ''}${
-        !isMobile ? ' map-scene' : ''
-      }${isRiskView ? ' risk-open' : ''} step-${step}`}
+        drawerOpen && !drawerMini ? ' drawer-expanded' : ''
+      }${drawerOpen && drawerMini ? ' nav-collapsed' : ''}${!isMobile ? ' map-scene' : ''}${isRiskView ? ' risk-open' : ''}${vfx ? ' zone-vfx-active' : ''} step-${step}`}
       style={{ '--accent': accent } as CSSProperties}
     >
-      {/* ===== SIDENAV rétractable (navigation façon Gemini) ===== */}
+      {/* ===== SIDENAV rétractable (navigation façon Gemini) =====
+          Le tiroir s'ouvre en version MINI (colonne d'icônes seule) ; le
+          toggle du tiroir la déplie en version complète (libellés), et un
+          second clic referme. Réouverture = mini à nouveau. */}
       <ZoneSidenav
         sidenavRef={sidenavRef}
-        collapsed={false}
+        collapsed={drawerMini}
         mobile
         hidden={!drawerOpen}
         theme={theme}
         mode={mode}
         onThemeModeChange={setThemeMode}
-        onToggleCollapse={() => setDrawerOpen(false)}
+        onToggleCollapse={() => {
+          if (drawerMini) {
+            /* Mini → déplier en version pleine (le tiroir reste ouvert). */
+            setDrawerMini(false);
+          } else {
+            /* Pleine → refermer le tiroir ; la prochaine ouverture sera mini. */
+            setDrawerOpen(false);
+            setDrawerMini(true);
+          }
+        }}
         onOpenAccount={() => {
           setDrawerOpen(false);
           navigate('/settings/account');
@@ -471,6 +641,9 @@ export function Zone() {
 
       {/* ===== COLONNE PRINCIPALE ===== */}
       <div className="zone-main">
+        {/* VFX-002 — le disclaimer est TOUJOURS rendu en mode VFX (§2.1) et
+            jamais en mode data : hors VFX, il n'y a rien à démentir. */}
+        {vfx ? <VfxDisclaimer partial={vfxLevel.partial} source={vfxLevel.source} /> : null}
         {/* ===== PANNEAUX GAUCHES — population / industries / infrastructures =====
             Colonne indépendante à gauche de l'écran (au-dessus de la console
             météo), chaque panneau défilant sous sa propre scrollbar. */}
@@ -487,6 +660,19 @@ export function Zone() {
         />
         {/* ===== ÉCRAN FRANCE — recherche seule (pas de nav/stepper) ===== */}
         <div className="zone-topbar">
+          {/* Bouton retour : étape précédente (far left de la topbar). Visible
+              seulement à partir de l'étape 2 — l'étape 1 n'a pas d'arrière. */}
+          {step > 1 ? (
+            <button
+              type="button"
+              className="sim-indicator back step-back"
+              aria-label={`Étape précédente : étape ${step - 1} sur 3`}
+              title="Étape précédente"
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
+            >
+              <md-icon aria-hidden="true">arrow_back</md-icon>
+            </button>
+          ) : null}
           {/* Coin supérieur gauche : hamburger (ouvre le drawer) + indicateur
               « région/adresse » (icône monde) + étiquette de zone. */}
           <div className="loc-chip">
@@ -546,13 +732,37 @@ export function Zone() {
                   : step >= 3
                     ? 'Revenir à la carte'
                     : 'Étape suivante'
-              }
-              onClick={nextStep}
+              }                onClick={nextStep}
             >
               <md-icon aria-hidden="true">
                 {stepLocked ? 'lock' : step >= 3 ? 'arrow_back' : 'arrow_forward'}
               </md-icon>
             </button>
+
+            {/* VFX-002 — bascule de mode de rendu (accessible, atteignable au
+                clavier). N'existe qu'en vue risques : le mode VFX est une
+                couche de présentation sur l'analyse, pas un écran à part. */}
+            {isRiskView ? (
+              <button
+                type="button"
+                className={`vfx-toggle${vfx ? ' on' : ''}`}
+                aria-pressed={vfx}
+                aria-label={
+                  vfx
+                    ? 'Revenir au rendu données (contractuel)'
+                    : 'Activer le mode simulation visuelle (non contractuel)'
+                }
+                title={
+                  vfx
+                    ? 'Rendu données — chiffres sourcés'
+                    : 'Simulation visuelle — non contractuelle'
+                }
+                onClick={() => setViewMode((m) => (m === 'vfx' ? 'data' : 'vfx'))}
+              >
+                <md-icon aria-hidden="true">{vfx ? 'analytics' : 'movie'}</md-icon>
+                <span>{vfx ? 'Données' : 'VFX'}</span>
+              </button>
+            ) : null}
           {loading ? (
             <div className="hero-thinking" role="status" aria-live="polite">
               <span className="hero-thinking-dots" aria-hidden="true">
@@ -623,9 +833,17 @@ export function Zone() {
               }
               /* Enveloppe d'inondation modélisée (étape 2) — le volume d'eau
                  qui répond au scénario et à la timeline. */
-              impact={riskImpact}
+              /* VFX-008 — isolation des modes : en VFX, l'enveloppe « data »
+                 n'est PAS transmise à la carte (pas de double nappe d'eau).
+                 Le mode data, lui, reste rigoureusement l'ancien. */
+              impact={vfx ? null : riskImpact}
               journey={isRiskView ? journey : null}
               basinGeometry={isRiskView ? basinGeometry : null}
+              /* SCN-021 — cône de feu : seulement si l'aléa feu est PRÉSENT à
+                 l'adresse (diagnostic) ET si le mode feu est sélectionné. */
+              fireCone={hazardEvent === 'FIRE' ? fireConeGeometry : null}
+              /* VFX-006 — politique de caméra cinématique (Windy coupé, pitch). */
+              vfxMode={vfx}
             />
 
           </div>
@@ -653,8 +871,6 @@ export function Zone() {
         <RiskPanel
           place={selectedPlace}
           report={report}
-          scenarioKey={scenarioKey}
-          timeMin={riskTimeMin}
         />
 
         {/* ===== PANNEAU DES SCÉNARIOS (mode « étape suivante ») — colonne
@@ -667,6 +883,13 @@ export function Zone() {
           scenarioKey={scenarioKey}
           onScenarioChange={setScenarioKey}
           timeMin={riskTimeMin}
+          floodAlea={floodAlea}
+          triFailed={triStatus === 'unavailable'}
+          hazardEvent={hazardEvent}
+          onHazardChange={setHazardEvent}
+          gustPeak={gustProfile?.peakKmh ?? null}
+          gustTime={gustProfile ? gustProfile.hours[gustProfile.peakIndex] : null}
+          meteo={meteo}
           /* Photo terrain réelle du secteur (Panoramax) — sert de support aux
              vignettes des scénarios. null = non chargée, `available: false` =
              secteur non couvert : les deux retombent sur le visuel abstrait. */
@@ -680,14 +903,34 @@ export function Zone() {
         <RiskConsole
           place={selectedPlace}
           report={report}
-          scenarioKey={scenarioKey}
           timeMin={riskTimeMin}
           onTimeChange={setRiskTimeMin}
           meteo={meteo}
+          triPeak={triPeak}
+          triLabel={triLabel}
+          triAbsenceLabel={triAbsenceLabel}
+          hazardEvent={hazardEvent}
+          gustProfile={gustProfile}
+          windBand={windBand}
         />
 
-        {/* ===== ÉTAPE 3 = la vue rapport est une page autonome (/report) ;
-            un useEffect navigue directement dès que step === 3 (sans bouton). */}
+        {/* ===== ÉTAPE 3 = RAPPORT EN PANNEAU INTÉGRÉ — par-dessus la vue
+            risques, avec l'état courant de la carte (scénario, heure, trajet).
+            « Retour à la carte » referme le panneau (retour à l'étape 2). */}
+        {reportOpen ? (
+          <div className="zone-report-overlay" role="dialog" aria-label="Rapport de risque">
+            <ReportPage
+              initialState={{
+                place: selectedPlace,
+                report,
+                scenarioKey,
+                timeMin: riskTimeMin,
+                hydro,
+              }}
+              onClose={() => setStep(2)}
+            />
+          </div>
+        ) : null}
 
       </div>
 

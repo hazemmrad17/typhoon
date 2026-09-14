@@ -44,6 +44,7 @@ import {
   mountJourney,
 } from '../zone/hydroLayer';
 import type { Journey } from '../zone/hydroRoute';
+import type { FireConeGeometry } from '../zone/hazardSim';
 import { quantiseSlab } from '../zone/impactModel';
 
 // Token + style en variable d'environnement (jamais en dur dans le code).
@@ -116,6 +117,11 @@ const FRANCE_BOUNDS: [[number, number], [number, number]] = [
   [-5.2, 41.2],
   [9.8, 51.2],
 ];
+
+/* VFX-006 — inclinaison minimale de la caméra cinématique (degrés). Assez
+   inclinée pour lire le volume d'eau, pas assez pour donner le vertige : la
+   durée d'animation reste courte et l'utilisateur peut toujours ajuster. */
+export const VFX_MIN_PITCH_DEG = 55;
 
 /* ── Régions françaises (façon carte EVpin) — GeoJSON embarqué ──
    Contours des 13 régions métropolitaines (jeu data.gouv.fr « Contours
@@ -464,6 +470,17 @@ interface UnifiedMapProps {
   journey?: Journey | null;
   /** Géométrie du bassin versant contributeur réel (polygone BD TOPO). */
   basinGeometry?: GeoJSON.Geometry | null;
+  /** VFX-006 — mode cinématique (constitution §2.1). En VFX : l'overlay Windy
+   *  est désactivé (il force un rendu plat en mercator, incompatible avec la
+   *  caméra 3D) et l'inclinaison est forcée à ≥ 55°. Sortir du mode restaure
+   *  la politique météo normale : le mode data n'est pas altéré. */
+  vfxMode?: boolean;
+  /** SCN-021 — cône d'exposition FEU (aléa diagnostiqué présent uniquement) :
+   *  polygone GeoJSON orienté par la direction du vent RÉEL au pic de rafales.
+   *  `null` = pas de météo, ou aléa non présent à l'adresse → rien n'est
+   *  dessiné (aucun cône inventé). La forme (portée/ouverture) est une
+   *  hypothèse : la légende du panneau le dit. */
+  fireCone?: FireConeGeometry | null;
   /** Clic sur une région de la carte France (mode overview) — Zone.tsx
    *  s'en sert pour afficher la région dans le placeholder de recherche. */
   onRegionSelect?: (nom: string) => void;
@@ -516,6 +533,8 @@ export function UnifiedMap({
   overview = false,
   journey = null,
   basinGeometry = null,
+  fireCone = null,
+  vfxMode = false,
   onRegionSelect,
   focus = null,
   weatherMetric,
@@ -564,8 +583,10 @@ export function UnifiedMap({
      surligne) — la vue d'ensemble, elle, vit sur le cadrage France. */
   const riskHintRef = useRef(riskHighlight);
   riskHintRef.current = riskHighlight;
-  /* Une enveloppe est-elle demandée ? (l'eau ne se peint que si le moteur
-     compte quelque chose : au-dessous de son seuil, `impact` est null) */
+  /* Une enveloppe est-elle demandée ? SCN-002 : `impact` vient de
+     `mapImpactFromDepth`, donc il est non null dès qu'une profondeur > 0 est
+     modélisée — l'eau se peint AVANT le seuil de dommages (0,3 m), qui ne
+     gouverne que les compteurs. `null` reste un état : rien n'est modélisé. */
   const impactOn = impact !== null;
   /* Épaisseur déjà écrite dans la couche : évite un setPaintProperty par tick
      de curseur quand le pas de 5 cm n'a pas bougé. */
@@ -1205,6 +1226,21 @@ export function UnifiedMap({
     else disableWindyOverlay(map);
   }, [weatherMetric, weatherTime]);
 
+  /* ── VFX-006 — politique de caméra du mode cinématique ──
+     Windy et la caméra 3D sont MUTUELLEMENT EXCLUSIFS (§2.1, [test]) : Windy
+     force un rendu métrique plat. On libère donc la couche météo à l'entrée en
+     VFX et on incline la caméra. En sortie, l'effet de la prop `weatherMetric`
+     ci-dessus reprend la main : la politique data est restaurée telle quelle. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (!vfxMode) return;
+    disableWindyOverlay(map);
+    if (map.getPitch() < VFX_MIN_PITCH_DEG) {
+      map.easeTo({ pitch: VFX_MIN_PITCH_DEG, duration: 700, essential: true });
+    }
+  }, [vfxMode]);
+
   /* ── visibleLayerKeys → masquer/afficher les couches WMS/WFS ──
      Ne s'applique que quand showRisks est vrai (étape Cartographie/Synthèse).
      En Analyse (allowParcels), on ne veut jamais de couches de risque —
@@ -1250,6 +1286,46 @@ export function UnifiedMap({
       if (mapReadyRef.current) clearJourney(map);
     };
   }, [journey, basinGeometry]);
+
+  /* ── SCN-021 — cône de FEU sur la carte (aléa feu diagnostiqué) ──
+     Le panneau garde sa vignette SVG ; la carte porte la géométrie réelle :
+     polygone ancré au bien, orienté par la direction du vent au pic de
+     rafales RÉELLE. Couleurs volontairement chaudes et translucides : une
+     zone d'EXPOSITION, pas une emprise de flammes. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    const SRC = 'fire-cone-src';
+    const FILL = 'fire-cone-fill';
+    const LINE = 'fire-cone-line';
+
+    if (!fireCone) {
+      if (map.getLayer(FILL)) map.removeLayer(FILL);
+      if (map.getLayer(LINE)) map.removeLayer(LINE);
+      if (map.getSource(SRC)) map.removeSource(SRC);
+      return;
+    }
+
+    const data: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [fireCone] };
+    const src = map.getSource(SRC) as mapboxgl.GeoJSONSource | undefined;
+    if (src) {
+      src.setData(data);
+      return;
+    }
+    map.addSource(SRC, { type: 'geojson', data });
+    map.addLayer({
+      id: FILL,
+      type: 'fill',
+      source: SRC,
+      paint: { 'fill-color': '#ff7043', 'fill-opacity': 0.18 },
+    });
+    map.addLayer({
+      id: LINE,
+      type: 'line',
+      source: SRC,
+      paint: { 'line-color': '#ff7043', 'line-width': 1.5, 'line-dasharray': [2, 2] },
+    });
+  }, [fireCone]);
 
   /* ── Défauts d'étape (pilotés par Zone.tsx) : parcelles + éclairage ──
      Chaque changement d'étape change la prop et ré-applique son défaut ; le

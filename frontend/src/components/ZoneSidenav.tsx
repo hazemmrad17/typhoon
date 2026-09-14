@@ -197,10 +197,13 @@ export function ZoneSidenav({
           aria-label="Typhon — accueil"
           onClick={onCloseDrawer}
         >
-          {/* Wordmark teinté par l'accent : le SVG blanc sert de masque
-              alpha, la couleur est --accent (voir zone.css). Le lien a déjà
-              aria-label — le span est décoratif. */}
-          <span className="sidenav-wordmark-img" aria-hidden="true" />
+          {/* Logo : ICON MARK (icône seule) en version mini du tiroir, le
+              wordmark complet quand il est déplié. Les deux sont des masques
+              alpha teintés par --md-sys-color-primary (voir zone.css). */}
+          <span
+            className={collapsed ? 'sidenav-iconmark-img' : 'sidenav-wordmark-img'}
+            aria-hidden="true"
+          />
         </Link>
         {/* Toggle à 2 états (desktop) :
             1. Repliée → hamburger (clic = déplier) ;

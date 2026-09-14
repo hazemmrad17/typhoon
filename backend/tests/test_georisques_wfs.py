@@ -203,3 +203,55 @@ async def test_resolve_per_building_ppr_type_falls_back_when_wfs_unavailable(mon
     resultat = await resolve_per_building(client=None, lon=5.0, lat=5.0)
 
     assert resultat["ppr_par_type"]["inondation"] == {"present": None, "count": 0, "resolution": "commune-level"}
+
+
+# ---------------------------------------------------------------------------
+# parse_gml_features — variantes d'emboîtement MultiSurface réellement servies
+# (Limites TRI) : `surfaceMembers` (pluriel, conteneur) et srsName URN porté
+# par la MultiSurface sans répétition sur le Polygon. Sans ces deux branches,
+# la couche ms:LIMITETRI_FXX ne rend rien ou reste en (lat, lon) → le test
+# point-dans-périmètre répond « hors TRI » à tort (bug silencieux mesuré en
+# qualification sur Paris, quai de Seine).
+# ---------------------------------------------------------------------------
+
+GML_SURFACE_MEMBERS_PLURAL = """<?xml version='1.0' encoding="UTF-8" ?>
+<wfs:FeatureCollection
+   xmlns:ms="http://mapserver.gis.umn.edu/mapserver"
+   xmlns:gml="http://www.opengis.net/gml/3.2"
+   xmlns:wfs="http://www.opengis.net/wfs/2.0">
+  <wfs:member>
+    <ms:LIMITETRI_FXX gml:id="TRI.1">
+      <ms:msGeometry>
+        <gml:MultiSurface srsName="urn:ogc:def:crs:EPSG::4326">
+          <gml:surfaceMembers>
+            <gml:Polygon>
+              <gml:exterior>
+                <gml:LinearRing>
+                  <gml:posList>48.840 2.360 48.860 2.360 48.860 2.380 48.840 2.380 48.840 2.360</gml:posList>
+                </gml:LinearRing>
+              </gml:exterior>
+            </gml:Polygon>
+          </gml:surfaceMembers>
+        </gml:MultiSurface>
+      </ms:msGeometry>
+    </ms:LIMITETRI_FXX>
+  </wfs:member>
+</wfs:FeatureCollection>"""
+
+
+def test_parse_gml_features_surface_members_plural_with_inherited_srs():
+    """`surfaceMembers` (pluriel) + srsName URN hérité de la MultiSurface :
+    coordonnées (lon, lat) correctes et point-in-polygon qui matche."""
+    feats = parse_gml_features(GML_SURFACE_MEMBERS_PLURAL)
+    assert len(feats) == 1
+    poly = feats[0]
+    assert poly["type"] == "MultiPolygon"
+    ring = list(poly["coordinates"][0][0])
+    xs = [p[0] for p in ring]
+    ys = [p[1] for p in ring]
+    # (lon, lat) : lon ∈ [2.36, 2.38], lat ∈ [48.84, 48.86]
+    assert min(xs) == 2.36 and max(xs) == 2.38
+    assert min(ys) == 48.84 and max(ys) == 48.86
+    # Point quai de Seine (48.850, 2.370) DANS le périmètre
+    assert point_in_polygon((2.370, 48.850), poly) is True
+    assert point_in_polygon((3.0, 49.0), poly) is False

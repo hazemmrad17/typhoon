@@ -18,6 +18,58 @@
   color: var(--md-sys-color-on-surface, #e6eef6);
 }
 
+/* ── Mode PANNEAU INTÉGRÉ (/zone, étape 3) ──
+   Le rapport couvre TOUTE la page (plein écran), avec la carte qui reste
+   visible DERRIÈRE via un scrim translucide — on garde le contexte spatial
+   sans sacrifier la place du document. Anim d'entrée : fondu + léger zoom
+   depuis la vue risques. */
+.zone-report-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  /* Scrim : la carte reste perceptible derrière, mais n'interagit plus. */
+  background: color-mix(in srgb, #0e151c 55%, transparent);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: zone-report-in 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
+  overflow-y: auto;
+}
+
+.zone-report-overlay .rp-page {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  min-height: 100%;
+  background: color-mix(in srgb, var(--md-sys-color-surface, #0e151c) 94%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border-radius: 20px;
+  max-width: 1080px;
+  margin: 18px auto;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--rp-line);
+}
+
+/* Petit écran : le panneau colle aux bords (pas de marge flottante). */
+@media (max-width: 1120px) {
+  .zone-report-overlay .rp-page {
+    margin: 0;
+    max-width: none;
+    border-radius: 0;
+  }
+}
+
+@keyframes zone-report-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* ── Topbar ── */
 .rp-topbar {
   flex: none;
@@ -868,4 +920,124 @@
   .rp-meta b {
     color: #111;
   }
-}
+}
+/* ═══ Synthèse déterministe façon Géorisques ═══ */
+.rp-summary-text {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--rp-text, inherit);
+}
+.rp-alea-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.rp-alea-group-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--rp-muted);
+}
+.rp-alea-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.rp-alea-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-left: 4px solid var(--md-sys-color-outline);
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-container-low, transparent);
+}
+.rp-alea-cell.st-adresse { border-left-color: #d32f2f; }
+.rp-alea-cell.st-commune { border-left-color: #f9a825; }
+.rp-alea-cell.st-absent  { opacity: 0.55; }
+.rp-alea-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.rp-alea-status {
+  font-size: 11px;
+  color: var(--rp-muted);
+}
+.rp-alea-cell.st-adresse .rp-alea-status { color: #d32f2f; font-weight: 600; }
+.rp-alea-cell.st-commune .rp-alea-status { color: #f9a825; font-weight: 600; }
+
+/* ═══ Faits clés — ordre de lecture des faits sourcés ═══
+   Chaque ligne : un intitulé, une VALEUR (le fait), une note d'échelle ou de
+   provenance. Aucun score, aucune couleur de jugement : la hiérarchie visuelle
+   porte sur la valeur, pas sur une appréciation. */
+.rp-keyfacts .rp-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+.rp-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rp-facts--compact {
+  gap: 8px;
+}
+.rp-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-left: 3px solid var(--accent, #4386b1);
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-container-low, transparent);
+}
+.rp-fact-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--rp-muted);
+}
+.rp-fact-value {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.rp-fact-note {
+  font-size: 11px;
+  color: var(--rp-muted);
+}
+.rp-foot-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--rp-muted);
+}
+
+/* Échelle de résolution affichée sous chaque aléa de la synthèse. */
+.rp-alea-res {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.rp-catcard-src {
+  font-weight: 600;
+}
+
+/* Impression : les faits clés ne doivent pas se couper entre deux pages. */
+@media print {
+  .rp-fact,
+  .rp-catcard,
+  .rp-alea-cell {
+    break-inside: avoid;
+  }
+}

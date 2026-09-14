@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import diagnostic, health, geocoding as geocoding_router
+from app.api.routes import flood as flood_router
 from app.api.routes import hydro as hydro_router
 from app.api.routes import photo as photo_router
 from app.api.routes import report as report_router
@@ -66,3 +67,4 @@ app.include_router(geocoding_router.router, prefix="/api", tags=["geocoding"])
 app.include_router(report_router.router, tags=["report"])
 app.include_router(hydro_router.router, tags=["hydro"])
 app.include_router(photo_router.router, tags=["photo"])
+app.include_router(flood_router.router, tags=["flood"])

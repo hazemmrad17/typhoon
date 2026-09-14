@@ -495,6 +495,52 @@ async def test_meteo_signale_une_journee_seche(monkeypatch):
     assert data["rain_total_mm"] == 0.0
 
 
+async def test_meteo_parse_vent_et_rafales(monkeypatch):
+    """Le vent/rafales horaires RÉELS sont retournés avec leur pic horodaté —
+    même axe que la pluie, aucune valeur synthétique."""
+
+    async def _fake_json(client, url, params):
+        if "flood" in url:
+            return {"daily": {"time": [], "river_discharge": []}}
+        return {
+            "hourly": {
+                "time": ["2026-09-14T00:00", "2026-09-14T01:00", "2026-09-14T02:00"],
+                "precipitation": [0.0, 0.0, 0.0],
+                "wind_speed_10m": [10.0, 12.0, 8.0],
+                "wind_gusts_10m": [25.0, 44.6, 30.0],
+                "wind_direction_10m": [280.0, 310.0, 300.0],
+                "soil_moisture_0_to_7cm": [0.11, 0.09, 0.082],
+            }
+        }
+
+    monkeypatch.setattr(meteo, "_get_json", _fake_json)
+    data = await meteo.fetch_meteo(SITE_LAT, SITE_LON)
+
+    assert data["wind_gust_peak_kmh"] == 44.6
+    assert data["wind_gust_peak_time"] == "2026-09-14T01:00"
+    assert data["wind_gusts_hourly"][1] == {"t": "2026-09-14T01:00", "v": 44.6}
+    assert data["wind_speed_hourly"][0] == {"t": "2026-09-14T00:00", "v": 10.0}
+    assert data["wind_gust_peak_dir_deg"] == 310.0
+    assert data["soil_moisture_min"] == 0.082
+    assert data["soil_moisture_max"] == 0.11
+    assert data["soil_moisture_hourly"][2] == {"t": "2026-09-14T02:00", "v": 0.082}
+
+
+async def test_meteo_sans_vent_reste_typee(monkeypatch):
+    """Prévision sans champs vent → séries vides et pic null, jamais une
+    valeur inventée (le frontend n'affiche alors pas de simulation vent)."""
+
+    async def _fake_json(client, url, params):
+        if "flood" in url:
+            return {"daily": {"time": [], "river_discharge": []}}
+        return {"hourly": {"time": ["t"], "precipitation": [0.0]}}
+
+    monkeypatch.setattr(meteo, "_get_json", _fake_json)
+    data = await meteo.fetch_meteo(SITE_LAT, SITE_LON)
+    assert data["wind_gusts_hourly"] == []
+    assert data["wind_gust_peak_kmh"] is None
+
+
 async def test_meteo_ne_leve_jamais(monkeypatch):
     async def _boom(client, url, params):
         return None

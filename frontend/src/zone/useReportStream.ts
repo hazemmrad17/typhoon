@@ -24,7 +24,6 @@ export interface ReportMeta {
 export interface ReportHeader {
   sector: string;
   scenario: string;
-  pct: number;
   timestamp: string;
   timestamp_label: string;
 }
@@ -99,13 +98,18 @@ export type ReportPayload = {
   timestamp: string;
   scenario: {
     key: string;
-    pct: number;
     risk: string;
-    windPeakKmh: number;
-    rainPeakMmH: number;
+    /* Pic d'eau de la classe TRI officielle (0 = hors TRI). */
     depthPeakM: number;
+    /* Appartenance du point au PÉRIMÈTRE d'un TRI (`ms:LIMITETRI`) :
+       `depthPeakM === 0` recouvre deux situations que le rapport ne doit pas
+       confondre — « dans un TRI sans classe au point » et « hors TRI ».
+       `null` = non vérifié : le rapport ne tranche pas. */
+    inTri: boolean | null;
   };
-  damage: Record<string, { v: number; low: number; high: number }>;
+  /* ⚠ Plus aucun montant de dommage : les estimations synthétiques ont été
+     supprimées. Le contrat backend rend `damage` optionnel. */
+  damage?: Record<string, { v: number; low: number; high: number }>;
   /** Trajet de l'eau RÉEL (facultatif) : faits de géographie reconstruits sur
       le réseau hydrographique IGN BD TOPO. `null`/absent → rapport identique à
       celui d'avant (la clé de cache côté serveur ne change pas). */

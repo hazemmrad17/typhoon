@@ -86,10 +86,3 @@ export function putCachedDiagnostic(report: RisqueReport): void {
   const without = entries.filter((c) => c.key !== key);
   saveCache([{ key, report, createdAt: Date.now() }, ...without]);
 }
-
-/** Supprime l'entrée correspondant à une adresse (suppression de l'historique). */
-export function removeCachedDiagnostic(address: string): void {
-  const key = normKey(address);
-  if (!key) return;
-  saveCache(loadCache().filter((c) => c.key !== key));
-}

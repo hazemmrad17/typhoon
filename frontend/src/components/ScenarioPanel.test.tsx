@@ -8,9 +8,11 @@
 // =============================================================================
 
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { ScenarioPanel } from './ScenarioPanel';
 import type { SitePhoto } from '../zone/sitePhoto';
+import type { RisqueReport } from '../zone/config';
+import type { FloodAleaResult } from '../zone/floodAlea';
 
 const PHOTO: SitePhoto = {
   available: true,
@@ -95,5 +97,106 @@ describe('ScenarioPanel — vignettes des scénarios', () => {
     expect(container.querySelectorAll('.scenario-card')).toHaveLength(8);
     expect(container.querySelector('.scenario-card-photo')).toBeNull();
     expect(container.querySelector('.scenario-photo-credit')).toBeNull();
+  });
+
+  it('affiche le statut RÉEL de l’aléa du diagnostic (feu, RGA, séisme, mvt)', () => {
+    const report = {
+      aleas: [
+        { code: 'feu_foret', libelle: 'Feux de forêt', present: true, zonage: 'Dans un périmètre PPR feu de forêt', resolution: 'per-building' },
+        { code: 'rga', libelle: 'Retrait-gonflement des argiles', present: false, zonage: 'Aléa non recensé' },
+        { code: 'sismicite', libelle: 'Séisme', present: true, zonage: 'Zone sismique 2 — sismicité faible', zone_sismique: '2' },
+        { code: 'mouvement_terrain', libelle: 'Mouvements de terrain', present: null, erreur: 'source Géorisques indisponible' },
+      ],
+    } as unknown as RisqueReport;
+
+    const { rerender } = render(
+      <ScenarioPanel place="x" report={report} scenarioKey="direct" onScenarioChange={vi.fn()} timeMin={195} photo={null} hazardEvent="FIRE" />
+    );
+    /* Le statut porte désormais l'ÉCHELLE réelle de la donnée : plus de
+       « à mon adresse » collé sur une estimation communale (cf. zone/exposure). */
+    expect(screen.getByText(/exposé — à l’adresse/i)).toBeTruthy();
+    expect(screen.getByText(/périmètre PPR feu/i)).toBeTruthy();
+    expect(screen.getByText(/testé au bâtiment/i)).toBeTruthy();
+
+    rerender(
+      <ScenarioPanel place="x" report={report} scenarioKey="direct" onScenarioChange={vi.fn()} timeMin={195} photo={null} hazardEvent="RGA" />
+    );
+    expect(screen.getByText(/non exposé au point/i)).toBeTruthy();
+
+    rerender(
+      <ScenarioPanel place="x" report={report} scenarioKey="direct" onScenarioChange={vi.fn()} timeMin={195} photo={null} hazardEvent="SEISMIC" />
+    );
+    expect(screen.getByText(/Zone sismique 2/i)).toBeTruthy();
+
+    rerender(
+      <ScenarioPanel place="x" report={report} scenarioKey="direct" onScenarioChange={vi.fn()} timeMin={195} photo={null} hazardEvent="MVT" />
+    );
+    expect(screen.getByText(/statut inconnu/i)).toBeTruthy();
+    expect(screen.getByText(/source Géorisques indisponible/i)).toBeTruthy();
+  });
+});
+
+// SCN-003 — l'absence de classe TRI recouvre QUATRE vérités distinctes, et
+// chacune doit se dire avec ses mots :
+//   · le point est dans un TRI, mais sans classe à cet endroit (un quai) ;
+//   · le point n'est dans aucun TRI (un fait) ;
+//   · la source a échoué (une panne) ;
+//   · la réponse n'est pas encore arrivée (on ne sait rien).
+// Les confondre ferait passer une panne — ou un simple silence — pour une
+// absence de risque.
+describe('SCN-003 — absence de classe TRI : quatre vérités distinctes', () => {
+  const base = {
+    place: 'x',
+    scenarioKey: 'extreme',
+    onScenarioChange: vi.fn(),
+    timeMin: 195,
+    photo: null,
+    hazardEvent: 'FLOODING',
+  };
+
+  /* Une réponse TRI « aucune classe au point », avec l'appartenance au
+     périmètre renseignée — c'est `in_tri` qui départage. */
+  const noClass = (inTri: boolean | null) =>
+    ({
+      available: false,
+      reason: 'aucune classe au point',
+      in_tri: inTri,
+      resolution: 'per-building',
+      scenarios: [],
+      source: 'Géorisques WFS',
+      source_url: null,
+      retrieved_at: '2026-09-14T00:00:00+00:00',
+    }) as unknown as FloodAleaResult;
+
+  it('dans un TRI sans classe au point → le dit, sans conclure au hors-TRI', () => {
+    render(<ScenarioPanel {...base} report={null} floodAlea={noClass(true)} />);
+    expect(screen.getByText('Dans un TRI, sans classe au point')).toBeTruthy();
+    expect(screen.queryByText(/Hors zone TRI/i)).toBeNull();
+  });
+
+  it('hors TRI → « Hors zone TRI », avec le garde-fou de sens', () => {
+    render(<ScenarioPanel {...base} report={null} floodAlea={noClass(false)} />);
+    expect(screen.getByText('Hors zone TRI')).toBeTruthy();
+    expect(screen.getByText(/jamais inondé/i)).toBeTruthy();
+  });
+
+  it('appartenance non vérifiée → « Point non cartographié », sans trancher', () => {
+    render(<ScenarioPanel {...base} report={null} floodAlea={noClass(null)} />);
+    expect(screen.getByText(/Point non cartographié/i)).toBeTruthy();
+    expect(screen.getByText(/n’a pas pu être vérifiée/i)).toBeTruthy();
+  });
+
+  it('service TRI injoignable → message de PANNE, pas d’absence de risque', () => {
+    render(<ScenarioPanel {...base} report={null} floodAlea={null} triFailed />);
+    expect(screen.getByText(/Service indisponible/i)).toBeTruthy();
+    expect(screen.getByText(/n’a pas répondu|n'a pas répondu/)).toBeTruthy();
+    expect(screen.queryByText(/Point non cartographié/i)).toBeNull();
+  });
+
+  it('réponse pas encore arrivée → aucun verdict affiché', () => {
+    render(<ScenarioPanel {...base} report={null} floodAlea={null} triFailed={false} />);
+    expect(screen.getByText(/Cartographie en cours/i)).toBeTruthy();
+    expect(screen.queryByText(/Hors zone TRI/i)).toBeNull();
+    expect(screen.queryByText(/Service indisponible/i)).toBeNull();
   });
 });

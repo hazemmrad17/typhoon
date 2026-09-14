@@ -135,8 +135,10 @@ def _save_cache(key: str, resp: ReportResponse) -> None:
 # Pré-traitement déterministe (aucun LLM)
 # ---------------------------------------------------------------------------
 
-def _category_risks(damage: DamageModel) -> list[CategoryRiskOut]:
+def _category_risks(damage: DamageModel | None) -> list[CategoryRiskOut]:
     out: list[CategoryRiskOut] = []
+    if damage is None:
+        return out
     for cat, spec in CATEGORY_RISK.items():
         field = getattr(damage, spec["field"])
         out.append(
@@ -151,7 +153,9 @@ def _category_risks(damage: DamageModel) -> list[CategoryRiskOut]:
     return out
 
 
-def _mitigations(damage: DamageModel) -> list[MitigationOut]:
+def _mitigations(damage: DamageModel | None) -> list[MitigationOut]:
+    if damage is None:
+        return []
     applied = select_mitigations(damage)
     return [
         MitigationOut(
@@ -227,18 +231,78 @@ def _hydro_summary_template(req: ReportRequest) -> str:
     return " ".join(parts)
 
 
-def _exec_summary_template(req: ReportRequest) -> str:
+def _class_phrase(req: ReportRequest) -> str:
+    """Phrase d'ouverture sur la classe retenue — SANS jamais imprimer un
+    « 0,0 m ».
+
+    `depthPeakM == 0` signifie « aucune classe TRI cartographiée au point »,
+    pas « profondeur nulle ». Écrire « pic d'eau 0,0 m » faisait passer une
+    absence de donnée pour une mesure — c'est exactement ce qu'interdit
+    l'invariant « faits + provenance » : ni valeur inventée, ni absence
+    déguisée en chiffre.
+    """
     s = req.scenario
+    if s.depthPeakM > 0:
+        return (
+            f"Pour {req.sector}, la classe de crue retenue est {s.risk} "
+            f"(pic d'eau {s.depthPeakM:.1f} m, classe TRI officielle). "
+        )
+    # `depthPeakM == 0` recouvre DEUX situations que le rapport ne doit pas
+    # confondre (un quai peut être dans un TRI sans classe à cet endroit) :
+    #   · point dans le périmètre TRI → l'exposition réglementaire existe,
+    #     seule la hauteur n'est pas cartographiée ;
+    #   · point hors TRI → aucune classe, et le rappel « hors TRI n'est pas
+    #     jamais inondé » s'applique ;
+    #   · non vérifié → on n'affirme ni l'un ni l'autre.
+    if s.inTri is True:
+        return (
+            f"Pour {req.sector}, la classe de crue retenue est {s.risk}, mais "
+            "AUCUNE classe de hauteur d'eau n'est cartographiée (TRI, Directive "
+            "Inondation) à cet emplacement précis : aucune profondeur n'est donc "
+            "affichée. Le point est en revanche DANS le périmètre d'un TRI — "
+            "l'exposition réglementaire n'est pas nulle pour autant. "
+        )
+    if s.inTri is False:
+        return (
+            f"Pour {req.sector}, la classe de crue retenue est {s.risk}, mais "
+            "AUCUNE classe de hauteur d'eau n'est cartographiée (TRI, Directive "
+            "Inondation) au point analysé : aucune profondeur n'est donc affichée. "
+            "Hors TRI n'équivaut pas à « jamais inondé ». "
+        )
     return (
-        f"Pour {req.sector}, le scénario le plus probable est {s.risk} ({s.pct} %). "
-        f"Les dommages estimés atteignent {_fmt_money_eur(req.damage.damageEUR.v)} "
+        f"Pour {req.sector}, la classe de crue retenue est {s.risk}, mais "
+        "AUCUNE classe de hauteur d'eau n'est cartographiée (TRI, Directive "
+        "Inondation) au point analysé : aucune profondeur n'est donc affichée. "
+        "L'appartenance du point au périmètre d'un TRI n'a pas pu être vérifiée "
+        "— hors TRI n'équivaut pas à « jamais inondé ». "
+    )
+
+
+def _exec_summary_template(req: ReportRequest) -> str:
+    base = _class_phrase(req)
+    if req.damage is None:
+        return (
+            base
+            + "Aucune estimation de dommages n'est produite : les courbes de "
+            "vulnérabilité synthétiques ont été retirées tant qu'un référentiel "
+            "d'exposition réel n'est pas disponible. Le rapport se limite aux "
+            "faits sourcés (aléas Géorisques, hydrographie IGN BD TOPO, météo)."
+        )
+    return (
+        base
+        + f"Les dommages estimés atteignent {_fmt_money_eur(req.damage.damageEUR.v)} "
         f"avec environ {_fmt(req.damage.hp.v)} habitations touchées. "
         f"La priorité porte sur le renforcement face à l'eau ({_fmt(req.damage.waterLevelFt.v)} ft) "
         "et la protection des réseaux et bâtiments exposés."
     )
 
 
-def _category_narrative_template(cat: CategoryRiskOut, damage: DamageModel) -> str:
+def _category_narrative_template(cat: CategoryRiskOut, damage: DamageModel | None) -> str:
+    if damage is None:
+        return (
+            f"Niveau {cat.risk_level} : {cat.label}. Aucune estimation chiffrée "
+            "n'est produite tant qu'un référentiel d'exposition réel n'est pas disponible."
+        )
     spec = CATEGORY_RISK[cat.category]
     field = getattr(damage, spec["field"])
     return (
@@ -248,6 +312,22 @@ def _category_narrative_template(cat: CategoryRiskOut, damage: DamageModel) -> s
 
 
 def _appendix_rows(req: ReportRequest) -> list[list[str]]:
+    if req.damage is None:
+        # Même règle que la synthèse : 0 n'est pas une mesure, c'est une
+        # absence de classe cartographiée. On écrit l'absence, pas un zéro.
+        peak = (
+            f"{req.scenario.depthPeakM:.1f} m"
+            if req.scenario.depthPeakM > 0
+            else {
+                True: "non cartographiée au point (dans un TRI, sans classe à cet emplacement)",
+                False: "non cartographiée au point (hors TRI)",
+                None: "non cartographiée au point (appartenance TRI non vérifiée)",
+            }[req.scenario.inTri]
+        )
+        return [
+            ["Pic d'eau de la classe TRI", peak],
+            ["Classe retenue", req.scenario.risk],
+        ]
     return [
         ["Arbres cassés", _fmt_range(req.damage.brokenTrees)],
         ["Véhicules endommagés", _fmt_range(req.damage.damagedVehicles)],
@@ -287,13 +367,14 @@ def _build_report_data(req: ReportRequest) -> dict:
 
 def _allowed_numbers(req: ReportRequest) -> set[int]:
     """Nombres légitimes pouvant apparaître dans la prose : toutes les
-    valeurs v/low/high de l'estimation + intensité du scénario + année."""
+    valeurs v/low/high de l'estimation (si fournie) + intensité du scénario + année."""
     allowed: set[int] = set()
-    for field in type(req.damage).model_fields:
-        r = getattr(req.damage, field)
-        allowed.add(int(round(r.v)))
-        allowed.add(int(round(r.low)))
-        allowed.add(int(round(r.high)))
+    if req.damage is not None:
+        for field in type(req.damage).model_fields:
+            r = getattr(req.damage, field)
+            allowed.add(int(round(r.v)))
+            allowed.add(int(round(r.low)))
+            allowed.add(int(round(r.high)))
     # Les faits du parcours sont ancrés comme le scénario officiel : leurs
     # nombres sont légitimes dans la prose de la section « trajet de l'eau ».
     if req.hydro is not None:
@@ -315,7 +396,7 @@ def _allowed_numbers(req: ReportRequest) -> set[int]:
     s = req.scenario
     allowed.update(
         int(round(x))
-        for x in (s.pct, s.windPeakKmh, s.rainPeakMmH, s.depthPeakM)
+        for x in (s.depthPeakM,)
         if x > 0
     )
     try:
@@ -400,13 +481,8 @@ def _validated_llm(llm: dict | None, req: ReportRequest) -> dict:
 def _mistral_io(req: ReportRequest) -> tuple[str, str]:
     risks = _category_risks(req.damage)
     migs = _mitigations(req.damage)
-    payload = {
-        "sector": req.sector,
-        "scenario": {
-            "risk": req.scenario.risk,
-            "pct": req.scenario.pct,
-        },
-        "executiveStats": {
+    exec_stats = (
+        {
             "damageEUR": _fmt_money_eur(req.damage.damageEUR.v),
             "damageRange": (
                 f"{_fmt_money_eur(req.damage.damageEUR.low)} – "
@@ -414,7 +490,17 @@ def _mistral_io(req: ReportRequest) -> tuple[str, str]:
             ),
             "hp": _fmt(req.damage.hp.v),
             "waterLevelFt": _fmt(req.damage.waterLevelFt.v),
+        }
+        if req.damage is not None
+        else None
+    )
+    payload = {
+        "sector": req.sector,
+        "scenario": {
+            "risk": req.scenario.risk,
+            "depthPeakM": req.scenario.depthPeakM,
         },
+        "executiveStats": exec_stats,
         "categoryRiskLevels": [
             {"category": c.category, "label": c.label, "riskLevel": c.risk_level, "value": c.value, "unit": c.unit}
             for c in risks
@@ -557,7 +643,6 @@ async def _emit_deterministic(req: ReportRequest, data: dict) -> AsyncIterator[s
         {
             "sector": req.sector,
             "scenario": s.risk,
-            "pct": s.pct,
             "timestamp": req.timestamp,
             "timestamp_label": _fmt_ts(req.timestamp),
         },
@@ -565,13 +650,15 @@ async def _emit_deterministic(req: ReportRequest, data: dict) -> AsyncIterator[s
     yield _sse(
         "summary",
         {
-            "damageEUR": _fmt_money_eur(req.damage.damageEUR.v),
+            "damageEUR": _fmt_money_eur(req.damage.damageEUR.v) if req.damage else None,
             "damageRange": (
                 f"{_fmt_money_eur(req.damage.damageEUR.low)} – "
                 f"{_fmt_money_eur(req.damage.damageEUR.high)}"
+                if req.damage
+                else None
             ),
-            "hp": _fmt(req.damage.hp.v),
-            "waterLevelFt": _fmt(req.damage.waterLevelFt.v),
+            "hp": _fmt(req.damage.hp.v) if req.damage else None,
+            "waterLevelFt": _fmt(req.damage.waterLevelFt.v) if req.damage else None,
             "executive_summary": data["exec_template"],
         },
     )
@@ -584,7 +671,11 @@ async def _emit_deterministic(req: ReportRequest, data: dict) -> AsyncIterator[s
                 "risk_level": cat.risk_level,
                 "value": cat.value,
                 "unit": cat.unit,
-                "estimate": _fmt_range(getattr(req.damage, CATEGORY_RISK[cat.category]["field"])),
+                "estimate": (
+                    _fmt_range(getattr(req.damage, CATEGORY_RISK[cat.category]["field"]))
+                    if req.damage
+                    else None
+                ),
                 "narrative": _category_narrative_template(cat, req.damage),
             },
         )
@@ -595,8 +686,8 @@ async def _emit_deterministic(req: ReportRequest, data: dict) -> AsyncIterator[s
     yield _sse(
         "confidence",
         {
-            "low": _fmt_money_eur(req.damage.damageEUR.low),
-            "high": _fmt_money_eur(req.damage.damageEUR.high),
+            "low": _fmt_money_eur(req.damage.damageEUR.low) if req.damage else None,
+            "high": _fmt_money_eur(req.damage.damageEUR.high) if req.damage else None,
         },
     )
     yield _sse("appendix", {"rows": data["appendix_rows"]})
@@ -691,11 +782,13 @@ def _render_markdown(req: ReportRequest, llm: dict, data: dict | None = None) ->
     cat_blocks = []
     for cat in risks:
         narr = llm.get("categoryNarratives", {}).get(cat.category) or _category_narrative_template(cat, req.damage)
-        cat_blocks.append(
-            f"### {cat.label} — {cat.risk_level}\n{narr}\n"
-            f"*Estimation : {_fmt_range(getattr(req.damage, CATEGORY_RISK[cat.category]['field']))} "
+        est_line = (
+            f"\n*Estimation : {_fmt_range(getattr(req.damage, CATEGORY_RISK[cat.category]['field']))} "
             f"{cat.unit}.*"
+            if req.damage is not None
+            else ""
         )
+        cat_blocks.append(f"### {cat.label} — {cat.risk_level}\n{narr}{est_line}")
 
     mit_blocks = []
     for m in migs:
@@ -757,11 +850,30 @@ def _render_markdown(req: ReportRequest, llm: dict, data: dict | None = None) ->
 """
         annexe_no = 6
 
+    exec_line = (
+        f"> **Dommages estimés :** {_fmt_money_eur(req.damage.damageEUR.v)} · "
+        f"**Habitations touchées :** {_fmt(req.damage.hp.v)}\n"
+        if req.damage is not None
+        else ""
+    )
+    confidence_block = (
+        (
+            "Estimation modélisée à partir des données météo du scénario, de l'exposition\n"
+            "du secteur et de courbes de vulnérabilité (méthodologie de type HAZUS). Ce ne\n"
+            "sont **pas des dommages observés**. Fourchette d'incertitude du modèle :\n"
+            f"dommages estimés {_fmt_money_eur(req.damage.damageEUR.low)} – {_fmt_money_eur(req.damage.damageEUR.high)}.\n"
+        )
+        if req.damage is not None
+        else (
+            "Aucune estimation de dommages chiffrée : les courbes de vulnérabilité\n"
+            "synthétiques (style HAZUS) ont été retirées tant qu'aucun référentiel réel\n"
+            "d'exposition ne les soutient. Le rapport se limite aux faits sourcés.\n"
+        )
+    )
     return f"""# Rapport de risque — {req.sector}
 
-> **Scénario :** {s.risk} ({s.pct} %) — évaluation à {_fmt_ts(req.timestamp)}
-> **Dommages estimés :** {_fmt_money_eur(req.damage.damageEUR.v)} · **Habitations touchées :** {_fmt(req.damage.hp.v)}
-
+> **Scénario :** {s.risk} — évaluation à {_fmt_ts(req.timestamp)}
+{exec_line}
 ## 1. Synthèse
 {exec_sum}
 
@@ -772,13 +884,9 @@ def _render_markdown(req: ReportRequest, llm: dict, data: dict | None = None) ->
 {mito}
 
 ## 4. Confiance & limites
-Estimation modélisée à partir des données météo du scénario, de l'exposition
-du secteur et de courbes de vulnérabilité (méthodologie de type HAZUS). Ce ne
-sont **pas des dommages observés**. Fourchette d'incertitude du modèle :
-dommages estimés {_fmt_money_eur(req.damage.damageEUR.low)} – {_fmt_money_eur(req.damage.damageEUR.high)}.
-{hydro_block}
+{confidence_block}{hydro_block}
 ## {annexe_no}. Annexe — données brutes
-| Indicateur | Estimation ± |
+| Indicateur | Valeur |
 |---|---|
 {appendix}
 """

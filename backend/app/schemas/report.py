@@ -21,11 +21,17 @@ class RangeModel(BaseModel):
 
 class ScenarioModel(BaseModel):
     key: str
-    pct: int
     risk: str
-    windPeakKmh: float = 0.0
-    rainPeakMmH: float = 0.0
+    # Pic d'eau : CLASSE TRI OFFICIELLE uniquement (0 = hors TRI). Les intensités
+    # synthétiques (vent/pluie inventées) ont été supprimées du contrat.
     depthPeakM: float = 0.0
+    # Appartenance du point au PÉRIMÈTRE d'un TRI (`ms:LIMITETRI`). Sert quand
+    # `depthPeakM == 0` : « aucune classe à cet endroit » n'est pas la même
+    # chose que « hors TRI » (un quai peut être en TRI sans classe).
+    #   True — dans un TRI, sans classe au point ;
+    #   False — dans aucun TRI ;
+    #   None — non vérifié : le rapport ne tranche pas.
+    inTri: bool | None = None
 
 
 class DamageModel(BaseModel):
@@ -77,7 +83,11 @@ class ReportRequest(BaseModel):
     sector: str = Field(..., description="Nom de la zone / adresse diagnostiquée")
     scenario: ScenarioModel
     timestamp: str = Field(..., description="Instant t de l'évaluation (ISO 8601)")
-    damage: DamageModel
+    # ⚠ damage optionnel : les estimations de dommages synthétiques (courbes
+    # HAZUS, coûts unitaires, proxies d'exposition) ont été supprimées — aucun
+    # référentiel réel ne les soutenait. Absent → rapport sans section chiffrée
+    # de dommages (ni risques par catégorie, ni mitigation chiffrée, ni annexe).
+    damage: DamageModel | None = None
     # Optionnel : trajet de l'eau réel (géographie IGN BD TOPO). Absent →
     # rapport identique à aujourd'hui (aucun événement hydro_* n'est émis, la
     # clé de cache ne change pas).

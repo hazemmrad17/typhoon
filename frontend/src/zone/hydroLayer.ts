@@ -40,15 +40,8 @@ const C_END = '#0b3d66';
 const C_SITE = '#ffb703';
 const C_DROP = '#eaf7ff';
 
-export const HYDRO_LAYER_IDS = [DROP_CORE, DROP, MARK_SITE, MARK_END, ROUTE_DONE, ROUTE_LINE, BASIN_LINE, BASIN_FILL];
-
 function emptyFc(): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
-}
-
-/** Une couche est « montée » dès lors que sa source existe. */
-export function isJourneyMounted(map: mapboxgl.Map): boolean {
-  return !!map.getSource(ROUTE_SRC);
 }
 
 function pointFc(lon: number, lat: number, props: Record<string, unknown> = {}): GeoJSON.FeatureCollection {

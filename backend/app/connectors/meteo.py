@@ -75,6 +75,14 @@ async def fetch_meteo(lat: float, lon: float) -> dict[str, Any]:
         "rain_total_mm": None,
         "rain_peak_mm_h": None,
         "dry": None,
+        "wind_gusts_hourly": [],
+        "wind_speed_hourly": [],
+        "wind_gust_peak_kmh": None,
+        "wind_gust_peak_time": None,
+        "wind_gust_peak_dir_deg": None,
+        "soil_moisture_hourly": [],
+        "soil_moisture_min": None,
+        "soil_moisture_max": None,
         "discharge": None,
         "sources": {"rain": SOURCE_FORECAST, "discharge": SOURCE_DISCHARGE},
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
@@ -91,7 +99,10 @@ async def fetch_meteo(lat: float, lon: float) -> dict[str, Any]:
                 {
                     "latitude": f"{lat:.5f}",
                     "longitude": f"{lon:.5f}",
-                    "hourly": "precipitation,rain",
+                    "hourly": (
+                        "precipitation,rain,wind_speed_10m,wind_gusts_10m,"
+                        "wind_direction_10m,soil_moisture_0_to_7cm"
+                    ),
                     "past_days": "1",
                     "forecast_days": "3",
                     "timezone": "Europe/Paris",
@@ -108,6 +119,38 @@ async def fetch_meteo(lat: float, lon: float) -> dict[str, Any]:
                     out["rain_total_mm"] = round(total, 2)
                     out["rain_peak_mm_h"] = round(float(max(vals)), 2)
                     out["dry"] = total < DRY_TOTAL_MM
+
+                # Vent / rafales horaires RÉELS (km/h) — même axe temporel que
+                # la pluie ; le pic de rafales est la référence du risque vent.
+                # Champs absents de la réponse → séries vides (jamais un axe
+                # découplé rempli de None) : le frontend n'affiche alors pas
+                # de simulation vent.
+                gusts = hourly.get("wind_gusts_10m") or []
+                speeds = hourly.get("wind_speed_10m") or []
+                if gusts:
+                    out["wind_gusts_hourly"] = _pair(axis, gusts)
+                    out["wind_speed_hourly"] = _pair(axis, speeds)
+                gvals = [v for v in gusts if isinstance(v, (int, float))]
+                if gvals:
+                    out["wind_gust_peak_kmh"] = round(float(max(gvals)), 1)
+                    gi = max(range(len(gusts)), key=lambda i: gvals[i])
+                    out["wind_gust_peak_time"] = axis[gi] if gi < len(axis) else None
+                    # Direction du vent (°, provenance) à l'heure du pic —
+                    # pilote l'orientation du cône d'exposition feu.
+                    if gi < len(axis):
+                        wdir = hourly.get("wind_direction_10m") or []
+                        if gi < len(wdir) and isinstance(wdir[gi], (int, float)):
+                            out["wind_gust_peak_dir_deg"] = wdir[gi]
+
+                # Humidité du sol (m³/m³, couche 0–7 cm) — série réelle pour la
+                # chronique de dessiccation RGA (retrait-gonflement des argiles).
+                sm = hourly.get("soil_moisture_0_to_7cm") or []
+                if sm:
+                    out["soil_moisture_hourly"] = _pair(axis, sm)
+                    svals = [v for v in sm if isinstance(v, (int, float))]
+                    if svals:
+                        out["soil_moisture_min"] = round(float(min(svals)), 4)
+                        out["soil_moisture_max"] = round(float(max(svals)), 4)
             else:
                 reasons.append("pluie prévue indisponible")
 

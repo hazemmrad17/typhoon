@@ -10,19 +10,17 @@
 // =============================================================================
 
 import { describe, expect, it } from 'vitest';
-import { SCENARIOS, scenarioFor, effectiveDepthM, timeProfileAt } from './damageModel';
 import {
   FLOOD_BANDS,
   INFRA_THRESHOLD_M,
+  MAP_MIN_DEPTH_M,
   cappedSlabM,
   floodBand,
   fmtDepth,
-  impactAt,
   impactState,
+  mapImpactFromDepth,
   quantiseSlab,
 } from './impactModel';
-
-const DIRECT = scenarioFor('direct'); // profondeur de pic 1,1 m
 
 describe('floodBand — le seuil du moteur est une frontière, pas un ornement', () => {
   it('la bande « rien n’est compté » s’arrête exactement au seuil du moteur', () => {
@@ -102,41 +100,25 @@ describe('impactState', () => {
   });
 });
 
-describe('impactAt — la timeline fait monter l’eau du modèle', () => {
-  it('monte de façon monotone avec l’avancement de l’événement', () => {
-    const depths = [0, 0.25, 0.5, 0.75, 1].map((a) => impactAt(DIRECT, a).depthM);
-    for (let i = 1; i < depths.length; i += 1) {
-      expect(depths[i]).toBeGreaterThanOrEqual(depths[i - 1]);
-    }
-    expect(depths[depths.length - 1]).toBeCloseTo(DIRECT.depthPeakM, 6);
-  });
-
-  it('au départ de l’événement, l’enveloppe est sous le seuil (rien à peindre)', () => {
-    const start = impactAt(DIRECT, 0);
+describe('impactState — la simulation pilote la profondeur', () => {
+  it('au départ, sous le seuil : rien à peindre', () => {
+    const start = impactState(0.05, 1.1);
     expect(start.overThreshold).toBe(false);
     expect(start.band.key).toBe('b0');
     expect(start.slabM).toBe(0.05);
   });
 
-  it('au pic, la bande correspond bien à la profondeur de pic du scénario', () => {
-    const peak = impactAt(DIRECT, 1);
-    expect(peak.depthM).toBeCloseTo(1.1, 6);
+  it('au pic TRI (1,1 m), la bande correspond à la classe officielle', () => {
+    const peak = impactState(1.1, 1.1);
     expect(peak.band.label).toBe('1,0 – 1,5 m');
+    expect(peak.overThreshold).toBe(true);
   });
 
-  it('reste cohérent avec le moteur : même profondeur que effectiveDepthM', () => {
-    for (const s of SCENARIOS) {
-      for (const h of [0, 6, 13, 23]) {
-        const accum = timeProfileAt(h).accum;
-        expect(impactAt(s, accum).depthM).toBeCloseTo(effectiveDepthM(s, accum), 9);
-      }
-    }
-  });
-
-  it('le scénario le plus faible ne peint rien de tout l’événement', () => {
-    const low = scenarioFor('offshore'); // pic 0,2 m, sous le seuil de 0,3 m
-    expect(impactAt(low, 1).overThreshold).toBe(false);
-    expect(impactAt(low, 1).band.key).toBe('b0');
+  it('hors TRI (profondeur 0) : rien n’est peint', () => {
+    const none = impactState(0, 0);
+    expect(none.overThreshold).toBe(false);
+    expect(none.slabM).toBe(0);
+    expect(none.peakPct).toBe(0);
   });
 });
 
@@ -144,5 +126,37 @@ describe('fmtDepth', () => {
   it('une décimale, en mètres', () => {
     expect(fmtDepth(0.72)).toBe('0.7 m');
     expect(fmtDepth(1)).toBe('1.0 m');
+  });
+});
+
+// SCN-002 — le seuil de la CARTE n'est pas celui des DOMMAGES : la carte peint
+// dès que la profondeur dépasse zéro, sinon la montée de l'eau reste invisible
+// pendant tout le début du scrub.
+describe('SCN-002 — mapImpactFromDepth : la carte voit l\u2019eau avant le seuil de dommages', () => {
+  it('peint d\u00e8s 0,1 m alors que le seuil de dommages (0,3 m) n\u2019est pas franchi', () => {
+    const m = mapImpactFromDepth(0.1, 1.1);
+    expect(m).not.toBeNull();
+    expect(m!.visible).toBe(true);
+    expect(m!.slabM).toBe(0.1);
+    expect(m!.overThreshold).toBe(false);
+    expect(m!.color).toBe(FLOOD_BANDS[0].color);
+  });
+
+  it('franchit le seuil de dommages à 0,4 m (bande 0,3 \u2013 0,5 m)', () => {
+    const m = mapImpactFromDepth(0.4, 1.1);
+    expect(m!.overThreshold).toBe(true);
+    expect(m!.band.label).toBe('0,3 \u2013 0,5 m');
+  });
+
+  it('ne peint rien \u00e0 z\u00e9ro, sous le seuil visuel, ou si le pas de 5 cm annule la hauteur', () => {
+    expect(mapImpactFromDepth(0, 1.1)).toBeNull();
+    expect(mapImpactFromDepth(MAP_MIN_DEPTH_M / 2, 1.1)).toBeNull();
+    expect(mapImpactFromDepth(Number.NaN, 1.1)).toBeNull();
+  });
+
+  it('ne modifie pas le comportement des compteurs de dommages', () => {
+    expect(impactState(0.1, 1.1).overThreshold).toBe(false);
+    expect(impactState(0.4, 1.1).overThreshold).toBe(true);
+    expect(impactState(0.1, 1.1).slabM).toBe(0.1);
   });
 });
