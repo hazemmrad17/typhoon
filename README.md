@@ -173,47 +173,62 @@ frontend/
 
 ## Déploiement
 
-Deux hôtes : **Render** (backend FastAPI, gratuit) + **Vercel** (frontend,
-gratuit).
+**Option A — Tout sur Vercel (un seul projet, recommandé)** : le frontend est
+servi en statique, le backend FastAPI tourne en fonction serverless derrière
+des rewrites — une seule URL, pas de CORS à gérer.
 
-### 1. Backend sur Render
+### A. Vercel monorepo (tout-en-un)
 
-1. Pousser ce dépôt sur GitHub (fait).
-2. Sur [render.com](https://render.com) : **New → Blueprint**, choisir le dépôt
-   — le fichier `render.yaml` à la racine pré-configure tout (Python 3.12,
-   `pip install -r requirements.txt`, démarrage `uvicorn app.render_server:app`,
-   health-check `/health`, plan free).
-3. Renseigner la variable d'environnement `CORS_ALLOWED_ORIGINS` avec l'URL
-   Vercel (étape 2 ci-dessous), ex. `https://typhoon.vercel.app`.
-   Optionnel : `MISTRAL_API_KEY` pour la prose du rapport.
-4. Déployer → l'API vit sur `https://typhoon-api-xxxx.onrender.com`.
-   Health-check : `GET /health` → `{"status":"ok"}`.
+Le `vercel.json` à la racine fait tout :
 
-> Plan gratuit : l'instance s'endort après 15 min d'inactivité — la première
-> requête du réveil prend ~30 s. Un cron-ping (UptimeRobot sur `/health`)
-> la garde éveillée pendant une démo.
+- build : `cd frontend && npm install && npm run build` → servi depuis
+  `frontend/dist`
+- rewrites `/api/*`, `/diagnostic/*`, `/health` → `api/index.py` (fonction
+  Python qui monte `backend/app/main.py`)
 
-### 2. Frontend sur Vercel
-
-1. Sur [vercel.com](https://vercel.com) : **Add New → Project**, importer le
-   même dépôt GitHub.
-2. **Root Directory** : `frontend` (le `vercel.json` à la racine configure le
-   build Vite et le fallback SPA).
+1. Sur [vercel.com](https://vercel.com) : **Add New → Project** → importer le
+   dépôt. **Root Directory : laisser VIDE** (la racine du dépôt).
+2. Framework Preset : **Other**.
 3. Variables d'environnement (production) :
 
    | Variable | Valeur |
    |---|---|
-   | `VITE_API_BASE` | URL Render de l'étape 1 (`https://typhoon-api-xxxx.onrender.com`) |
-   | `VITE_MAPBOX_TOKEN` | Jeton public Mapbox (même valeur que le `.env` local) |
-   | `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` | Auth |
-   | `VITE_WINDY_API_KEY` | Overlay météo (optionnel) |
+   | `VITE_API_BASE` | **VIDE ou absent** — le frontend appelle son propre domaine (`/api/...`) |
+   | `VITE_MAPBOX_TOKEN` | jeton Mapbox |
+   | `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` | auth |
+   | `VITE_WINDY_API_KEY` | optionnel |
+   | `MISTRAL_API_KEY` / `MISTRAL_MODEL` | prose du rapport (backend) |
+   | `CORS_ALLOWED_ORIGINS` | l'URL Vercel finale (ex. `https://typhoon.vercel.app`) — inutile en option A car même origine, mais sans risque |
 
-4. Déployer → partager l'URL obtenue.
-5. **Boucle de retour** : remettre l'URL Vercel finale dans
-   `CORS_ALLOWED_ORIGINS` côté Render (sinon le navigateur bloque les appels
-   API) puis redeployer Render.
+4. Déployer. Vérifier :
 
-### Vérification post-déploiement
+   ```bash
+   curl https://<projet>.vercel.app/health
+   curl "https://<projet>.vercel.app/api/flood-alea?lat=48.848&lon=2.370" | head -c 200
+   ```
+
+   (Le réveil d'une fonction froide prend quelques secondes — normal sur le
+   plan gratuit.)
+
+### B. Deux hôtes (Render + Vercel) — si les fonctions serverless sont trop lentes
+
+**Backend sur Render** (blueprint `render.yaml` prêt) :
+
+1. [render.com](https://render.com) : **New → Blueprint** → choisir le dépôt.
+2. Env : `CORS_ALLOWED_ORIGINS=https://<votre-app>.vercel.app`, optionnel
+   `MISTRAL_API_KEY`.
+3. Deploy → `https://typhoon-api-xxxx.onrender.com` (health `/health`).
+   Plan gratuit : s'endort après 15 min (~30 s de réveil) — un ping
+   UptimeRobot sur `/health` le garde éveillé pour une démo.
+
+**Frontend sur Vercel** :
+
+1. **Root Directory : `frontend`** (le `frontend/vercel.json` gère le fallback
+   SPA).
+2. Env : `VITE_API_BASE=https://typhoon-api-xxxx.onrender.com` + les
+   `VITE_MAPBOX_TOKEN` / `VITE_SUPABASE_*` ci-dessus.
+3. Déployer, puis reporter l'URL Vercel finale dans Render
+   `CORS_ALLOWED_ORIGINS` (boucle de retour).
 
 ```bash
 curl https://<render-url>/health
