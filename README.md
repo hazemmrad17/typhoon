@@ -16,6 +16,16 @@ point-in-polygon WFS) et vulnérabilité BDNB (139 champs verbatim), avec
 > Pas de score, pas de narration IA, pas de recommandations : l'assureur
 > applique son propre modèle actuariel (voir `constitution.md` §2).
 
+## Aperçu
+
+| Étape 1 — Diagnostic | Étape 2 — Scénarios |
+|---|---|
+| ![Diagnostic](docs/screenshots/step1-diagnostic.png) | ![Scénarios](docs/screenshots/step2-scenario.png) |
+
+*À gauche : 13 aléas Géorisques, fiche BDNB, photo Panoramax sur carte 3D.
+À droite : classes TRI officielles (moyen ~100 ans, extrême ~500 ans…),
+timeline horaire et Play — l'eau monte sur le bâtiment.*
+
 ## Fonctionnalités
 
 ### Étape 1 — Diagnostic (`/zone`)
@@ -106,6 +116,12 @@ ruff check app tests
 # frontend (depuis frontend/)
 npm test                       # 143 tests vitest
 npm run build                  # tsc -b && vite build
+```
+
+Captures d'écran (rejouables) :
+
+```bash
+cd frontend && node scripts/demo-shots.mjs   # nécessite backend + vite en local
 ```
 
 La suite est **hors-ligne** (fixtures GML capturées, sources mockées) et doit
