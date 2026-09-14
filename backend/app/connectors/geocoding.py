@@ -132,7 +132,7 @@ async def search_municipalities(
     (meme forme que l'ancienne API Adresse, decommissionnee fin 01/2026).
     """
     response = await _get_with_429_retry(
-        client, settings.geocoding_url, {"q": address, "limit": 1}
+        client, settings.geocoding_url, {"q": q, "limit": max(1, min(limit, 10))}
     )
     response.raise_for_status()
     data = response.json()

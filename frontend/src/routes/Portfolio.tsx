@@ -10,7 +10,7 @@
 //   jugement (constitution §2). Le lot est N × le pipeline canonique.
 // =============================================================================
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { UnifiedMap } from '../components/UnifiedMap';
 import { ZoneSidenav, useIsMobile } from '../components/ZoneSidenav';

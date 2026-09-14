@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -77,7 +76,7 @@ async def main(argv: list[str]) -> int:
     addresses = DEFAULT_ADDRESSES
     if args.addresses:
         lines = Path(args.addresses).read_text(encoding="utf-8").splitlines()
-        addresses = [l.strip() for l in lines if l.strip()]
+        addresses = [line.strip() for line in lines if line.strip()]
     if not addresses:
         print("aucune adresse fournie", file=sys.stderr)
         return 1

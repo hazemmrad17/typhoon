@@ -22,7 +22,6 @@ import httpx
 from app.connectors.bdnb import BdnbAdresseIntrouvable, fetch_bdnb
 from app.connectors.geocoding import (
     GeocodeResult,
-    GeocodingError,
     geocode_address,
     reverse_geocode,
 )
@@ -36,7 +35,6 @@ from app.schemas.diagnostic_record import (
     PerBuilding,
     PerBuildingMethod,
     Resolution,
-    SourceProvenance,
 )
 from app.schemas.risque_report import AleaDetail
 from app.schemas.diagnostic_record import SCHEMA_VERSION

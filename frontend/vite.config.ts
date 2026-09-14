@@ -213,6 +213,17 @@ export default defineConfig({
   envDir: '..',
   server: {
     port: 5173,
+    // Proxy dev pour les sources inondation françaises (Vigicrues) : leurs
+    // APIs ne renvoient pas d'en-têtes CORS — le navigateur ne peut pas les
+    // appeler directement. On proxyie /vigicrues → vigicrues.gouv.fr en dev
+    // (la prod passe par le backend, cf. /api/climate).
+    proxy: {
+      '/vigicrues': {
+        target: 'https://www.vigicrues.gouv.fr',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/vigicrues/, ''),
+      },
+    },
   },
   build: {
     rollupOptions: {

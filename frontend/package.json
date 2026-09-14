@@ -17,17 +17,18 @@
     "jspdf": "^4.2.1",
     "mapbox-gl": "^3.28.1",
     "ol": "^10.10.0",
+    "proj4": "^2.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.18.2",
-    "recharts": "^3.10.1",
-    "three": "^0.128.0"
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.4",
     "@types/geojson": "^7946.0.16",
+    "@types/proj4": "^2.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",

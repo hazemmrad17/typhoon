@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     # IGN Altimetrie (Geoplateforme, public, sans cle)
     ign_altitude_base_url: str = "https://data.geopf.fr/altimetrie/1.0"
 
+    # Panoramax (photos terrain ouvertes, public, sans cle) — fonde par l'IGN
+    # et la DINUM, interrogeable sur plusieurs instances. Le visualiseur sert
+    # aux liens de provenance affiches sous les vignettes (licence etalab-2.0,
+    # donc la source doit etre citée et cliquable).
+    panoramax_search_url: str = "https://api.panoramax.xyz/api/search"
+    panoramax_viewer_url: str = "https://api.panoramax.xyz/#focus=pic&pic="
+
     # CORS — origines autorisées, séparées par des virgules. Par défaut,
     # seulement le frontend Vite en dev local (port 5173) : un joker "*"
     # fonctionnait tant qu'aucun vrai frontend n'était déployé derrière un
@@ -63,6 +70,16 @@ class Settings(BaseSettings):
     # Clés d'API pilote (FR-21) — séparées par virgules. Vide = accès ouvert
     # (mode dev, warning journalisé). Ne jamais logger ces valeurs.
     api_keys: str = ""
+
+    # Mistral (étape 3 — rapport de risque). Optionnel : sans clé, le service
+    # retourne un rapport 100 % template (sans prose LLM). Ne jamais logger.
+    mistral_api_key: str | None = None
+    # Modèle utilisé pour la prose. Réglable car l'accès est fonction de
+    # l'abonnement : « mistral-large-latest » répond 403 tier_not_allowed sur
+    # un compte qui n'y a pas droit, et le service retombe alors — sans erreur
+    # — sur le rendu template. Mettre MISTRAL_MODEL sur un modèle réellement
+    # disponible sur le compte (ex. mistral-medium-latest, mistral-small-latest).
+    mistral_model: str = "mistral-large-latest"
 
     # Budget mensuel d'appels BDNB (FR-28) — garde-fou du lot ; la requête
     # unitaire interactive n'est jamais bloquée par lui en v1.

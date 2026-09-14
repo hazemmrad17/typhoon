@@ -14,5 +14,8 @@ venv/
 # IDE
 .vscode/
 .idea/
-node_modules/__pycache__/
-backend/app/cache/
+node_modules/
+__pycache__/
+
+# Cache des rapports générés (étape 3) — sortie locale, jamais versionnée.
+app/cache/

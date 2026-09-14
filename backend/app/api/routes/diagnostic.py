@@ -17,23 +17,18 @@ Routes actives :
 from __future__ import annotations
 
 import time
-import uuid
 
-from typing import Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel, Field
 
-from app.agents.collector_agent import collect
 from app.connectors.bdnb import (
-    BdnbAdresseIntrouvable,
     fetch_batiment_groupe,
-    fetch_bdnb,
     fetch_buildings_in_bbox,
 )
-from app.connectors.geocoding import GeocodingError, geocode_address
+from app.connectors.geocoding import GeocodingError
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services import batch as batch_service

@@ -6,7 +6,7 @@
 //     · score de risque global (jauge D03 + pastille)
 //     · tableau des aléas recensés (statut · niveau · score)
 //     · fiche du bien BDNB (si disponible)
-//     · sections du rapport Mistral + synthèse encadrée + obligations
+//     · synthèse encadrée + obligations
 //     · pied de page paginé (sources, page X/Y)
 // =============================================================================
 
@@ -23,16 +23,8 @@ const LINE = '#C9D6E0';
 const TINT = '#EDF4F9';
 const ROW_ALT = '#F6FAFD';
 const OK = '#2E7D5B';
-const WARN_TINT = '#FBF6EA';
 const WARN_INK = '#8A6D1F';
 const WHITE_60 = '#B9CCDA';
-
-const PAGE_W = 210;
-const PAGE_H = 297;
-const M = 16; // marge gauche/droite
-const CW = PAGE_W - 2 * M; // largeur utile
-const FOOTER_TOP = PAGE_H - 12;
-const SAFE_BOTTOM = PAGE_H - 16;
 
 /* Logo Typhon (blanc, fond transparent) encodé en dur pour un export 100 %
    hors-ligne. viewBox 674.53 × 119.6 (aspect ≈ 5.639). */

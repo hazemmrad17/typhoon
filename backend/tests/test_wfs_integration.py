@@ -82,7 +82,7 @@ async def _canonical_from_batiment(batiment: dict):
     async def fake_raw(client, cc, la, lo):
         return {"erreurs": [], "batiment": batiment}
 
-    async def fake_bdnb(client, a, l=""):
+    async def fake_bdnb(client, address, label_ban=""):
         return None
 
     canonical.geocode_address = fake_geo
@@ -186,7 +186,7 @@ async def test_wfs_failure_degrades_without_breaking_rest(monkeypatch):
         rest_calls.append("done")
         return raw
 
-    async def fake_bdnb(client, a, l=""):
+    async def fake_bdnb(client, address, label_ban=""):
         return None
 
     monkeypatch.setattr(canonical, "geocode_address", fake_geo)
