@@ -1,5 +1,13 @@
 # Typhoon 2 — Données climatiques par bâtiment
 
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Mapbox](https://img.shields.io/badge/Mapbox_GL-black?logo=mapbox&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 Service de données climatiques **par bâtiment** pour les assureurs français.
 Une adresse → un JSON canonique joignant aléas réglementaires (Géorisques,
 point-in-polygon WFS) et vulnérabilité BDNB (139 champs verbatim), avec
@@ -153,6 +161,10 @@ frontend/
 - `AGENTS.md` — méthodologie spec-driven, invariants acquis, pièges
 - `docs/workflow/` — spec, plans (scénarios SCN-xxx, VFX), notes de décision
 - `handoff.md` — décisions architecturales en attente
+
+## Licence
+
+MIT — voir [LICENSE](LICENSE).
 
 ## Convention de commit
 
