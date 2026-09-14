@@ -128,7 +128,8 @@ async def mistral_stream_json(
 
     payload = _base_payload(system_prompt, user_message)
     payload["stream"] = True
-    payload["include_usage"] = True
+    # NB : `include_usage` (option OpenAI) est refusé 422 par l'API Mistral
+    # (extra_forbidden) — ne pas l'envoyer.
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

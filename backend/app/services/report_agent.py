@@ -399,6 +399,13 @@ def _allowed_numbers(req: ReportRequest) -> set[int]:
         for x in (s.depthPeakM,)
         if x > 0
     )
+    # Le nom du secteur (adresse diagnostiquée) fait partie des faits : les
+    # nombres qu'il contient (numéro de rue, code postal, code INSEE) sont
+    # légitimes dans la prose. Sans cet ancrage, toute phrase citant l'adresse
+    # était rejetée (« 75019 » non autorisé) et le rapport retombait en
+    # template — même quand le LLM avait répondu correctement.
+    for n in _numbers_in(req.sector):
+        allowed.add(int(round(n)))
     try:
         allowed.add(datetime.fromisoformat(req.timestamp).year)
     except ValueError:
