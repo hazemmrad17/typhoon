@@ -117,15 +117,11 @@ export function ZoneSidenav({
   };
 
   const profileNav = (profile ? PROFILE_NAV[profile] : undefined) || [];
-  /* Survol (desktop, replié) : dépliage temporaire « peek » — la sidenav
-     n'est dépliée durablement que si elle est épinglée (toggle) ; sinon elle
-     se déplie tant que la souris reste dessus puis se replie au départ. */
-  const [peek, setPeek] = useState(false);
-  const canPeek = !mobile && collapsed;
-  const peekActive = canPeek && peek;
-  const effectiveCollapsed = collapsed && !peekActive;
-  /* Déplié durablement (épinglé) : l'aside reste ouverte après un clic,
-     par opposition au « peek » temporaire au survol. */
+  /* Mode replié : STRICTEMENT la colonne d'icônes — aucun libellé, et aucun
+     dépliage au survol (les intitulés restent accessibles en infobulle via
+     `title`). Le dépliage durable passe uniquement par le toggle. */
+  const effectiveCollapsed = collapsed;
+  /* Déplié durablement (épinglé) : l'aside reste ouverte après un clic. */
   const pinned = !mobile && !collapsed;
 
   /* ── Menu utilisateur (dropdown du pied de sidenav) ── */
@@ -189,16 +185,10 @@ export function ZoneSidenav({
   return (
     <aside
       ref={sidenavRef}
-      className={`zone-sidenav${canPeek && peek ? ' sidenav-peek' : ''}`}
+      className="zone-sidenav"
       aria-label="Navigation principale"
       inert={hidden}
       aria-hidden={hidden}
-      onMouseEnter={() => {
-        if (canPeek) setPeek(true);
-      }}
-      onMouseLeave={() => {
-        if (canPeek) setPeek(false);
-      }}
     >
       <header className="sidenav-header">
         <Link
@@ -212,30 +202,24 @@ export function ZoneSidenav({
               aria-label — le span est décoratif. */}
           <span className="sidenav-wordmark-img" aria-hidden="true" />
         </Link>
-        {/* Toggle à 3 états (desktop) :
+        {/* Toggle à 2 états (desktop) :
             1. Repliée → hamburger (clic = déplier) ;
-            2. Survol « peek » → menu_open creuse (clic = épingler, l'aside
-               reste alors dépliée) ;
-            3. Épinglée → menu_open pleine/adherente, l'aside demeure dépliée. */}
+            2. Épinglée → menu_open pleine/adherente, l'aside demeure dépliée. */}
         <md-icon-button
-          className={`sidenav-toggle${pinned ? ' sidenav-toggle--pinned' : ''}${peekActive ? ' sidenav-toggle--peek' : ''}`}
+          className={`sidenav-toggle${pinned ? ' sidenav-toggle--pinned' : ''}`}
           aria-label={
             mobile
               ? 'Fermer le menu'
               : effectiveCollapsed
                 ? 'Déplier le menu'
-                : peekActive
-                  ? 'Épingler la navigation'
-                  : 'Replier le menu'
+                : 'Replier le menu'
           }
           title={
             mobile
               ? 'Fermer le menu'
               : effectiveCollapsed
                 ? 'Déplier le menu'
-                : peekActive
-                  ? 'Épingler la navigation'
-                  : 'Replier le menu'
+                : 'Replier le menu'
           }
           onClick={onToggleCollapse}
         >
@@ -246,7 +230,7 @@ export function ZoneSidenav({
       </header>
 
       {effectiveCollapsed ? (
-        /* ── Mode replié : colonne d'icônes ── */
+        /* ── Mode replié : colonne d'icônes, sans libellé ── */
         <nav className="sidenav-rail" aria-label="Raccourcis">
           {profileNav.map((item) => (
             <md-icon-button

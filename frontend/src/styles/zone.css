@@ -77,6 +77,31 @@
   --sidenav-item-radius: 999px;
   --sidenav-item-h: 44px;
 
+  /* Tokens de mouvement Material 3 (https://m3.material.io/styles/motion) —
+     durées courtes/standard et les courbes d'accélération officielles :
+     · standard (entrée/sortie)        : cubic-bezier(0.2, 0, 0, 1)
+     · emphasized-decelerate (arrivée) : cubic-bezier(0.05, 0.7, 0.1, 1)
+     · emphasized-accelerate (départ)  : cubic-bezier(0.3, 0, 0.8, 0.15)
+     Une grande transformation (panneaux plein écran) → ~400 ms emphasized ;
+     une petite (couleur, élévation)  → ~200 ms. */
+  --md-motion-duration-short: 200ms;
+  --md-motion-duration-standard: 300ms;
+  --md-motion-duration-long: 400ms;
+  --md-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+  /* Largeur du panneau d'évaluation des risques (mode « étape suivante ») —
+     la carte se décale de cette valeur vers la droite. Le panneau des
+     scénarios (droite) est symétrique : la carte se décale aussi de cette
+     valeur vers la gauche et la console se centre entre les deux colonnes. */
+  --risk-panel-w: 380px;
+  /* Les deux colonnes de la vue risque partagent la même largeur et les
+     mêmes marges → composition équilatérale (la console se centre au
+     milieu exact de la carte entre elles). */
+  --scenario-panel-w: 380px;
+
   /* Sidenav à gauche + colonne principale : grid pleine hauteur */
   display: grid;
   grid-template-columns: auto 1fr;
@@ -154,30 +179,10 @@
   width: var(--sidenav-w-collapsed);
 }
 
-/* ── Survol (desktop, replié) : dépliage temporaire « peek » ──
-   La sidenav n'est dépliée durablement que si elle est épinglée (toggle) ;
-   sinon elle se déplie tant que la souris reste dessus (classe .sidenav-peek
-   posée par ZoneSidenav) puis se replie au départ. Ces règles restaurent le
-   look « déplié » pendant le survol (sinon les styles .nav-collapsed gagnent). */
-@media (min-width: 901px) {
-  .zone-app.nav-collapsed .zone-sidenav.sidenav-peek {
-    width: var(--sidenav-w);
-  }
-  .zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-header {
-    padding: 0 12px 0 16px;
-    justify-content: space-between;
-  }
-  .zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-brand {
-    display: flex;
-  }
-  .zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-footer-main {
-    justify-content: space-between;
-    padding: 0 12px;
-  }
-  .zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-user {
-    display: flex;
-  }
-}
+/* ── Replié : STRICTEMENT la colonne d'icônes ──
+   Aucun libellé, aucun dépliage au survol : le rail reste identique tant que
+   l'utilisateur ne l'épingle pas via le toggle. Les intitulés restent
+   accessibles en infobulle (attribut title des boutons du rail). */
 
 .zone-main {
   grid-column: 2;
@@ -309,30 +314,15 @@
   --md-icon-button-icon-color: var(--md-sys-color-primary);
   --md-icon-button-unselected-icon-color: var(--md-sys-color-primary);
 }
-/* Toggle à 3 états (desktop) :
+/* Toggle à 2 états (desktop) :
    1. Repliée (rail)      → menu (hamburger)
-   2. Survol « peek »     → menu_open creuse, léger rappel (clic = épingler)
-   3. Épinglée (dépliée)  → menu_open pleine (axe FILL) teintée accent. */
+   2. Épinglée (dépliée)  → menu_open pleine (axe FILL) teintée accent. */
 .sidenav-toggle md-icon {
   transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1), color 0.2s ease;
-}
-.sidenav-toggle--peek md-icon {
-  animation: sidenav-pin-nudge 0.45s ease;
 }
 .sidenav-toggle--pinned md-icon {
   font-variation-settings: 'FILL' 1;
   color: var(--md-sys-color-primary);
-}
-@keyframes sidenav-pin-nudge {
-  0% {
-    transform: rotate(-14deg) scale(0.85);
-  }
-  50% {
-    transform: rotate(10deg) scale(1.12);
-  }
-  100% {
-    transform: rotate(0deg) scale(1);
-  }
 }
 
 /* ── Corps de la sidenav dépliée : liste M3 centrée verticalement ── */
@@ -733,18 +723,6 @@
 }
 .zone-app.nav-collapsed .sidenav-theme-label {
   display: none;
-}
-/* Survol (peek) : on restaure le look déplié avec le libellé */
-.zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-theme {
-  justify-content: flex-start;
-  width: 100%;
-}
-.zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-theme-btn {
-  width: 100%;
-  padding: 0 14px;
-}
-.zone-app.nav-collapsed .zone-sidenav.sidenav-peek .sidenav-theme-label {
-  display: block;
 }
 /* Rangée du bas : utilisateur + engrenage (étalée en mode déplié, centrée en
    rail). Le survol couvre TOUTE la rangée (avatar + nom + engrenage) d'une
@@ -1362,15 +1340,6 @@
   font-size: 13px;
 }
 
-@media (max-width: 760px) {
-  .risk-sheet {
-    padding: 20px 18px 22px;
-    max-height: 92vh;
-  }
-  .risk-cards {
-    grid-template-columns: 1fr;
-  }
-}
 .src-chip md-icon {
   --md-icon-size: 14px;
 }
@@ -2976,43 +2945,6 @@
 .mb-demo-wrap .mapboxgl-marker .map-pin {
   transform: none;
 }
-/* ── Épingle « bâtiment cible » ──
-   Pin classique en forme de goutte (tip vers le bas, ancré au centre de
-   l'empreinte BDNB). Visible en 2D comme en 3D. */
-.mb-demo-wrap .mapboxgl-marker .bldg-pin {
-  position: relative;
-  width: 0;
-  height: 0;
-  transform: none;
-  pointer-events: none;
-}
-.mb-demo-wrap .bldg-pin-dot {
-  position: absolute;
-  left: 0;
-  top: -34px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50% 50% 50% 0;
-  background: var(--accent, #4C3F91);
-  border: 2px solid #fff;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-  transform: rotate(-45deg);
-  transform-origin: 50% 100%;
-  z-index: 2;
-}
-/* Œil blanc au centre du pin (style Mapbox/Google). */
-.mb-demo-wrap .bldg-pin-dot::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 38%;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  transform: translate(-50%, -50%);
-  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.25);
-}
 /* ── Indicateur d'adresse (popup compact « mb-risk ») ──
    En-tête adresse avec épingle d'ancrage + aléas présents en pastilles de
    niveau colorées (dot avant le libellé absent : compact). */
@@ -3391,6 +3323,7 @@
   min-height: 0;
 }
 .mb-demo-map {
+  position: relative; /* conteneur de référence pour l'overlay Windy (inset:0) */
   width: 100%;
   height: 100%;
 }
@@ -3501,21 +3434,6 @@
   flex: none;
 }
 
-/* Tooltip survol/clic des couches de risque */
-.mb-demo-wrap .mb-hover-popup .mapboxgl-popup-content {
-  padding: 8px 10px;
-}
-.mb-demo-wrap .mb-hover-title {
-  font-family: var(--serif);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-  margin-bottom: 2px;
-}
-.mb-demo-wrap .mb-hover-level {
-  font-size: 11px;
-  font-weight: 600;
-}
 
 /* ============================================================================
    SCÈNE CARTE PLEIN ÉCRAN (desktop ≥ 901 px)
@@ -3762,9 +3680,6 @@
     transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
     box-shadow: none;
   }
-  .zone-app.nav-offcanvas .zone-sidenav.sidenav-peek {
-    width: min(320px, 86vw);
-  }
   .zone-app.nav-offcanvas.drawer-open .zone-sidenav {
     transform: translateX(0);
     box-shadow: 12px 0 40px rgba(0, 0, 0, 0.4);
@@ -3810,6 +3725,9 @@
   min-width: 0;
 }
 
+/* Nudge « passez à l'étape 2 » — apparaît sous la topbar, à droite, dès
+   qu'une adresse est diagnostiquée mais qu'on reste à l'étape 1 (globe).
+   Doux battement pour attirer l'œil vers la flèche « étape suivante ». */
 /* Chips (hamburger + icône monde + étiquette) : groupe compact à gauche.
    Sur mobile ils passent sur leur propre ligne (pleine largeur). */
 .zone-topbar .loc-chip {
@@ -3899,14 +3817,134 @@
   border-radius: 50%;
   color: var(--md-sys-color-on-surface-variant);
   cursor: pointer;
-  transition: border-color 0.18s, color 0.18s, background 0.18s, box-shadow 0.18s;
+  transition: border-color 0.18s, color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.2s;
 }
 .sim-indicator:hover {
   border-color: var(--md-sys-color-primary);
   color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent),
+    0 6px 18px color-mix(in srgb, var(--md-sys-color-primary) 32%, transparent);
 }
 .sim-indicator md-icon {
   --md-icon-size: 26px;
+  transition: transform 0.22s var(--md-motion-easing-emphasized-decelerate);
+}
+/* Au survol, l'icône glisse dans le sens de la navigation (→ avancer, ← retour). */
+.sim-indicator.forward:hover md-icon {
+  transform: translateX(4px);
+}
+.sim-indicator.back:hover md-icon {
+  transform: translateX(-4px);
+}
+
+/* ── Étape 2 verrouillée faute d'adresse diagnostiquée ──
+   Le bouton est `disabled` côté React (donc inaccessible au clavier et au
+   pointeur), et l'icône devient un cadenas : l'état se lit sur le bouton
+   lui-même, pas seulement au survol. Le retour arrière n'est jamais bloqué. */
+.sim-indicator:disabled,
+.sim-indicator.is-locked {
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 65%, transparent);
+  border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface) 78%, transparent);
+}
+.sim-indicator:disabled:hover,
+.sim-indicator:disabled:hover md-icon,
+.sim-indicator.is-locked:hover {
+  border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 65%, transparent);
+  box-shadow: none;
+  transform: none;
+}
+.sim-indicator.is-locked md-icon {
+  --md-icon-size: 22px;
+}
+
+/* ── Chip d'étape : « étape N / 3 » + pastilles, à gauche de la flèche ── */
+.step-chip {
+  position: absolute;
+  top: 12px; /* = padding haut du bandeau en mobile (même ligne que le bouton) */
+  right: calc(56px + 10px); /* à gauche du bouton rond 56 px + écart */
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 56px;
+  padding: 0 18px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 65%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface) 90%, transparent);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.step-chip-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.step-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 22%, transparent);
+  transition: background 0.25s, box-shadow 0.25s, transform 0.25s;
+}
+.step-dot.done {
+  background: color-mix(in srgb, #ff3b30 70%, transparent);
+}
+.step-dot.cur {
+  background: #ff3b30;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.25);
+  transform: scale(1.15);
+}
+/* Étapes inaccessibles sans adresse : cerclées, pas simplement éteintes. */
+.step-dot.todo {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-sys-color-on-surface) 26%, transparent);
+}
+.step-chip.is-locked .step-chip-count,
+.step-chip.is-locked .step-chip-title {
+  color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 75%, transparent);
+}
+.step-chip-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+.step-chip-count b {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #ff3b30;
+}
+.step-chip-count i {
+  font-style: normal;
+  opacity: 0.55;
+}
+/* Desktop « scène carte » : aligné sur la ligne des chips (même top). */
+@media (min-width: 901px) {
+  .zone-app.map-scene .step-chip {
+    top: 14px;
+    right: calc(56px + 16px + 10px);
+  }
+}
+@media (max-width: 900px) {
+  .step-chip {
+    height: 48px;
+  }
+  .step-chip-title {
+    display: none; /* économiser la place en mobile */
+  }
 }
 
 /* Étiquette « Sélectionner une région » / nom de la zone choisie. */
@@ -3958,19 +3996,28 @@
     align-self: center;
   }
   .zone-app.map-scene .zone-topbar > .hero-pill {
-    /* Barre compacte : ne remplit PLUS toute la rangée — largeur plafonnée
-       (~560 px), bouton + juste après ; l'excédent reste vide au-dessus de
-       la carte à droite. Elle rétrécit si l'écran est étroit. */
-    flex: 1 1 560px;
-    max-width: 560px;
+    /* La pilule remplit l'espace restant sur la rangée, entre la chip
+       « région » (gauche) et le bloc droit (chip « étape » + bouton),
+       remis dans le flux flex pour un espacement uniforme (gap 12px). */
+    flex: 1 1 0;
+    max-width: none;
     width: auto;
     align-self: center;
   }
-  /* Bouton « simulation » : toujours dans le coin supérieur droit, aligné
-     sur la ligne des chips (même top que leur padding 14px). */
+  /* Sur desktop, la chip « étape » et le bouton « simulation » rejoignent
+     le flux flex (au lieu d'être ancrés en absolu) : tous les espacements
+     de la rangée proviennent alors du même `gap` du bandeau. */
+  .zone-app.map-scene .zone-topbar .step-chip,
   .zone-app.map-scene .zone-topbar > .sim-indicator {
-    top: 14px;
-    right: 16px;
+    position: static;
+    align-self: center;
+  }
+  .zone-app.map-scene .zone-topbar .step-chip {
+    order: 2;
+    flex-shrink: 0;
+  }
+  .zone-app.map-scene .zone-topbar > .sim-indicator {
+    order: 3;
   }
   .zone-app.map-scene .zone-topbar .loc-chip {
     flex-basis: auto;
@@ -4007,6 +4054,23 @@
   flex-direction: row;
   align-items: stretch;
   gap: 6px; /* resserré : les toggles restent proches du panneau des cartes */
+  /* Sortie douce vers l'étape suivante — mouvement Material emphasized
+     (grande transformation plein écran → 400 ms, courbe emphasized). */
+  will-change: transform, opacity;
+  transition:
+    transform var(--md-motion-duration-long) var(--md-motion-easing-emphasized-decelerate),
+    opacity var(--md-motion-duration-standard) ease;
+}
+
+/* ── Étape 2 (« analyse des risques ») : la console météo de l'étape 1 cède
+   sa place, en bas de carte, à la console d'évaluation (.risk-console). Les
+   colonnes latérales de l'étape 1 cèdent elles aussi leurs bords aux panneaux
+   d'analyse (.risk-panel / .scenario-panel) — voir .zone-app.risk-open
+   .side-panels / .right-panels. */
+.zone-app.risk-open .flood-console {
+  transform: translate(-50%, 160%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ── Panneau principal (70 %) : 50/50 vertical — sans fond (invisible) ── */
@@ -4029,20 +4093,100 @@
   height: auto; /* la hauteur suit le composant ArcGIS (plus haut que 44 px) */
   padding: 10px 12px;
   border-radius: 20px;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+  /* MÊME fond et MÊME bord que les cartes météo juste en dessous : la rangée
+     des cartes est la référence. Deux écarts mesurés en direct faisaient deux
+     surfaces différentes : un jeton plus sombre (surface-container 88 % au lieu
+     de surface-container-high 72 %) et un `backdrop-filter` que les cartes
+     n'ont pas — sur une carte chargée, le flou change la teinte perçue même à
+     fond identique. Les deux sont alignés.
+     Le rayon reste 20 px (panneau pleine largeur vs cartes 16 px). */
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 72%, transparent);
+  border: 1px solid var(--md-sys-color-outline-variant);
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  /* Pas d'animation d'entrée : essayée puis retirée. Un fondu d'opacité porté
+     par `animation` laisse le panneau à opacity: 0 tant que la page ne peint
+     pas (onglet en arrière-plan, fenêtre occultée, capture) — mesuré en direct :
+     68 px de haut, opacité 0, commande invisible alors qu'elle existe. Le
+     panneau doit être peint dès qu'il est monté, sans dépendre d'une horloge
+     d'animation. */
 }
+/* ── Timeline verrouillée avant la saisie d'une adresse ──
+   Elle RESTE montée (l'instrument garde sa place au premier écran) mais
+   grisée et inerte : pointeur coupé sur toute la timeline, champ de période
+   en cursor: not-allowed, commande de lecture désactivée par son attribut
+   `disabled`. Cohérent avec les cartes météo (.flood-card--locked). */
+.flood-timeline.is-locked {
+  filter: grayscale(0.9);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.flood-timeline.is-locked .flood-date-field {
+  cursor: not-allowed;
+}
+
+/* ── Commande lecture/pause de la journée (reprise de l'étape 2) ──
+   Même rouge que l'aiguille et la capsule (#f5455c), donc la commande, le
+   défilement et l'indicateur se lisent comme un seul instrument. Ronde et
+   compacte (38 px) pour ne pas concurrencer le champ de période à côté. */
+.flood-play {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #f5455c;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(245, 69, 92, 0.22), 0 3px 10px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s, background 0.18s;
+}
+.flood-play:hover:not(:disabled) {
+  transform: scale(1.06);
+  background: #ff5f73;
+}
+.flood-play:disabled {
+  cursor: not-allowed;
+  background: color-mix(in srgb, #f5455c 45%, transparent);
+  box-shadow: none;
+}
+/* En lecture : la commande s'éclaircit pour se distinguer de l'état « pause »
+   — le même contraste inversé que le bandeau de l'étape 2. */
+.flood-play.playing {
+  background: #ffb4ab;
+  color: #690005;
+  box-shadow: 0 0 0 3px rgba(255, 180, 171, 0.25), 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+.flood-play md-icon {
+  --md-icon-size: 21px;
+}
+
 .flood-cards-row {
   flex: 1; /* moitié inférieure */
+  position: relative;
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 8px;
   min-width: 0;
   min-height: 92px; /* équilibre 50/50 avec la timeline */
+}
+
+/* ── Cartes grisées avant la saisie d'une adresse (locked) ──
+   Les 4 cartes restent visibles mais inactives ; un indice flottant
+   l'état est porté par les cartes éteintes elles-mêmes — plus de chip
+   d'explication posée sur la console (elle reste en infobulle). */
+.flood-card--locked {
+  filter: grayscale(0.9);
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.flood-card--locked:hover {
+  border-color: var(--md-sys-color-outline-variant);
 }
 
 /* ── Panneau latéral (collé au contenu) : toggles FLOOD EMPILÉS — sans fond ──
@@ -4338,6 +4482,7 @@
 .flood-switch-label.on {
   color: var(--md-sys-color-primary);
 }
+
 /* Rail fixe : le md-switch pivoté à 90° garde son boîte de layout, le rail
    offre l'espace vertical pour que le coulisseau glisse de bas en haut. */
 .flood-switch-rail {
@@ -4350,10 +4495,14 @@
 }
 .flood-switch-rail md-switch {
   transform: rotate(90deg);
-  --md-switch-selected-track-color: var(--md-sys-color-primary);
-  --md-switch-selected-handle-color: var(--md-sys-color-on-primary);
-  --md-switch-selected-track-outline-color: var(--md-sys-color-primary);
-  --md-switch-selected-icon-color: var(--md-sys-color-on-primary);
+  /* Couleurs neutres (pas de dégradé violet) : on/off restent gris, la
+     sélection est indiquée par la teinte du libellé. */
+  --md-switch-unselected-track-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 85%, transparent);
+  --md-switch-unselected-handle-color: var(--md-sys-color-outline);
+  --md-switch-selected-track-color: var(--md-sys-color-outline);
+  --md-switch-selected-handle-color: var(--md-sys-color-on-surface);
+  --md-switch-selected-track-outline-color: var(--md-sys-color-outline);
+  --md-switch-selected-icon-color: var(--md-sys-color-on-surface);
 }
 
 /* ═══ Mobile (≤ 900 px) : enveloppe en colonne (panneau puis toggles) ═══ */
@@ -4437,6 +4586,113 @@
   cursor: pointer;
 }
 
+/* ── Indicateur d'alerte (panneau Alertes → carte) ──
+   Pastille colorée par niveau de vigilance, pulsation douce + étiquette du
+   tronçon flottant au-dessus — même langue que le pin de l'adresse mais en
+   couleur d'alerte. */
+.fr-alert-marker {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--alert-c, #2fbf71);
+  border: 3px solid color-mix(in srgb, var(--md-sys-color-surface) 85%, transparent);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--alert-c, #2fbf71) 35%, transparent),
+    0 2px 12px rgba(0, 0, 0, 0.45);
+  animation: fr-alert-pulse 1.6s ease-in-out infinite;
+  cursor: pointer;
+}
+.fr-alert-marker::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--alert-c, #2fbf71) 70%, transparent);
+  animation: fr-alert-ripple 1.6s ease-out infinite;
+}
+@keyframes fr-alert-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--alert-c, #2fbf71) 35%, transparent),
+      0 2px 12px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    transform: scale(1.25);
+    box-shadow:
+      0 0 0 10px color-mix(in srgb, var(--alert-c, #2fbf71) 18%, transparent),
+      0 2px 16px rgba(0, 0, 0, 0.5);
+  }
+}
+@keyframes fr-alert-ripple {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+.fr-alert-tag {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid color-mix(in srgb, var(--alert-c, #2fbf71) 60%, var(--md-sys-color-outline-variant));
+  color: var(--md-sys-color-on-surface);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Indicateurs « cloche » de TOUTES les alertes affichées (panneau droit) ──
+   Une pastille cloche colorée par niveau est posée sur chaque tronçon listé,
+   avec une pulsation douce + un halo de la couleur d'alerte. */
+.fr-alert-bell {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--alert-c, #2fbf71) 26%, var(--md-sys-color-surface-container-high));
+  border: 2px solid var(--alert-c, #2fbf71);
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--alert-c, #2fbf71) 28%, transparent),
+    0 2px 10px rgba(0, 0, 0, 0.45);
+  animation: fr-alert-bell-pulse 2s ease-in-out infinite;
+  cursor: pointer;
+  transform: translate(-50%, -100%);
+}
+.fr-alert-bell-ico {
+  width: 13px;
+  height: 13px;
+  fill: #fff;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+@keyframes fr-alert-bell-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 5px color-mix(in srgb, var(--alert-c, #2fbf71) 28%, transparent),
+      0 2px 10px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 0 9px color-mix(in srgb, var(--alert-c, #2fbf71) 14%, transparent),
+      0 2px 14px rgba(0, 0, 0, 0.5);
+  }
+}
+
 /* ═════════════════════════════════════════════════════════════════════
    PANNEAUX LATÉRAUX GAUCHES (écran France — style dashboard flood)
    Colonne flottante à gauche de l'écran : trois panneaux indépendants
@@ -4448,6 +4704,10 @@
   position: absolute;
   top: 92px; /* sous la topbar (hamburger + recherche) */
   left: 12px;
+  /* Colonne de l'étape 1 (carte/crues) : masquée dès l'étape 2, où le panneau
+     d'évaluation des risques prend ce bord (voir .zone-app.risk-open plus bas).
+     Aucune transformation ici — pas de will-change : la colonne n'est jamais
+     déplacée, elle est retirée. */
   /* Le bord bas VISIBLE de la console météo (rangée de cartes / toggles)
      est remonté de 12 px au-dessus de son box (padding-bas de
      .flood-console-main = 12 px). La colonne s'arrête donc à 14+12 = 26 px
@@ -4469,7 +4729,7 @@
 /* ── Un panneau : carte Material, SCROLL INDÉPENDANT ── */
 .side-panel {
   pointer-events: auto;
-  flex: 1 1 0;
+  flex: 0 1 auto; /* hauteur auto = contenu (pas d'étirement vers le bas) */
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -4483,6 +4743,13 @@
 }
 
 /* ── En-tête de panneau (titre + compteur / loupe) ── */
+/* Panneau qui remplit l'espace restant de la colonne (ex. « Aléas présents »
+   sous le panneau auto-hauteur de la commune/région). */
+.side-panel--grow {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .side-panel-head {
   flex: none;
   display: flex;
@@ -4699,6 +4966,26 @@
   flex: none;
 }
 
+/* ── Étape 2 : les colonnes de l'étape 1 cèdent la place aux panneaux de
+   l'analyse des risques (.risk-panel à gauche, .scenario-panel à droite),
+   qui occupent les MÊMES bords mais à largeur fixe (380 px).
+
+   Les deux largeurs ne coïncident pas : à 1918 px la colonne de l'étape 1
+   mesure calc((100 % − 920 px) / 2 − 12 px) = 487 px, le panneau d'analyse
+   380 px. Laisser les deux affichées empile donc deux colonnes de largeurs
+   différentes au même endroit, et la plus large déborde de ~105 px derrière
+   l'autre — on voyait la colonne de l'étape 1 (population, vigilances)
+   affleurer au travers du panneau d'analyse.
+
+   Retrait franc plutôt que glissement : un fondu croisé entre deux largeurs
+   différentes laisserait justement voir ce décalage pendant la transition.
+   Effet de bord utile — les colonnes quittent l'arbre d'accessibilité, donc
+   plus de tabulation dans des panneaux devenus invisibles. ── */
+.zone-app.risk-open .side-panels,
+.zone-app.risk-open .right-panels {
+  display: none;
+}
+
 /* Compteur d'alertes actives dans l'en-tête. */
 .alert-count {
   font-size: 10px;
@@ -4774,6 +5061,283 @@
   color: var(--md-sys-color-on-error);
   background: var(--md-sys-color-error);
 }
+/* ── Ligne de résumé vigilance crues (niveau max à proximité) ── */
+.alert-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 8px 2px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 72%, transparent);
+}
+.alert-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.alert-summary-level {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+/* Bande de répartition nationale par niveau de vigilance. */
+.alert-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 4px 8px 2px;
+  padding: 6px 12px;
+}
+.alert-strip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.alert-strip-item i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* ── État vide / chargement des panneaux latéraux ── */
+.side-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.side-empty md-icon {
+  --md-icon-size: 26px;
+  color: var(--md-sys-color-primary);
+  opacity: 0.85;
+}
+/* ── Graphique en ligne : population des régions ── */
+.region-chart {
+  padding: 6px 6px 2px;
+}
+.region-chart-svg {
+  width: 100%;
+  height: 90px;
+  display: block;
+  overflow: visible;
+}
+.region-chart-line {
+  stroke: var(--md-sys-color-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+}
+.region-chart-dot {
+  fill: var(--md-sys-color-primary);
+  stroke: var(--md-sys-color-on-primary-container);
+  stroke-width: 2;
+}
+.region-chart-labels {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.region-chart-hi {
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+}
+
+/* ── Rangées d'aléas : icône par type de risque + code couleur ── */
+.hazard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border-left: 3px solid var(--hazard-c, var(--md-sys-color-outline-variant));
+  background: color-mix(in srgb, var(--hazard-c, var(--md-sys-color-primary)) 8%, transparent);
+}
+.hazard-row + .hazard-row {
+  margin-top: 6px;
+}
+.hazard-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hazard-c, var(--md-sys-color-primary)) 18%, transparent);
+  color: var(--hazard-c, var(--md-sys-color-primary));
+}
+.hazard-ico md-icon {
+  --md-icon-size: 18px;
+}
+.hazard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.hazard-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  line-height: 1.25;
+}
+.hazard-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hazard-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.hazard-catnat {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+}
+/* Aléa auquel l'adresse diagnostiquée est effectivement exposée (`present`) :
+   bordure accentuée, fond plus dense et liseré interne, pour le distinguer au
+   premier coup d'œil des aléas évalués mais NON détectés (--muted). Sa couche
+   est allumée d'office sur la carte quand une couche existe pour lui. */
+.hazard-row--concerned {
+  border-left-width: 4px;
+  background: color-mix(in srgb, var(--hazard-c, var(--md-sys-color-primary)) 16%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--hazard-c, var(--md-sys-color-primary)) 30%, transparent);
+}
+.hazard-row--concerned .hazard-name {
+  font-weight: 700;
+}
+
+/* Aléa absent du rapport (Géorisques l'a évalué mais pas détecté ici) :
+   rangée grisée, badge neutre « Non détecté ». */
+.hazard-row--muted {
+  border-left-color: #8a8f98;
+  background: color-mix(in srgb, #8a8f98 6%, transparent);
+}
+.hazard-row--muted .hazard-ico {
+  background: color-mix(in srgb, #8a8f98 14%, transparent);
+  color: #8a8f98;
+}
+.hazard-row--muted .hazard-name {
+  color: var(--md-sys-color-on-surface-variant);
+}
+/* Aléa masqué par l'œil (ou le « Tout masquer ») : la rangée se grise et
+   s'estompe nettement pour qu'on voie qu'elle est désactivée. */
+.hazard-row--hidden {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.hazard-badge--na {
+  color: var(--md-sys-color-on-surface-variant);
+  border-color: var(--md-sys-color-outline);
+}
+/* Toggle œil pour masquer / réafficher un aléa. */
+.hazard-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.hazard-toggle md-icon {
+  --md-icon-size: 17px;
+}
+.hazard-toggle:hover {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-primary);
+}
+/* Bouton « Tout masquer / Tout montrer » de l'en-tête du panneau aléas.
+   Largeur fixe : les deux libellés n'ont pas la même longueur — sans
+   min-width, le bouton se redimensionne au clic et fait « sauter »
+   l'en-tête (impression de backspace). */
+.hazard-toggle-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-left: auto;
+  min-width: 96px;
+  padding: 3px 9px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.hazard-toggle-all md-icon {
+  --md-icon-size: 14px;
+  flex-shrink: 0;
+}
+.hazard-toggle-all span {
+  min-width: 72px;
+  text-align: center;
+}
+.hazard-toggle-all:hover {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: var(--md-sys-color-primary);
+}
+
+.side-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 60%, transparent);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.side-hint md-icon {
+  --md-icon-size: 15px;
+  color: var(--md-sys-color-primary);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
 .alert-place {
   display: block;
   margin-top: 3px;
@@ -4782,6 +5346,31 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Bouton « Voir » : recentrer la carte sur le tronçon d'alerte. */
+.alert-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--md-sys-color-primary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.alert-move md-icon {
+  --md-icon-size: 14px;
+}
+.alert-move:hover {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border-color: var(--md-sys-color-primary);
 }
 
 /* ── Responsive : comme les panneaux gauches, sans place utile à droite de
@@ -4793,3 +5382,2278 @@
   }
 }
 /* ═══ Fin panneau droit — alertes ═══ */
+
+/* ═════════════════════════════════════════════════════════════════════
+   ÉVALUATION DES RISQUES — panneau gauche (mode « étape suivante »)
+   Dashboard latéral façon référence (secteur inondé) qui glisse depuis la
+   gauche quand la flèche de la topbar bascule le mode. Rouge alerte
+   #ff3b30 comme accent de l'outil de référence, surfaces sombres M3.
+   NB : ce panneau REMPLACE la colonne gauche de l'étape 1 (commune/aléas),
+   de même largeur de bord mais pas de même largeur (380 px contre 487 px à
+   1918 px) : les deux ne peuvent pas coexister sans se recouvrir, donc la
+   colonne de l'étape 1 est retirée tant que .risk-open est posé.
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* Le panneau est rendu en permanence mais caché hors-écran (gauche) ; on le
+   révèle quand .zone-app.risk-open est posé — même langage de mouvement que
+   la sortie des autres panneaux (Material emphasized, 400 ms). */
+.risk-panel {
+  position: absolute;
+  top: 92px; /* sous la topbar (chips + recherche) */
+  left: 14px;
+  bottom: 14px;
+  width: var(--risk-panel-w);
+  z-index: 9; /* au-dessus de la carte (7/8), sous la topbar (30) */
+  padding: 18px 18px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+  border-radius: 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  transform: translateX(-115%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--md-motion-duration-long) var(--md-motion-easing-emphasized-decelerate),
+    opacity var(--md-motion-duration-standard) ease;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--md-sys-color-outline) 55%, transparent) transparent;
+}
+.risk-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.risk-panel::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--md-sys-color-outline) 55%, transparent);
+  border-radius: 999px;
+}
+.zone-app.risk-open .risk-panel {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Les panneaux flottent AU-DESSUS de la carte sans la décaler : le hero
+   (carte) garde sa pleine largeur (inset:0) et les voiles translucides se
+   superposent en survol du fond, avec leur marge de 14 px. */
+
+/* ── En-tête ── */
+.risk-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+.risk-place {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--md-sys-color-on-surface);
+}
+.risk-sub {
+  font-size: 0.8rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Rangée de métriques (Buildings / Area / Gauge Pairs) ──
+   Cellule « donnée » standard des deux panneaux : numéro en tête (rôle
+   number M3), étiquette overline en dessous. */
+.risk-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.risk-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+.risk-metric-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.risk-metric-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Dommages estimés (modélisés) — grille de widgets recalée sur le
+   scénario actif et l'instant t de la timeline. Chaque cellule : icône +
+   valeur avec fourchette d'incertitude. ── */
+.risk-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.risk-dmg-scenario {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ff3b30;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 59, 48, 0.12);
+  white-space: nowrap;
+}
+.risk-loss-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.risk-loss {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+.risk-loss md-icon {
+  --md-icon-size: 18px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-loss-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-color-on-surface);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.risk-loss-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-loss-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.risk-loss-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+}
+.risk-loss-total-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-loss-total-val {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #ff3b30;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.risk-loss-note {
+  margin-top: 8px;
+  font-size: 0.62rem;
+  line-height: 1.45;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Scénario actif (debug / confiance) ── */
+.scenario-debug {
+  margin-top: 14px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 0.62rem;
+  line-height: 1.5;
+  color: var(--md-sys-color-on-surface-variant);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 70%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+.scenario-debug b {
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ── Titres de section ── */
+/* Titre de section — même voix sur les deux panneaux : petit label rouge
+   espacé (l'équivalent d'un « overline » Material en couleur d'alerte). */
+.risk-title,
+.scenario-title,
+.scenario-grid-count {
+  margin: 0 0 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ff3b30;
+}
+.risk-block {
+  margin-bottom: 18px;
+}
+
+/* ── Aléas détectés (liste Géorisques) ── */
+.risk-aleas {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.risk-alea {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+.risk-alea md-icon {
+  --md-icon-size: 16px;
+  color: var(--md-sys-color-on-surface-variant);
+  flex-shrink: 0;
+}
+.risk-alea--present md-icon {
+  color: #ff9f0a;
+}
+.risk-alea--commune md-icon {
+  color: #f0c33c;
+}
+.risk-alea--absent md-icon {
+  opacity: 0.45;
+}
+.risk-alea-label {
+  flex: 1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.risk-alea--absent .risk-alea-label {
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-alea-badge {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-highest) 70%, transparent);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+}
+.risk-alea--present .risk-alea-badge {
+  background: rgba(255, 159, 10, 0.16);
+  color: #ff9f0a;
+}
+.risk-alea--commune .risk-alea-badge {
+  background: rgba(240, 195, 60, 0.14);
+  color: #d9b13a;
+}
+
+/* ── Historique CatNat ── */
+.risk-catnat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.risk-catnat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+}
+.risk-catnat-date {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 68px;
+}
+.risk-catnat-lib {
+  font-size: 0.72rem;
+  color: var(--md-sys-color-on-surface);
+}
+.risk-catnat-more {
+  font-size: 0.64rem;
+  color: var(--md-sys-color-on-surface-variant);
+  padding-top: 2px;
+}
+
+/* ── Bloc CC22D ── */
+.risk-cc22d {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+}
+.risk-cc22d-code {
+  display: flex;
+  align-items: center;
+  flex: none;
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ff3b30;
+}
+.risk-cc22d-stats {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.risk-cc22d-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.risk-cc22d-val {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+}
+.risk-cc22d-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Fiche bâtiment BDNB ── */
+.risk-fiche {
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+}
+.risk-fiche-loc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+.risk-fiche-loc md-icon {
+  --md-icon-size: 16px;
+  color: #ff3b30;
+  flex-shrink: 0;
+}
+.risk-fiche-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.risk-fiche-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+.risk-fiche-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-fiche-val {
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-color-on-surface);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.risk-fiche-item--na .risk-fiche-val {
+  color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 55%, transparent);
+  font-weight: 600;
+}
+
+/* ── Structural Integrity Building : sélecteurs ── */
+.risk-selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.risk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.risk-field-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-select {
+  width: 100%;
+  height: 40px;
+  padding: 0 32px 0 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bec7d0' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+.risk-select:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+.risk-select option {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ── Floor Plan blueprint (SVG BDNB) ── */
+.risk-plan-wrap {
+  margin-bottom: 18px;
+}
+.risk-plan {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 59, 48, 0.06), transparent 70%),
+    color-mix(in srgb, var(--md-sys-color-surface-container-low) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 50%, transparent);
+  overflow: hidden;
+}
+.risk-plan-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.risk-plan-line {
+  stroke: #ff3b30;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  fill: rgba(255, 59, 48, 0.08);
+  filter: drop-shadow(0 0 6px rgba(255, 59, 48, 0.55));
+}
+.risk-plan-empty {
+  font-size: 0.85rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+/* Bandeau d'alerte en bas du plan. */
+.risk-plan-warn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #ffb4ab;
+  background: linear-gradient(90deg, rgba(255, 59, 48, 0.28), rgba(255, 59, 48, 0.12));
+  border-top: 1px solid rgba(255, 59, 48, 0.4);
+  backdrop-filter: blur(6px);
+}
+.risk-plan-warn md-icon {
+  --md-icon-size: 16px;
+  flex-shrink: 0;
+}
+/* ═══ Fin panneau évaluation des risques ═══ */
+
+/* ============================================================================
+   CONSOLE D'ÉVALUATION DES RISQUES — rangée basse du mode « étape
+   suivante » (référence Fuselab : suivi + règle temporelle)
+   Deux rangées dans un panneau flottant centré sur la carte décalée :
+     · .risk-console-status   : compteurs colorés + cartes météo ;
+     · .risk-console-timeline : play/pause + piste histogramme + repères.
+   Hors mode risque le panneau est hors-écran (bas) ; .risk-open le monte.
+   Rouge alerte #ff3b30 comme accent de l'outil de référence.
+============================================================================ */
+.risk-console {
+  position: absolute;
+  bottom: 14px;
+  /* La bande doit tenir ENTRE les deux panneaux de l'étape 2, qui sont à
+     largeur FIXE : .risk-panel à gauche (14 px + 380 px) et .scenario-panel à
+     droite (380 px + 14 px). L'espace libre est donc
+        100 % − 2 × 380 px − 2 × 14 px
+     et on garde 24 px de gouttière de chaque côté (mention de 120 px au lieu
+     de 2 × 24 px : la formule d'origine, conservée telle quelle).
+     Une largeur fixe de 880 px centrée sur la fenêtre ne convient PAS : sous
+     1920 px elle déborderait sous les deux panneaux (à 1440 px, 114 px de
+     recouvrement de chaque côté) — c'est le recouvrement constaté. */
+  left: calc(50% + (var(--risk-panel-w) - var(--scenario-panel-w)) / 2);
+  transform: translateX(-50%) translateY(150%);
+  z-index: 9; /* au-dessus de la carte (7/8), sous la topbar (30) */
+  width: min(880px, calc(100% - var(--risk-panel-w) - var(--scenario-panel-w) - 120px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--md-motion-duration-long) var(--md-motion-easing-emphasized-decelerate),
+    opacity var(--md-motion-duration-standard) ease;
+}
+.zone-app.risk-open .risk-console {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+
+
+/* ── Rangée 1 : bande de suivi (compteurs + météo) ── */
+.risk-console-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.risk-console-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.risk-console-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  min-width: 0;
+  /* Chaque compteur flotte indépendamment : sa propre pilule verre. */
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 85%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+.risk-console-stat-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--risk-c, #f0c33c) 16%, transparent);
+  color: var(--risk-c, #f0c33c);
+}
+.risk-console-stat-ico md-icon {
+  --md-icon-size: 17px;
+}
+.risk-console-stat-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.risk-console-stat-val {
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--risk-c, #f0c33c);
+  font-variant-numeric: tabular-nums;
+}
+.risk-console-stat-label {
+  font-size: 9px;
+  font-style: italic;
+  line-height: 1.15;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Ligne de bande du compteur d'eau : la MÊME couleur que le volume peint sur
+   la carte (les deux sortent de `FLOOD_BANDS`), donc le compteur nomme ce que
+   la carte montre — pas de légende séparée à faire correspondre à l'œil. */
+.risk-console-stat-band {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  line-height: 1.15;
+  color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 88%, transparent);
+  white-space: nowrap;
+}
+.risk-console-stat-band i {
+  display: block;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--risk-c, #f0c33c);
+}
+
+.risk-console-divider {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1px;
+  height: 26px;
+  background: color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+}
+
+.risk-console-wx {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.risk-console-wx-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 6px 11px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 85%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+.risk-console-wx-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 14%, transparent);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-console-wx-ico md-icon {
+  --md-icon-size: 15px;
+}
+.risk-console-wx-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.risk-console-wx-line {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.risk-console-wx-sub {
+  font-size: 8.5px;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Rangée 2 : timeline (play + règle) ── */
+.risk-console-timeline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  min-width: 0;
+}
+.risk-console-play {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 0;
+  background: #ff3b30;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.22), 0 3px 10px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s, background 0.18s;
+}
+.risk-console-play:hover {
+  transform: scale(1.06);
+  background: #ff5147;
+}
+.risk-console-play.playing {
+  background: #ffb4ab;
+  color: #690005;
+}
+.risk-console-play md-icon {
+  --md-icon-size: 21px;
+}
+
+/* Piste : barres d'intensité (histogramme mm/h) */
+.risk-console-scale {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  height: 58px;
+  cursor: ew-resize;
+  touch-action: none;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.risk-console-scale:focus-visible {
+  border-radius: 12px;
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+.risk-console-bars {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  top: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+.risk-console-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, #ff3b30 22%, transparent);
+  transition: background 0.2s;
+}
+.risk-console-bar.lit {
+  background: linear-gradient(180deg, #ff5f55, rgba(255, 59, 48, 0.35));
+  box-shadow: 0 0 6px rgba(255, 59, 48, 0.25);
+}
+
+.risk-console-progress {
+  position: absolute;
+  left: 0;
+  bottom: 24px;
+  height: 3px;
+  border-radius: 2px;
+  background: #ff3b30;
+  box-shadow: 0 0 8px rgba(255, 59, 48, 0.6);
+  pointer-events: none;
+}
+.risk-console-needle {
+  position: absolute;
+  top: 2px;
+  bottom: 22px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: #ffb4ab;
+  box-shadow: 0 0 6px rgba(255, 59, 48, 0.8);
+  pointer-events: none;
+}
+.risk-console-capsule {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #ff3b30;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 2;
+}
+.risk-console-capsule b {
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.risk-console-capsule i {
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.9;
+  line-height: 1.1;
+}
+.risk-console-marks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.85;
+}
+.risk-console-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.risk-console-mark-time {
+  font-weight: 700;
+}
+.risk-console-mark-mm {
+  opacity: 0.8;
+}
+
+/* ── Responsive : écrans étroits. La colonne scénarios se resserre pour
+   garder de la place à la carte et à la bande basse, puis tout ce qui ne
+   tient plus est retiré. ── */
+@media (max-width: 1100px) {
+  .zone-app {
+    --scenario-panel-w: 330px;
+  }
+  .risk-console {
+    width: min(860px, calc(100% - var(--risk-panel-w) - var(--scenario-panel-w) - 120px));
+  }
+}
+/* Sur téléphone, trois colonnes côte à côte n'ont plus de sens : le panneau
+   des scénarios et la bande basse sont retirés (le panneau d'évaluation,
+   lui, reste — c'est le contenu de l'étape). ── */
+@media (max-width: 900px) {
+  .risk-console,
+  .scenario-panel {
+    display: none;
+  }
+}
+/* ═══ Fin console d'évaluation des risques ═══ */
+
+/* ============================================================================
+   PANNEAU DES SCÉNARIOS — colonne droite du mode « étape suivante »
+   (référence Fuselab : FLOOD WARNING + SELECT SCENARIO + classement des
+   scénarios probables + grille « 16 possible scenarios »)
+   Rendu en permanence mais hors-écran (droite) ; .risk-open le révèle —
+   même langage de mouvement que le panneau gauche. Les panneaux flottent
+   au-dessus de la carte (qui reste pleine largeur) et la console basse
+   reste centrée entre les deux colonnes.
+   Rouge alerte #ff3b30 comme accent de l'outil de référence.
+============================================================================ */
+.scenario-panel {
+  position: absolute;
+  top: 92px; /* sous la topbar (chips + recherche) */
+  right: 14px;
+  bottom: 14px;
+  width: var(--scenario-panel-w);
+  z-index: 9; /* au-dessus de la carte (7/8), sous la topbar (30) */
+  padding: 18px 18px 28px; /* même gabarit intérieur que le panneau risque */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+  border-radius: 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  transform: translateX(115%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--md-motion-duration-long) var(--md-motion-easing-emphasized-decelerate),
+    opacity var(--md-motion-duration-standard) ease;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--md-sys-color-outline) 55%, transparent) transparent;
+}
+.scenario-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.scenario-panel::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--md-sys-color-outline) 55%, transparent);
+  border-radius: 999px;
+}
+.zone-app.risk-open .scenario-panel {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Bandeau FLOOD WARNING ── */
+.scenario-warn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(120deg, #d31f16, #ff5147 62%, color-mix(in srgb, #ff3b30 80%, #000));
+  box-shadow: 0 6px 20px rgba(255, 59, 48, 0.3);
+}
+.scenario-warn-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.scenario-warn-ico md-icon {
+  --md-icon-size: 17px;
+}
+.scenario-warn-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.scenario-warn-txt b {
+  font-size: 12.5px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.scenario-warn-txt span {
+  font-size: 10px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Localisation attendue ── */
+.scenario-expected {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 18px;
+}
+.scenario-expected-k {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.scenario-expected-v {
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-color-on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Bloc SELECT SCENARIO ── */
+.scenario-block {
+  margin-bottom: 18px;
+}
+.scenario-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 23px; /* le titre (12 px) et le sélecteur restent alignés */
+  margin-bottom: 6px;
+}
+.scenario-peak {
+  font-size: 0.72rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-title {
+  margin: 0; /* dans la rangée .scenario-block-head : pas de marge propre */
+}
+.scenario-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.scenario-pick select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 6px 26px 6px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 80%, transparent);
+  color: var(--md-sys-color-on-surface);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  cursor: pointer;
+}
+.scenario-pick md-icon {
+  position: absolute;
+  right: 5px;
+  pointer-events: none;
+  --md-icon-size: 16px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Classement des scénarios probables ── */
+.scenario-ranks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.scenario-rank {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 75%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s,
+    opacity 0.15s;
+}
+.scenario-rank:hover {
+  border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 80%, transparent);
+}
+.scenario-rank.active {
+  border-color: rgba(255, 59, 48, 0.55);
+  background: color-mix(in srgb, #ff3b30 7%, var(--md-sys-color-surface-container));
+  box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.22), 0 4px 14px rgba(255, 59, 48, 0.16);
+}
+.scenario-rank:not(.active) {
+  opacity: 0.72;
+}
+.scenario-rank:not(.active):hover {
+  opacity: 1;
+}
+.scenario-rank:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+.scenario-rank-pct {
+  flex-shrink: 0;
+  min-width: 48px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffb23e;
+  font-variant-numeric: tabular-nums;
+}
+.scenario-rank-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.scenario-rank-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+  overflow: hidden;
+}
+.scenario-rank-track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff8a3c, #ffc46b);
+  box-shadow: 0 0 8px rgba(255, 178, 62, 0.45);
+}
+.scenario-rank-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.scenario-rank-risk {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scenario-rank-vals {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-rank-vals b {
+  color: #ffb23e;
+  font-weight: 700;
+}
+.scenario-rank-vals i {
+  font-style: normal;
+  opacity: 0.6;
+}
+.scenario-rank-most {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ff3b30 16%, transparent);
+  color: #ff8f87;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.scenario-rank-most md-icon {
+  --md-icon-size: 11px;
+}
+
+/* ── Grille « 16 possible scenarios » + bouton Simulate ── */
+.scenario-grid-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.scenario-grid-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  text-transform: uppercase;
+  color: #ff3b30;
+}
+.scenario-grid-count small {
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.scenario-sim {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 59, 48, 0.5);
+  background: color-mix(in srgb, #ff3b30 12%, transparent);
+  color: #ff6b5e;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.scenario-sim:hover {
+  background: color-mix(in srgb, #ff3b30 20%, transparent);
+  color: #ff8a80;
+}
+.scenario-sim:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.scenario-sim md-icon {
+  --md-icon-size: 14px;
+}
+.scenario-sim-spin {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: scenario-spin 0.7s linear infinite;
+}
+@keyframes scenario-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scenario-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* Explicite, et pas cosmétique : la feuille de style du navigateur pose
+     `align-items: flex-start` sur les <button>. Sans cette ligne, les enfants
+     ne s'étirent pas — la vignette se réduit à sa bordure (2 px de large
+     mesurés en direct) et `justify-content: space-between` du corps n'a plus
+     d'espace à répartir. */
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 60%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.scenario-card:hover {
+  transform: translateY(-1px);
+}
+.scenario-card.picked {
+  border-color: color-mix(in srgb, var(--sc, #ff3b30) 75%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sc, #ff3b30) 40%, transparent),
+    0 6px 16px color-mix(in srgb, var(--sc, #ff3b30) 22%, transparent);
+}
+.scenario-card:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+/* Miniature radar : grille + halo teintés (rouge HIGH / bleu LOW). */
+.scenario-card-art {
+  position: relative;
+  overflow: hidden;
+  height: 56px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--sc, #ff3b30) 30%, transparent);
+  background-color: #0b0d10;
+  /* Visuel de repli : aucune photo réelle pour ce secteur → fond abstrait
+     assumé (jamais une image d'inondation générique). */
+  background-image:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--sc, #ff3b30) 42%, transparent), transparent 62%),
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: auto, 13px 13px, 13px 13px;
+  box-shadow: inset 0 0 20px color-mix(in srgb, var(--sc, #ff3b30) 20%, transparent);
+}
+
+/* ── Support RÉEL : la photo terrain du secteur (Panoramax) ──
+   Elle remplace le fond abstrait. Un voile sombre + le ton de la bande la
+   rattachent à l'échelle de gravité (HIGH / LOW) sans la repeindre : la photo
+   reste la photo — une image de terrain, pas une illustration de catastrophe. */
+.scenario-card-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(0.85) contrast(1.04) brightness(0.98);
+}
+.scenario-card.has-photo .scenario-card-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, #05070a 58%, transparent),
+    color-mix(in srgb, var(--sc, #ff3b30) 12%, transparent)
+  );
+}
+
+/* ── Trait d'eau de la bande (ENVELOPPE, pas une cote mesurée) ──
+   Position = hauteur d'eau du scénario / hauteur de bâti BDNB. Le trait ne
+   peut donc jamais prétendre à une altitude absolue dans l'image : c'est une
+   part de hauteur de bâtiment. Tirets jaunes, comme la référence Fuselab. */
+.scenario-card-water {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 0;
+  border-top: 2px dashed #ffd83d;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.75));
+}
+
+/* Pastille « mise sous l'eau » — seuil d'infrastructure du moteur (0,3 m). */
+.scenario-card-flood {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #0b0d10 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sc, #ff3b30) 55%, transparent);
+  color: color-mix(in srgb, var(--sc, #ff3b30) 85%, white);
+  backdrop-filter: blur(6px);
+}
+.scenario-card-flood md-icon {
+  --md-icon-size: 13px;
+}
+
+/* ── Provenance des vignettes (obligation etalab-2.0, et confiance) ── */
+.scenario-photo-credit {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.scenario-photo-credit md-icon {
+  --md-icon-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.8;
+}
+.scenario-photo-credit a {
+  color: inherit;
+  text-decoration: underline;
+}
+.scenario-photo-credit.is-empty {
+  opacity: 0.75;
+}
+.scenario-card-body {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.scenario-card-id {
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-color-on-surface);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-card-note {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.scenario-card-risk {
+  align-self: flex-start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+.scenario-card-risk.high {
+  background: rgba(255, 59, 48, 0.16);
+  color: #ff7a70;
+}
+.scenario-card-risk.low {
+  background: rgba(77, 163, 255, 0.16);
+  color: #7ab8ff;
+}
+/* ═══ Fin panneau des scénarios ═══ */
+
+/* ── Overlay Windy (carte « Wind », api.windy.com) ──
+   En mode météo Windy DEVIENT la carte affichée (elle couvre Mapbox avec son
+   propre fond + les couches météo). On masque toute l'UI Leaflet (contrôles,
+   barres) — #windy passe en pointer-events:auto côté JS pendant ce mode. */
+#windy .leaflet-control-container,
+#windy .leaflet-top,
+#windy .leaflet-bottom,
+#windy .leaflet-bar,
+#windy .leaflet-control {
+  display: none !important;
+}
+#windy .leaflet-pane {
+  pointer-events: none !important;
+}
+
+/* Mode météo : la classe .windy-active est posée sur le conteneur Mapbox par
+   UnifiedMap quand Windy est la carte. On masque la scène Mapbox (canvas) —
+   fin du double rendu (Mapbox + Windy) qui coûtait cher en GPU. Windy couvre
+   toute la surface avec son propre fond. */
+.windy-active .mapboxgl-canvas {
+  display: none !important;
+}
+
+/* Indicateur de position (adresse diagnostiquée) au-dessus de l'overlay Windy :
+   le canvas Mapbox est masqué mais les marqueurs restent des éléments DOM
+   synchronisés avec la caméra. On remonte uniquement les marqueurs (pas le
+   conteneur, qui couvrirait toute la carte et bloquerait les gestes Windy) :
+   le conteneur reste static, donc leurs z-index participent au contexte
+   d'empilement de .mb-demo-map et passent au-dessus de #windy (z:3). */
+.windy-active .mapboxgl-marker {
+  z-index: 4;
+}
+
+/* État « clé Windy absente » : badge discret en haut-droite de la carte pour
+   expliquer pourquoi les cartes météo n'affichent rien (data-windy-state
+   posé sur le conteneur Mapbox par UnifiedMap). */
+.zone-map-wrap[data-windy-state='no-key']::after {
+  content: 'Clé Windy manquante — couches météo désactivées';
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #ff9f0a 55%, transparent);
+  background: color-mix(in srgb, #ff9f0a 14%, rgba(0, 0, 0, 0.55));
+  color: #ffd9a8;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* ============================================================================
+   RAPPORT DE RISQUE — vue centrale de l'étape 3
+   Panneau large centré révélé à l'étape 3 (.step-3). Il reprend le langage
+   visuel du panneau risque (surfaces sombres M3, rouge alerte #ff3b30). À
+   l'étape 3, les panneaux gauche/droit et la console basse de l'étape 2
+   s'effacent au profit du rapport.
+   ========================================================================== */
+.report-panel {
+  position: absolute;
+  top: 92px; /* sous la topbar */
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 9;
+  padding: 24px 34px 40px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+  border-radius: 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  /* Page pleine : glisse vers le haut à l'étape 3 (comme les panneaux des
+     étapes précédentes — mouvement Material emphasized). */
+  transform: translateY(24px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--md-motion-duration-long) var(--md-motion-easing-emphasized-decelerate),
+    opacity var(--md-motion-duration-standard) ease;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--md-sys-color-outline) 55%, transparent) transparent;
+}
+.report-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.report-panel::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--md-sys-color-outline) 55%, transparent);
+  border-radius: 999px;
+}
+/* À l'étape 3 : on révèle le rapport (page pleine) et on éteint l'étape 2. */
+.zone-app.step-3 .report-panel {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.zone-app.step-3 .risk-panel,
+.zone-app.step-3 .scenario-panel,
+.zone-app.step-3 .risk-console {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── En-tête ── */
+.report-head {
+  margin-bottom: 14px;
+}
+.report-title {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-color-on-surface);
+}
+.report-sub {
+  font-size: 0.78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.report-empty,
+.report-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.9rem;
+}
+.report-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--md-sys-color-on-surface-variant) 25%, transparent);
+  border-top-color: #ff3b30;
+  animation: report-spin 0.8s linear infinite;
+}
+@keyframes report-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.report-error {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 12px;
+  color: #ffb4ab;
+  background: rgba(255, 59, 48, 0.12);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.report-error md-icon {
+  --md-icon-size: 18px;
+  flex-shrink: 0;
+}
+.report-fallback-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--md-sys-color-on-surface-variant);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 85%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--md-sys-color-outline-variant) 50%, transparent);
+}
+.report-fallback-note md-icon {
+  --md-icon-size: 16px;
+  flex-shrink: 0;
+  color: #f0c33c;
+}
+.report-exec {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border-left: 3px solid #ff3b30;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 90%, transparent);
+}
+.report-exec-label {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #ff3b30;
+  margin-bottom: 6px;
+}
+.report-exec-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ── Contenu markdown → html ── */
+.report-content {
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.report-content h1 {
+  display: none;
+}
+.report-content h2 {
+  margin: 22px 0 10px;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+.report-content h3 {
+  margin: 16px 0 6px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+}
+.report-content p {
+  margin: 6px 0;
+}
+.report-content blockquote {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border-left: 3px solid #ff3b30;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 85%, transparent);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.report-content strong {
+  color: var(--md-sys-color-on-surface);
+  font-weight: 700;
+}
+.report-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.report-content th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--md-sys-color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.68rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+}
+.report-content td {
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 35%, transparent);
+}
+.report-content em {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ==========================================================================
+   RAPPORT — mise en page « façon Géorisques » (document formel structuré).
+   En-tête d'identité, synthèse, tableau de synthèse des risques avec badges
+   colorés, détail par catégorie, recommandations, confiance, annexe.
+   ========================================================================== */
+.gq-h2 {
+  margin: 26px 0 12px;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+}
+
+/* ── Bandeau d'identité ── */
+.gq-ident {
+  margin-bottom: 6px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 50%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 80%, transparent);
+}
+.gq-ident-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(120deg, #ff3b30 0%, #c11b0e 100%);
+  color: #fff;
+}
+.gq-ident-logo {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.gq-ident-mention {
+  font-size: 0.78rem;
+  opacity: 0.92;
+}
+.gq-ident-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
+}
+.gq-ident-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.gq-ident-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.gq-ident-val {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
+}
+
+/* ── Synthèse ── */
+.gq-synthese {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 85%, transparent);
+}
+.gq-synthese-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 12px 0 14px;
+}
+.gq-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container) 80%, transparent);
+}
+.gq-stat-val {
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #ff3b30;
+}
+.gq-stat-label {
+  font-size: 0.72rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.gq-stat-sub {
+  font-size: 0.66rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.gq-synthese-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ── Badges de niveau de risque ── */
+.gq-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.gq-badge--high {
+  color: #ffb4ab;
+  background: rgba(255, 59, 48, 0.18);
+}
+.gq-badge--moderate {
+  color: #ffd8a0;
+  background: rgba(240, 195, 60, 0.16);
+}
+.gq-badge--low {
+  color: #a5e0bd;
+  background: rgba(46, 125, 91, 0.2);
+}
+.gq-badge--unknown {
+  color: var(--md-sys-color-on-surface-variant);
+  background: color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+}
+
+/* ── Tableau de synthèse des risques ── */
+.gq-risk-table,
+.gq-annexe-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.gq-risk-table th,
+.gq-annexe-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.66rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+}
+.gq-risk-table td,
+.gq-annexe-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 35%, transparent);
+  color: var(--md-sys-color-on-surface);
+}
+.gq-risk-table td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gq-risk-table md-icon,
+.gq-catcard-head md-icon {
+  --md-icon-size: 18px;
+  flex-shrink: 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.gq-cell-est {
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+}
+
+/* ── Détail par catégorie ── */
+.gq-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gq-catcard {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 80%, transparent);
+}
+.gq-catcard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gq-catcard-label {
+  flex: 1;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+}
+.gq-catcard-text {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ── Recommandations de mitigation ── */
+.gq-mitigations-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gq-mitigations-list li {
+  margin-left: 0;
+}
+.gq-mitigation-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gq-mitigation-cat {
+  font-weight: 700;
+  font-size: 0.82rem;
+  text-transform: capitalize;
+  color: #ff3b30;
+}
+.gq-mitigation-trigger {
+  font-size: 0.7rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.gq-mitigation-text {
+  margin: 3px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--md-sys-color-on-surface);
+}
+.gq-mitigations-empty {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.86rem;
+}
+
+/* ── Confiance & limites ── */
+.gq-confidence p {
+  font-size: 0.86rem;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.gq-confidence strong {
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ── Mention Géorisques (pied de page) ── */
+.gq-mention {
+  flex: 1 1 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 85%, transparent);
+}
+.gq-mention b {
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ── Pied de page (méta) ── */
+.report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 45%, transparent);
+  font-size: 0.68rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.report-meta b {
+  color: var(--md-sys-color-on-surface);
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   SIMULATION D'INONDATION (étape 2) — curseur de hauteur d'eau (panneau
+   scénarios) + tag « Simulation » (panneau risques). L'emprise inondée sur
+   la carte est une couche Mapbox (pas de CSS). ========================================================================== */
+.scenario-sim {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scenario-sim-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 60%, transparent);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.scenario-sim-reset md-icon {
+  --md-icon-size: 14px;
+}
+.scenario-sim-reset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.scenario-sim-reset:not(:disabled):hover {
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 100%, transparent);
+}
+.sim-depth-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sim-depth-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+  flex: none;
+}
+.sim-depth-slider {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #4c9aff 0%,
+    #1e6fd9 60%,
+    #0c3f8f 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+.sim-depth-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #63b3ff;
+  border: 2px solid #0e151c;
+  box-shadow: 0 1px 6px rgba(30, 111, 217, 0.6);
+}
+.sim-depth-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #63b3ff;
+  border: 2px solid #0e151c;
+}
+.sim-depth-val {
+  flex: none;
+  min-width: 44px;
+  text-align: right;
+  font-size: 0.86rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #63b3ff;
+}
+.sim-depth-note {
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.risk-sim-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #9ecbff;
+  background: rgba(30, 111, 217, 0.22);
+  border: 1px solid rgba(99, 179, 255, 0.4);
+  white-space: nowrap;
+}
+.risk-sim-tag md-icon {
+  --md-icon-size: 13px;
+}
+
+/* ============================================================================
+   HUD DE SIMULATION DE CRUE (sur la carte, étape 2)
+   Bandeau flottant en haut de la bande centrale (même centrage que la console
+   de risque), au-dessus de la carte et du voile de lisibilité, sous les
+   panneaux latéraux. Il affiche le niveau d'eau courant — celui du moteur de
+   dommages —, l'échelle 0 → 3 m et la pastille d'activation de la surface.
+   ============================================================================ */
+.map-flood-hud {
+  position: absolute;
+  top: 96px;
+  left: calc(50% + (var(--risk-panel-w) - var(--scenario-panel-w)) / 2);
+  transform: translateX(-50%);
+  z-index: 8; /* au-dessus de la carte (0/7), sous la topbar (30) */
+  width: min(340px, calc(100% - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+.map-flood-hud.active {
+  border-color: rgba(99, 179, 255, 0.45);
+}
+.mfh-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.mfh-head md-icon {
+  --md-icon-size: 16px;
+  color: #63b3ff;
+}
+.mfh-title {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mfh-pill {
+  margin-left: auto;
+  flex: none;
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 65%, transparent);
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+.mfh-pill:hover {
+  border-color: rgba(99, 179, 255, 0.55);
+  color: #bfe0ff;
+}
+.mfh-pill.on {
+  background: rgba(30, 111, 217, 0.26);
+  border-color: rgba(99, 179, 255, 0.55);
+  color: #bfe0ff;
+}
+.mfh-val {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+.mfh-val b {
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: #9ecbff;
+}
+.mfh-val i {
+  font-style: normal;
+  opacity: 0.5;
+}
+.mfh-imposed {
+  font-style: normal;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #f0c33c;
+  background: rgba(240, 195, 60, 0.16);
+  border: 1px solid rgba(240, 195, 60, 0.42);
+}
+.mfh-scale {
+  position: relative;
+  display: block;
+  height: 12px;
+}
+.mfh-scale-bar {
+  position: absolute;
+  left: 0;
+  right: 26px;
+  top: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(99, 179, 255, 0.2), #1e6fd9);
+}
+.mfh-scale-mark {
+  position: absolute;
+  top: 1px;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: #fff;
+  box-shadow: 0 0 7px rgba(255, 255, 255, 0.85);
+}
+.mfh-scale-cap {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-size: 0.58rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+.mfh-note {
+  font-size: 0.64rem;
+  line-height: 1.45;
+  color: var(--md-sys-color-on-surface-variant);
+  opacity: 0.85;
+}
+@media (max-width: 900px) {
+  .map-flood-hud {
+    top: 88px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    transform: none;
+  }
+}
+
+/* ── Vitesse de lecture de la console risque (1× · 4× · 16×) ── */
+.risk-console-rate {
+  flex: none;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  height: 34px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 70%, transparent);
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+.risk-console-rate:hover {
+  border-color: rgba(255, 59, 48, 0.5);
+  color: #ffb4ab;
+}
+
+/* ── Bande de faits : état vide, provenance, badge de résolution ──
+   La console ne porte plus de niveau de risque ni de gradation calculée. */
+.risk-console-empty {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface-variant);
+  padding: 10px 14px;
+}
+
+.risk-console-provenance {
+  align-items: center;
+}
+
+.risk-console-src {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.risk-console-res {
+  color: var(--md-sys-color-on-surface-variant);
+  opacity: 0.85;
+}

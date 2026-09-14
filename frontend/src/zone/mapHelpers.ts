@@ -4,6 +4,8 @@
 //   dépendance cyclique après la migration vers Mapbox en moteur unique.
 // =============================================================================
 
+import proj4 from 'proj4';
+
 import { WMS_BASE, WFS_BASE } from '../zone/config';
 
 /* ── CRS / Laplace ── */
@@ -32,25 +34,19 @@ function mapCoords(
   return node.map((n) => mapCoords(n, fn));
 }
 
+/* Définition Lambert-93 (EPSG:2154) pour proj4 — reprojecteur exact côté
+   client. L'ancienne approximation maison (série trigonométrique) dérivait
+   de ~10-100 m selon la position : le bâtiment surligné était décalé par
+   rapport à l'empreinte Mapbox Standard (données WGS84 exactes). */
+proj4.defs('EPSG:2154',
+  '+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 '
+  + '+ellps=GRS80 +towgs84=0,0,0 +units=m +no_defs');
+const L93_TO_WGS84 = proj4('EPSG:2154', 'EPSG:4326');
+
 function lambert93ToWgs84(x: number, y: number): [number, number] {
-  // Lambert-93 (RGF93) → WGS84 (approximation standard)
-  const x0 = 700_000;
-  const y0 = 12_655_600;
-  const c = 11754255.426;
-  const n = 0.725607765;
-  const e = 0.08181919106; // GRS80 (premiere excentricite)
-  const dx = x - x0;
-  const dy = y - y0;
-  const r = Math.sqrt(dx * dx + dy * dy);
-  // Theta = angle polaire (petit angle positif = est du meridien origine).
-  const gamma = Math.atan2(dx, -dy);
-  const lon = (gamma / n) * (180 / Math.PI) + 3; // 3° E (meridien de reference)
-  const lat = 2 * Math.atan(Math.pow(c / r, 1 / n)) - Math.PI / 2;
-  let lat2 = lat;
-  for (let i = 0; i < 5; i++) {
-    lat2 = 2 * Math.atan(Math.pow(c / r, 1 / n) * Math.pow((1 + e * Math.sin(lat2)) / (1 - e * Math.sin(lat2)), e / 2)) - Math.PI / 2;
-  }
-  return [lon, (lat2 * 180) / Math.PI];
+  // Lambert-93 (RGF93) → WGS84 via proj4 (précision centimétrique).
+  const [lon, lat] = L93_TO_WGS84.forward([x, y]) as [number, number];
+  return [lon, lat];
 }
 
 /** Convertit une géométrie BDNB (Lambert-93 → WGS84 si nécessaire). */
@@ -161,28 +157,78 @@ function firstGeometryDescendant(root: Element): Element | null {
   return null;
 }
 
+/** Dimension déclarée d'une géométrie GML (`srsDimension`), héritée si absente.
+ *
+ *  ⚠ Indispensable pour la BD TOPO (IGN) : ses `gml:LineString` sont en
+ *  `srsDimension="3"` et `posList` contient alors des TRIPLETS
+ *  (lat, lon, altitude). Lire par paires produisait des coordonnées absurdes
+ *  (mesuré : un tronçon de 188 909 km). */
+export function readSrsDimension(
+  el: Element,
+  inherited?: number | null
+): number {
+  const raw = el.getAttribute('srsDimension');
+  if (raw) {
+    const n = Number(raw);
+    if (n === 2 || n === 3) return n;
+  }
+  if (inherited === 2 || inherited === 3) return inherited;
+  let node: Element | null = el.parentElement;
+  while (node) {
+    const up = node.getAttribute('srsDimension');
+    if (up === '2' || up === '3') return Number(up);
+    node = node.parentElement;
+  }
+  return 2;
+}
+
 /** Parse une liste de coordonnées GML (`gml:posList`, ou une paire `gml:pos`)
- *  en tenant compte de l'ordre d'axes du CRS. */
-function parseCoordText(text: string, srsName: string | null): Array<[number, number]> {
+ *  en tenant compte de l'ordre d'axes du CRS ET de la dimension déclarée.
+ *
+ *  Le troisième élément (altitude) est conservé quand il est présent : la
+ *  position GeoJSON reste valide pour Mapbox, et le profil en long du trajet
+ *  de l'eau a besoin de l'altitude RÉELLE (jamais interpolée côté client). */
+function parseCoordText(
+  text: string,
+  srsName: string | null,
+  dim = 2
+): Array<[number, number, number?]> {
   const nums = (text || '').trim().split(/\s+/).map(Number).filter((n) => !Number.isNaN(n));
   const swap = isLatLonAxisOrder(srsName);
-  const pts: Array<[number, number]> = [];
-  for (let i = 0; i + 1 < nums.length; i += 2) {
+  const d = dim === 3 ? 3 : 2;
+  const pts: Array<[number, number, number?]> = [];
+  for (let i = 0; i + d - 1 < nums.length; i += d) {
     const a = nums[i];
     const b = nums[i + 1];
-    pts.push(swap ? [b, a] : [a, b]);
+    if (d === 3) {
+      const z = nums[i + 2];
+      pts.push(swap ? [b, a, z] : [a, b, z]);
+    } else {
+      pts.push(swap ? [b, a] : [a, b]);
+    }
   }
   return pts;
 }
 
 /** Coordonnées d'un anneau (`gml:LinearRing`) ou d'une ligne — supporte
  *  `gml:posList`, la variante legacy `gml:coordinates`, et une suite de
- *  `gml:pos`. */
-function ringOrLineCoords(el: Element, inheritedSrs: string | null): Array<[number, number]> | null {
+ *  `gml:pos`. L'ordre d'axes ET la dimension sont héritées de la géométrie
+ *  porteuse (`gml:LineString` / `gml:Surface`) : ni `posList` ni
+ *  `gml:LinearRing` ne les portent eux-mêmes. */
+function ringOrLineCoords(
+  el: Element,
+  inheritedSrs: string | null,
+  inheritedDim: number = 2
+): Array<[number, number, number?]> | null {
   const srs = el.getAttribute('srsName') || inheritedSrs;
+  const dim = readSrsDimension(el, inheritedDim);
   const posList = firstDescendantByLocalName(el, 'posList');
   if (posList) {
-    const pts = parseCoordText(posList.textContent || '', posList.getAttribute('srsName') || srs);
+    const pts = parseCoordText(
+      posList.textContent || '',
+      posList.getAttribute('srsName') || srs,
+      dim
+    );
     return pts.length ? pts : null;
   }
   const coordinates = firstDescendantByLocalName(el, 'coordinates');
@@ -197,14 +243,19 @@ function ringOrLineCoords(el: Element, inheritedSrs: string | null): Array<[numb
   const posEls = descendantsByLocalName(el, 'pos');
   if (posEls.length) {
     const pts = posEls
-      .map((p) => parseCoordText(p.textContent || '', p.getAttribute('srsName') || srs)[0])
-      .filter((p): p is [number, number] => !!p);
+      .map(
+        (p) =>
+          parseCoordText(p.textContent || '', p.getAttribute('srsName') || srs, dim)[0]
+      )
+      .filter((p): p is [number, number, number?] => !!p);
     return pts.length ? pts : null;
   }
   return null;
 }
 
-function closeRing(ring: Array<[number, number]>): Array<[number, number]> {
+type RingPoint = [number, number, number?];
+
+function closeRing(ring: RingPoint[]): RingPoint[] {
   if (ring.length < 2) return ring;
   const [fx, fy] = ring[0];
   const [lx, ly] = ring[ring.length - 1];
@@ -213,20 +264,22 @@ function closeRing(ring: Array<[number, number]>): Array<[number, number]> {
 
 function polygonRings(
   polygonEl: Element,
-  inheritedSrs: string | null
-): { exterior: Array<[number, number]>; interiors: Array<[number, number]>[] } | null {
+  inheritedSrs: string | null,
+  inheritedDim: number = 2
+): { exterior: RingPoint[]; interiors: RingPoint[][] } | null {
   const srs = polygonEl.getAttribute('srsName') || inheritedSrs;
+  const dim = readSrsDimension(polygonEl, inheritedDim);
   const exteriorWrap = firstDescendantByLocalName(polygonEl, 'exterior');
   const ext = exteriorWrap
     ? firstDescendantByLocalName(exteriorWrap, 'LinearRing')
     : firstDescendantByLocalName(polygonEl, 'LinearRing');
   if (!ext) return null;
-  const exterior = ringOrLineCoords(ext, srs);
+  const exterior = ringOrLineCoords(ext, srs, dim);
   if (!exterior || exterior.length < 3) return null;
-  const interiors: Array<[number, number]>[] = [];
+  const interiors: RingPoint[][] = [];
   for (const interiorWrap of descendantsByLocalName(polygonEl, 'interior')) {
     const ring = firstDescendantByLocalName(interiorWrap, 'LinearRing');
-    const coords = ring ? ringOrLineCoords(ring, srs) : null;
+    const coords = ring ? ringOrLineCoords(ring, srs, dim) : null;
     if (coords && coords.length >= 3) interiors.push(closeRing(coords));
   }
   return { exterior: closeRing(exterior), interiors };
@@ -237,27 +290,36 @@ function polygonRings(
  *  (2-3 attributs utiles suffisent, on ne cherche pas l'exhaustivité GML). */
 function gmlGeometryToGeoJson(geomEl: Element, inheritedSrs: string | null): GeoJSON.Geometry | null {
   const srs = geomEl.getAttribute('srsName') || inheritedSrs;
+  // La dimension est portée par CET élément (gml:LineString srsDimension="3"),
+  // et doit être transmise aux anneaux imbriqués qui ne la portent pas.
+  const dim = readSrsDimension(geomEl, null);
   switch (geomEl.localName) {
     case 'Point': {
       const pos = firstDescendantByLocalName(geomEl, 'pos');
-      const pt = pos ? parseCoordText(pos.textContent || '', pos.getAttribute('srsName') || srs)[0] : null;
-      return pt ? { type: 'Point', coordinates: pt } : null;
+      const pt = pos
+        ? parseCoordText(pos.textContent || '', pos.getAttribute('srsName') || srs, dim)[0]
+        : null;
+      return pt ? ({ type: 'Point', coordinates: pt } as unknown as GeoJSON.Geometry) : null;
     }
     case 'LineString':
     case 'Curve': {
-      const coords = ringOrLineCoords(geomEl, srs);
-      return coords && coords.length >= 2 ? { type: 'LineString', coordinates: coords } : null;
+      const coords = ringOrLineCoords(geomEl, srs, dim);
+      return coords && coords.length >= 2
+        ? ({ type: 'LineString', coordinates: coords } as unknown as GeoJSON.Geometry)
+        : null;
     }
     case 'Polygon':
     case 'Surface': {
-      const rings = polygonRings(geomEl, srs);
-      return rings ? { type: 'Polygon', coordinates: [rings.exterior, ...rings.interiors] } : null;
+      const rings = polygonRings(geomEl, srs, dim);
+      return rings
+        ? ({ type: 'Polygon', coordinates: [rings.exterior, ...rings.interiors] } as unknown as GeoJSON.Geometry)
+        : null;
     }
     case 'MultiSurface':
     case 'MultiPolygon': {
       const coordinates: number[][][][] = [];
       for (const p of descendantsByLocalName(geomEl, 'Polygon')) {
-        const rings = polygonRings(p, srs);
+        const rings = polygonRings(p, srs, dim);
         if (rings) coordinates.push([rings.exterior, ...rings.interiors] as unknown as number[][][]);
       }
       return coordinates.length ? { type: 'MultiPolygon', coordinates } : null;
@@ -266,7 +328,7 @@ function gmlGeometryToGeoJson(geomEl: Element, inheritedSrs: string | null): Geo
     case 'MultiLineString': {
       const coordinates: number[][][] = [];
       for (const l of descendantsByLocalName(geomEl, 'LineString')) {
-        const coords = ringOrLineCoords(l, srs);
+        const coords = ringOrLineCoords(l, srs, dim);
         if (coords && coords.length >= 2) coordinates.push(coords as unknown as number[][]);
       }
       return coordinates.length ? { type: 'MultiLineString', coordinates } : null;
@@ -275,7 +337,9 @@ function gmlGeometryToGeoJson(geomEl: Element, inheritedSrs: string | null): Geo
       const coordinates: number[][] = [];
       for (const p of descendantsByLocalName(geomEl, 'Point')) {
         const pos = firstDescendantByLocalName(p, 'pos');
-        const pt = pos ? parseCoordText(pos.textContent || '', pos.getAttribute('srsName') || srs)[0] : null;
+        const pt = pos
+          ? parseCoordText(pos.textContent || '', pos.getAttribute('srsName') || srs, dim)[0]
+          : null;
         if (pt) coordinates.push(pt as unknown as number[]);
       }
       return coordinates.length ? { type: 'MultiPoint', coordinates } : null;

@@ -27,6 +27,9 @@ const Portfolio = lazy(() =>
 const WatchlistPage = lazy(() =>
   import('./routes/WatchlistPage').then((m) => ({ default: m.WatchlistPage }))
 );
+const ReportPage = lazy(() =>
+  import('./routes/ReportPage').then((m) => ({ default: m.ReportPage }))
+);
 const Dashboard = lazy(() =>
   import('./routes/Dashboard').then((m) => ({ default: m.Dashboard }))
 );
@@ -104,6 +107,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Zone />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/report"
+        element={
+          <RequireAuth>
+            <ReportPage />
           </RequireAuth>
         }
       />

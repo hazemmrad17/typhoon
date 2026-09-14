@@ -151,6 +151,17 @@ export const WFS_LAYER_MAP: Record<string, string[]> = {
     'ms:PPRM_PERIMETRE_MINIER',
   ],
   canalisations: ['ms:C_GAZ', 'ms:C_HYDROCARBURES', 'ms:C_PRODUITS_CHIM'],
+  // Zonage inondation (simulation de crue) : les couches WFS de risque
+  // inondation réellement exposées par le service sont les périmètres
+  // réglementaires (PPR inondation, submersion marine, risque industriel
+  // inondation). Aucune de ces couches n'existait sous la clé `inondation` :
+  // la simulation retombait toujours sur un repli sans géométrie réelle.
+  // Noms vérifiés sur le GetCapabilities (cf. note ci-dessus).
+  inondation: [
+    'ms:PPRN_PERIMETRE_INOND',
+    'ms:PPRN_PERIMETRE_SUBMAR',
+    'ms:PPRT_PERIMETRE_RISQIND',
+  ],
   // icpe : pas de couche vecteur fiable avec statut Seveso (ms:ETABLISSEMENTS_POLLUEURS
   // n'expose ni statut ni rayon) — reste en raster WMS (cf. WMS_LAYER_MAP).
 };

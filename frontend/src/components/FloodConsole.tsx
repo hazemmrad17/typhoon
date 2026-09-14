@@ -4,14 +4,36 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
    CONSOLE MÉTÉO / CRUES — rangée basse façon Fuselab
      · .flood-console          : enveloppe invisible (positionnement seul) ;
      · .flood-console-main     : panneau principal (timeline + 4 cartes) ;
-     · .flood-console-side     : les 2 toggles FLOOD (md-switch) à droite.
-   La timeline (moitié haute) est un SCRUBBER fait maison en Material :
-     · à gauche, le champ de période (md-outlined-text-field en lecture
-       seule + bascule calendrier) qui ouvre un calendrier flottant ;
-     · à droite, une piste pleine largeur avec blocs colorés, repères
-       horaires (00:00 → 24:00), une aiguille rouge et une capsule de temps
-       qui indique l'heure courante — interaction clic/glisser + clavier.
-   Les valeurs météo sont des données de démonstration issues de la maquette.
+     · .flood-console-side     : le toggle FLOOD (md-switch) à droite.
+   La timeline (moitié haute) est un SCRUBBER fait maison en Material :     · à gauche, le champ de période (md-outlined-text-field en lecture
+       seule + bascule calendrier) qui ouvre un calendrier flottant;
+       · au centre, la commande lecture/pause;
+       · à droite, une piste pleine largeur avec graduations, repères horaires
+       (00:00 → 24:00), une aiguille et une capsule de temps qui indique
+       l'heure courante — interaction clic/glisser, clavier et lecture auto.
+   Elle n'est montée QU'AVEC une carte métrique active : c'est elle qui date la
+   couche que la carte affiche sur la planète. Sans carte allumée il n'y a rien
+   à dater, donc pas d'échelle. Si l'adresse est retirée alors qu'une carte
+   restait active, elle reste montée mais INERTE (.is-locked : grisée, pointeur
+   coupé, lecture désactivée) — sans texte d'explication à l'écran, l'infobulle
+   des commandes désactivées suffit.
+
+   Lecture : la commande avance l'heure par pas de 30 min et reboucle sur la
+   journée. Ce n'est pas une animation décorative — chaque pas appelle
+   onTimeChange(), donc le timestamp de l'overlay météo réel (Windy) de la
+   carte suit le défilement. La barre « lit » les graduations à hauteur de
+   l'aiguille dans le même mouvement.
+
+   Ce qui n'est PAS repris du bandeau de l'étape 2 : l'histogramme de pluie
+   (mm/h) et les valeurs en mm de la capsule comme des repères. Le projet n'a
+   aucune source pluviométrique horaire — Open-Meteo a été retiré (constitution
+   §2) — et les barres d'origine venaient d'une enveloppe de scénario
+   synthétique, pas d'une mesure. Inventer ces barres reproduirait exactement
+   le décalage avec le réel que ce composant doit éviter : tant qu'il n'y a pas
+   de série horaire réelle, la piste reste une règle horaire, sans mm.
+
+   Les valeurs des 4 cartes métriques restent, elles, des constantes de
+   maquette (durcies) — signalé séparément, hors de ce composant.
 ══════════════════════════════════════════════════════════════════════════ */
 
 const METRICS = [
@@ -57,27 +79,103 @@ const TRACK_SEGMENTS = Array.from({ length: 24 }, (_, i) => i);
 export function FloodConsole({
   selectedMetric = 'wind',
   onMetricChange,
+  onTimeChange,
+  locked = false,
+  active = true,
+  floodMapping = false,
+  onFloodMappingChange,
 }: {
   /** Carte métrique active (temp/wind/pressure/rainfall) — pilotée depuis
-   *  Zone.tsx pour relayer « Wind » à la carte (particules de vent). */
+   *  Zone.tsx pour relayer la couche météo à la carte. */
   selectedMetric?: string;
   onMetricChange?: (key: string) => void;
+  /** Index de l'heure de prévision (time-aware) remonté à Zone.tsx :
+   *  offset en HEURES depuis maintenant (jour du calendrier × 24 + heure du
+   *  curseur), pour pointer le timestamp de l'overlay météo (Windy). */
+  onTimeChange?: (hourOffset: number) => void;
+  /** true = aucune adresse diagnostiquée : la timeline (période + lecture +
+   *  curseur) reste affichée mais grisée et inerte, et les 4 cartes sont
+   *  désactivées sous un indice invitant à saisir une adresse. */
+  locked?: boolean;
+  /** false = la console n'est plus à l'écran (étape ≥ 2, où elle est
+   *  escamotée mais restée montée). La lecture s'arrête alors : sans cela la
+   *  commande continuerait d'avancer l'heure 5 fois par seconde dans une
+   *  console invisible, en re-datant l'overlay Windy pendant que
+   *  l'utilisateur lit la bande de faits. */
+  active?: boolean;
+  /** Toggle Flood Mapping (contrôlé) — bascule la couche inondation
+   *  Géorisques (WMS LIMITETRI) sur la carte via visibleLayerKeys. */
+  floodMapping?: boolean;
+  onFloodMappingChange?: (v: boolean) => void;
 }) {
-  const [floodMapping, setFloodMapping] = useState(true);
-  const [floodForecast, setFloodForecast] = useState(false);
+  /* Aide au survol uniquement : plus de chip « Entrez d'abord une adresse »
+     posée sur la console. Elle reste en infobulle des commandes désactivées. */
+  const LOCK_HINT = "Entrez d'abord une adresse pour activer la météo";
 
-  /* Période (date range) — défaut aligné sur la maquette (6 → 10 août). */
-  const [range, setRange] = useState<Range>({ start: new Date(2026, 7, 6), end: new Date(2026, 7, 10) });
+  /* Période (date range) — défaut calé sur la fenêtre de prévision météo
+     (10 jours à partir d'aujourd'hui). */
+  const defaultRange = (): Range => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const end = new Date(start);
+    end.setDate(start.getDate() + 9);
+    return { start, end };
+  };
+  const [range, setRange] = useState<Range>(defaultRange);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [draft, setDraft] = useState<Range | null>(null);
-  const [view, setView] = useState(() => new Date(2026, 7, 1));
+  const [view, setView] = useState(() => new Date());
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const fieldRef = useRef<HTMLElement | null>(null);
 
   /* Heure du jour du curseur (0 → 1440 min). Défaut 3:15 = minute 195. */
   const [timeMin, setTimeMin] = useState(195);
+  /* Lecture automatique de la journée. Démarre en pause : rien ne bouge sans
+     un geste explicite de l'utilisateur. */
+  const [playing, setPlaying] = useState(false);
   const scaleRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
+
+  /* ── La timeline est la commande de temps de l'OVERLAY MÉTÉO ──
+     Elle n'a donc de sens qu'avec une carte active : c'est la carte qui
+     décide quelle couche est affichée sur la carte, et la timeline qui date
+     cette couche. Pas de carte allumée → aucune couche à dater → aucune
+     timeline (cliquer une carte l'ouvre, recliquer la même la referme). */
+  const timelineVisible = !!selectedMetric;
+
+  /* ── Lecture : avance de 30 min par tick, reboucle à minuit ──
+     Le pas de 30 min est celui du clavier (flèches), donc la lecture et le
+     clavier déplacent l'aiguille exactement de la même façon. Chaque tick
+     passe par timeMin, donc l'effet de synchronisation ci-dessus rejoue et
+     le timestamp de l'overlay météo suit.
+     Aucune lecture sans commande visible : pas d'adresse (verrouillé), pas à
+     l'étape 1, ou pas de carte active → l'échelle n'a rien à dater. */
+  useEffect(() => {
+    if (!playing || locked || !active || !timelineVisible) return;
+    const id = window.setInterval(() => {
+      setTimeMin((m) => (m + 30) % DAY_MIN);
+    }, 180);
+    return () => window.clearInterval(id);
+  }, [playing, locked, active, timelineVisible]);
+
+  /* Couper la lecture quand la commande disparaît (verrouillage, changement
+     d'étape, carte éteinte) : l'état ne doit pas rester « en lecture » dans un
+     instrument qu'on ne voit plus, en re-datant l'overlay dans le vide. */
+  useEffect(() => {
+    if (locked || !active || !timelineVisible) setPlaying(false);
+  }, [locked, active, timelineVisible]);
+
+  /* Time-aware : remonte l'offset horaire total (jour sélectionné + heure du
+     curseur) quand le curseur OU le calendrier change, pour re-pointer le
+     timestamp de l'overlay météo (Windy) sur la carte. */
+  useEffect(() => {
+    const dayOffset = Math.max(
+      0,
+      Math.round((range.start.getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000)
+    );
+    onTimeChange?.(dayOffset * 24 + Math.floor(timeMin / 60));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeMin, range.start]);
 
   /* Ferme le calendrier au clic hors du picker (ou Échap). */
   const closePicker = () => setPickerOpen(false);
@@ -136,6 +234,7 @@ export function FloodConsole({
   }, [view]);
 
   const openPicker = () => {
+    if (locked) return; // verrouillé tant qu'aucune adresse n'est diagnostiquée
     setDraft(range);
     setView(new Date(range.start.getFullYear(), range.start.getMonth(), 1));
     setPickerOpen(true);
@@ -163,6 +262,7 @@ export function FloodConsole({
   };
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (locked) return; // verrouillé tant qu'aucune adresse n'est diagnostiquée
     draggingRef.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
     minuteFromClientX(e.clientX);
@@ -179,13 +279,18 @@ export function FloodConsole({
 
   const pct = (timeMin / DAY_MIN) * 100;
 
+
   return (
     <>
       {/* ═══ Conteneur invisible : enveloppe de la console ═══ */}
       <div className="flood-console">
         {/* Panneau principal : timeline (date + scrubber) / cartes */}
         <div className="flood-console-main">
-          <div className="flood-timeline">
+          {/* Timeline montée seulement avec une carte active : elle date la
+              couche que la carte affiche. Grisée et inerte si l'adresse a été
+              retirée alors qu'une carte restait allumée (.is-locked). */}
+          {timelineVisible && (
+          <div className={`flood-timeline${locked ? ' is-locked' : ''}`}>
             {/* Sélecteur de période (date range) — champ Material en lecture
                 seule + bascule calendrier, façon matDatepickerToggle. */}
             <div className="flood-date">
@@ -270,7 +375,27 @@ export function FloodConsole({
               )}
             </div>
 
-            {/* Scrubber Fuselab : piste pleine largeur + repères + capsule */}
+            {/* Commande lecture/pause — reprise du bandeau de l'étape 2.
+                Elle anime l'heure, donc l'overlay météo réel de la carte. */}
+            <button
+              type="button"
+              className={`flood-play${playing ? ' playing' : ''}`}
+              disabled={locked}
+              aria-label={playing ? 'Mettre la lecture en pause' : 'Lire la journée'}
+              aria-pressed={playing}
+              title={
+                locked
+                  ? LOCK_HINT
+                  : playing
+                    ? 'Pause'
+                    : 'Défiler la journée (l\'heure de l\'overlay météo suit)'
+              }
+              onClick={() => setPlaying((p) => !p)}
+            >
+              <md-icon aria-hidden="true">{playing ? 'pause' : 'play_arrow'}</md-icon>
+            </button>
+
+            {/* Piste : règle horaire pleine largeur + repères + capsule */}
             <div
               className="flood-scale"
               ref={scaleRef}
@@ -280,8 +405,13 @@ export function FloodConsole({
               aria-valuemax={DAY_MIN}
               aria-valuenow={timeMin}
               aria-valuetext={fmtMin(timeMin)}
-              tabIndex={0}
+              aria-disabled={locked || undefined}
+              /* Verrouillée : sortie du parcours clavier. `pointer-events: none`
+                 ne coupe que la souris — sans cela, la piste resterait
+                 atteignable au Tab et se laisserait flécher inutilement. */
+              tabIndex={locked ? -1 : 0}
               onKeyDown={(e) => {
+                if (locked) return; // verrouillé tant qu'aucune adresse n'est diagnostiquée
                 const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 30 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -30 : 0;
                 if (step) {
                   e.preventDefault();
@@ -332,16 +462,33 @@ export function FloodConsole({
               </div>
             </div>
           </div>
+          )}
 
-          {/* Moitié inférieure : les 4 cartes métriques */}
-          <div className="flood-cards-row">
+          {/* Moitié inférieure : les 4 cartes métriques. Avant toute adresse
+              (locked) elles sont grisées et désactivées, sans pavé d'explication
+              flottant : l'état est déjà porté par les cartes éteintes, par le
+              champ d'adresse vide et par le cadenas de l'étape. Le texte d'aide
+              reste accessible en infobulle sur chaque commande désactivée. */}
+          <div className={`flood-cards-row${locked ? ' is-locked' : ''}`}>
+            {/* Un seul clic suffit : carte inactive → sélectionnée ; carte
+                active → coupée (métrique vide → applyWeatherLayer éteint
+                l'overlay météo). Même sémantique que les toggles œil du
+                panneau aléas — plus de double-clic à découvrir. */}
             {METRICS.map((m) => (
               <button
                 key={m.key}
                 type="button"
-                className={`flood-card${selectedMetric === m.key ? ' active' : ''}`}
+                disabled={locked}
+                className={`flood-card${selectedMetric === m.key ? ' active' : ''}${locked ? ' flood-card--locked' : ''}`}
                 aria-pressed={selectedMetric === m.key}
-                onClick={() => onMetricChange?.(m.key)}
+                title={
+                  locked
+                    ? LOCK_HINT
+                    : selectedMetric === m.key
+                      ? `Désactiver ${m.label}`
+                      : `Afficher ${m.label}`
+                }
+                onClick={() => onMetricChange?.(selectedMetric === m.key ? '' : m.key)}
               >
                 <span className="flood-card-icon" aria-hidden="true">
                   <md-icon>{m.icon}</md-icon>
@@ -358,30 +505,18 @@ export function FloodConsole({
           </div>
         </div>
 
-        {/* Les 2 toggles FLOOD (md-switch pivotés à 90°) à droite */}
+        {/* Toggle FLOOD (md-switch pivoté à 90°) à droite */}
         <div className="flood-console-side">
           <label className="flood-switch">
             <span className="flood-switch-rail">
               <md-switch
                 selected={floodMapping}
                 aria-label="Flood Mapping"
-                onChange={() => setFloodMapping((v) => !v)}
+                onChange={() => onFloodMappingChange?.(!floodMapping)}
               />
             </span>
             <span className={`flood-switch-label${floodMapping ? ' on' : ''}`}>
               Flood Mapping
-            </span>
-          </label>
-          <label className="flood-switch">
-            <span className="flood-switch-rail">
-              <md-switch
-                selected={floodForecast}
-                aria-label="Flood Forecast"
-                onChange={() => setFloodForecast((v) => !v)}
-              />
-            </span>
-            <span className={`flood-switch-label${floodForecast ? ' on' : ''}`}>
-              Flood Forecast
             </span>
           </label>
         </div>

@@ -18,7 +18,6 @@
 import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-
 import {
   API,
   type BatimentRisques,
@@ -30,7 +29,6 @@ import {
   bandForResolution,
   WMS_LAYER_MAP,
   WFS_LAYER_MAP,
-  ALEA_ICONS,
   escHtml,
 } from '../zone/config';
 import {
@@ -41,6 +39,12 @@ import {
   polygonCenter,
   wmsTileUrl,
 } from '../zone/mapHelpers';
+import {
+  clearJourney,
+  mountJourney,
+} from '../zone/hydroLayer';
+import type { Journey } from '../zone/hydroRoute';
+import { quantiseSlab } from '../zone/impactModel';
 
 // Token + style en variable d'environnement (jamais en dur dans le code).
 const MAPBOX_TOKEN: string = (import.meta as any).env?.VITE_MAPBOX_TOKEN || '';
@@ -70,8 +74,10 @@ const BUILDINGS_OUTLINE_LAYER = 'mb-buildings-outline';
 /* Surlignage 2D du bâtiment diagnostiqué : empreinte teintée accent +
  * contour accent (visible en vue 2D, où l'extrusion 3D est masquée). */
 const BUILDINGS_2D_LAYER = 'mb-buildings-2d-highlight';
-/* Étiquette flottante du bâtiment cible (P9) — id BDNB tronqué, zoom ≥ 15. */
-const TARGET_LABEL_LAYER = 'mb-target-label';
+/* Enveloppe d'inondation MODÉLISÉE (étape 2) : un volume d'eau de la hauteur
+ * d'eau du moteur, dans l'empreinte RÉELLE de chaque bâtiment, plafonné par
+ * sa hauteur BDNB. Aucune surface de crue n'est peinte. */
+const BUILDINGS_WATER_LAYER = 'mb-buildings-water';
 /* Bâtiments 3D natifs Mapbox (source composite/building — tout le bâti OSM,
  * « vibe ville numérique »). Ajoutés sous la couche BDNB. */
 const NATIVE_BUILDINGS_LAYER = 'mb-native-buildings';
@@ -80,10 +86,29 @@ const NATIVE_BUILDINGS_LAYER = 'mb-native-buildings';
 const CADASTRE_LAYER = 'mb-cadastre';
 const CADASTRE_SOURCE = 'mb-cadastre-src';
 
-/* Vents GFS — particules animées (raster-particle, doc Mapbox) activées
- * quand la carte météo « Wind » est sélectionnée dans la console. */
-const WIND_LAYER = 'mb-wind-particles';
-const WIND_SOURCE = 'mb-wind-raster-array';
+/* Vent — Windy Map Forecast API (https://api.windy.com). L'API Windy ne
+ * fournit pas de tuiles raster autonomes : elle embarque un moteur Leaflet
+ * (libBoot.js + windyInit, clé requise). On superpose donc cette carte Windy
+ * à la carte Mapbox et on synchronise sa caméra (centre + zoom). Sans clé
+ * VITE_WINDY_API_KEY (définie dans le .env racine), aucun overlay n'est
+ * affiché — la carte « Wind » reste vide avec un avertissement console. */
+const WINDY_LIB_URL = 'https://api.windy.com/assets/map-forecast/libBoot.js';
+/* Leaflet 1.4.0 — requis AVANT libBoot.js (docs Windy « Getting started »). */
+const WINDY_LEAFLET_URL = 'https://unpkg.com/leaflet@1.4.0/dist/leaflet.js';
+const WINDY_KEY: string = String((import.meta as any).env?.VITE_WINDY_API_KEY || '').trim();
+
+/* Alertes (panneau droit) → indicateurs « cloche » rendus en couches
+ * VECTORIELLES (symboles), PAS en marqueurs DOM : sur le globe 3D les
+ * marqueurs HTML flottent à l'écran et ne suivent pas la sphère, alors que
+ * les symboles épousent la surface, s'éloignent à l'horizon et restent
+ * parfaitement synchronisés (mercator comme globe). Icônes générées par
+ * niveau (canvas → map.addImage), couleurs VERT→JAUNE→ORANGE→ROUGE. */
+const ALERT_BELLS_SOURCE = 'fr-alert-bells-src';
+const ALERT_BELLS_LAYER = 'fr-alert-bells';
+const ALERT_FOCUS_SOURCE = 'fr-alert-focus-src';
+const ALERT_FOCUS_LAYER = 'fr-alert-focus';
+const ALERT_LEVEL_COLORS = ['#2fbf71', '#f0c33c', '#ff9f0a', '#ff3b30'];
+type AlertPoint = { lat: number; lon: number; name: string; level: number };
 
 /* Emprise de la France métropolitaine — vue d'ensemble de l'étape Adresse
  * (carte derrière le hero tant qu'aucune adresse n'est diagnostiquée). */
@@ -106,6 +131,20 @@ const REGIONS_LINE = 'mb-fr-regions-line';
 const REGIONS_LABEL = 'mb-fr-regions-label';
 const REGIONS_URL = `${(import.meta as any).env?.BASE_URL || '/'}data/regions-france.geojson`;
 
+/** Hauteur d'eau dessinée : la profondeur modélisée, plafonnée par la hauteur
+ *  RÉELLE de chaque bâtiment (BDNB) — au-delà, il n'y a plus d'immeuble à
+ *  noyer. Exprimée en littéraux (`case`, disponible sur toutes les versions du
+ *  style, plutôt que `min`, plus récent) : régler l'épaisseur ne réécrit donc
+ *  aucune géométrie. */
+function waterHeightExpr(slabM: number): any {
+  return [
+    'case',
+    ['>', slabM, ['coalesce', ['get', 'hauteur_mean'], 0]],
+    ['coalesce', ['get', 'hauteur_mean'], 0],
+    slabM,
+  ];
+}
+
 /** Accent courant (--accent sur .zone-app). */
 function currentAccent(): string {
   let v = '';
@@ -116,6 +155,36 @@ function currentAccent(): string {
       getComputedStyle(document.documentElement).getPropertyValue('--orange').trim();
   } catch { /* ignore */ }
   return /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#4C3F91';
+}
+
+/* ── Effet pluie Mapbox (v3.9+) ──
+   `setRain` rend de la pluie plein écran sur le style Standard — la façon
+   native (doc Mapbox) d'ajouter une « précipitation » visible. On l'active
+   dès que la vue météo est active (adresse diagnostiquée → flatProjection),
+   c'est-à-dire quelle que soit la carte métrique choisie (temp/pression/
+   pluie/vent) : toutes racontent la météo, la pluie y est « relatable ».
+   La densité est zoom-dépendante (révélée 11→13) pour ne pas pleuvoir à
+   la vue France dézoomée. Sans effet sur les styles classiques. */
+const RAIN_CONFIG: Parameters<mapboxgl.Map['setRain']>[0] = {
+  density: ['interpolate', ['linear'], ['zoom'], 11, 0.0, 13, 0.5],
+  intensity: 1.0,
+  color: '#a8adbc',
+  opacity: 0.7,
+  vignette: ['interpolate', ['linear'], ['zoom'], 11, 0.0, 13, 1.0],
+  'vignette-color': '#464646',
+  direction: [0, 80],
+  'droplet-size': [2.6, 18.2],
+  'distortion-strength': 0.7,
+  'center-thinning': 0,
+};
+
+function applyRainEffect(map: mapboxgl.Map, on: boolean) {
+  if (!IS_STANDARD_STYLE) return;
+  try {
+    map.setRain(on ? RAIN_CONFIG : null);
+  } catch {
+    // Style classique ou mapbox-gl < 3.9 : propriété ignorée, rien à faire.
+  }
 }
 
 /* Mode « Risques bâtiment » (P5/P8) : mappe les champs BDNB bruts vers un
@@ -168,15 +237,6 @@ async function addFranceOverviewLayers(
   }
 }
 
-/** #rrggbb → rgba() (le style Mapbox refuse le hex à 8 chiffres). */
-function hexToRgba(hex: string, alpha: number): string {
-  const h = hex.replace(/^#/, '');
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 /** Centre approché d'un polygone (centroïde du plus grand anneau). */
 function regionLabelPoint(feature: any): [number, number] | null {
   const geom = feature?.geometry;
@@ -220,9 +280,11 @@ function drawFranceRegions(
   try {
     if (map.getSource(REGIONS_SRC)) return;
     const light = !!document.querySelector('.zone-app')?.classList.contains('theme-light');
-    const accent = currentAccent();
-    const tint = hexToRgba(accent, light ? 0.28 : 0.36);
-    const hover = hexToRgba(accent, light ? 0.55 : 0.6);
+    /* Remplissage neutre des régions (pas la teinte accent / pas de dégradé
+       violet) : la carte reste lisible, le survol éclaircit légèrement la
+       surface pour la sélection. */
+    const tint = light ? 'rgba(120,132,148,0.12)' : 'rgba(150,165,184,0.10)';
+    const hover = light ? 'rgba(120,132,148,0.24)' : 'rgba(150,165,184,0.22)';
     const lineColor = light ? '#5b6470' : '#9fafc2';
     const labelColor = light ? '#1c222b' : '#f2f6fc';
     const halo = light ? 'rgba(255,255,255,0.92)' : 'rgba(8,12,18,0.85)';
@@ -382,6 +444,11 @@ interface UnifiedMapProps {
   /** Nombre max de bâtiments chargés par bbox (0 = tous, jusqu'à épuisement).
    *  Cartographie : tous. Analyse : 200 (la carte y est secondaire). */
   buildingsLimit?: number;
+  /** Enveloppe d'inondation MODÉLISÉE (étape 2) : hauteur d'eau du moteur (m)
+   *  dessinée dans l'empreinte BDNB réelle de chaque bâtiment de la vue,
+   *  plafonnée par sa hauteur réelle. `null` = rien à peindre (sous le seuil
+   *  d'infrastructure du moteur, ou hors de l'étape 2) — la couche est masquée. */
+  impact?: { slabM: number; color: string } | null;
   /** 3D au démarrage. */
   initial3D?: boolean;
   fitZoom?: number;
@@ -391,15 +458,43 @@ interface UnifiedMapProps {
   /** Mode « vue d'ensemble » (étape Adresse) : carte France sans chrome ni
    *  couches, en arrière-plan du hero de recherche. Aucun rapport requis. */
   overview?: boolean;
+  /** Trajet de l'eau (étape 2) : parcours RÉEL reconstruit sur le réseau
+   *  hydrographique IGN BD TOPO (cf. hydroRoute.ts). Non nul → les couches du
+   *  trajet sont montées (tracé, bassin versant, extrémités, marqueur). */
+  journey?: Journey | null;
+  /** Géométrie du bassin versant contributeur réel (polygone BD TOPO). */
+  basinGeometry?: GeoJSON.Geometry | null;
   /** Clic sur une région de la carte France (mode overview) — Zone.tsx
    *  s'en sert pour afficher la région dans le placeholder de recherche. */
   onRegionSelect?: (nom: string) => void;
   /** Point à recentrer en mode overview (adresse diagnostiquée) : la carte
    *  vole sur le point avec une pastille ; null = retour au cadrage France. */
   focus?: { lat: number; lon: number } | null;
-  /** Afficher les particules de vent (raster-particle GFS) sur la carte —
-   *  piloté par la carte météo « Wind » de la console. */
-  showWind?: boolean;
+  /** Carte météo active de la console (temp/wind/pressure/rainfall) — pilote
+   *  la couche météo sur la carte : vent en particules GFS natives ;
+   *  température / pression / pluie en calque Open-Meteo (raster-om). */
+  weatherMetric?: string;
+  /** Index de l'heure de prévision (time-aware) — 0 = première valid_time. */
+  weatherTime?: number;
+  /** Mode « risques bâtiment » (panneau latéral ouvert) : même en mode
+   *  overview (France), surligner l'empreinte du bâtiment diagnostiqué
+   *  (extrusion 3D + épingle + cadrage) — pilote depuis Zone.tsx. */
+  riskHighlight?: boolean;
+  /** Projection à plat (mercator) : les tuiles météo OM sont plates (Mercator) —
+   *  quand l'overlay météo est affiché, on passe la carte en mercator pour que
+   *  l'overlay s'aligne 1:1 (pan/zoom/rotation) au lieu de dériver sur la
+   *  sphère du globe 3D. true = vue analyse/risque ; false = globe (étape 1). */
+  flatProjection?: boolean;
+  /** Flood Mapping (Vigicrues) : bascule une couche GeoJSON des tronçons de
+   *  vigilance crues (InfoVigiCru.geojson) colorés par niveau — la « carte
+   *  inondation » réelle de la France. */
+  showFloodVigilance?: boolean;
+  /** Alerte sélectionnée depuis le panneau « Alertes » : la carte vole vers
+   *  le tronçon et pose un indicateur animé de la couleur du niveau. */
+  alertFocus?: { lat: number; lon: number; name: string; level: number } | null;
+  /** Toutes les alertes affichées par le panneau droit : un indicateur coloré
+   *  (cloche) est posé sur la carte pour chaque tronçon de vigilance. */
+  alertMarkers?: { lat: number; lon: number; name: string; level: number }[];
 }
 
 /* ── Composant ── */
@@ -414,17 +509,30 @@ export function UnifiedMap({
   defaultParcels = false,
   defaultLightPreset,
   buildingsLimit = 200,
+  impact = null,
   initial3D = false,
   fitZoom = 16.5,
   points,
   overview = false,
+  journey = null,
+  basinGeometry = null,
   onRegionSelect,
   focus = null,
-  showWind = false,
+  weatherMetric,
+  weatherTime = 0,
+  riskHighlight = false,
+  flatProjection = false,
+  showFloodVigilance = false,
+  alertFocus = null,
+  alertMarkers = [],
 }: UnifiedMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const mapReadyRef = useRef(false);
+  /* Projection courante voulue (globe avant diagnostic, mercator après) —
+     lue par les handlers asynchrones (onload) via le ref, pas la closure. */
+  const flatProjectionRef = useRef(flatProjection);
+  flatProjectionRef.current = flatProjection;
   const buildingsSeqRef = useRef(0);
   const buildingsTimerRef = useRef<number | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
@@ -438,6 +546,8 @@ export function UnifiedMap({
   batimentRef.current = batiment;
   const batimentRisquesRef = useRef(batimentRisques);
   batimentRisquesRef.current = batimentRisques;
+  const riskHighlightRef = useRef(riskHighlight);
+  riskHighlightRef.current = riskHighlight;
   const riskBuildingModeRef = useRef(false);
   const visibleKeysRef = useRef(visibleLayerKeys);
   visibleKeysRef.current = visibleLayerKeys;
@@ -447,18 +557,31 @@ export function UnifiedMap({
    * ids de couches (fill/outline/raster/circle), pour piloter leur
    * visibilité depuis les toggles œil du panneau latéral. */
   const layerIdsByKeyRef = useRef<Map<string, string[]>>(new Map());
+  const impactRef = useRef(impact);
+  impactRef.current = impact;
+  /* Vue d'analyse (étape 2) : c'est là que le bâti RÉEL de la scène doit être
+     chargé (l'eau se peint dans son empreinte, et le bâtiment cible s'y
+     surligne) — la vue d'ensemble, elle, vit sur le cadrage France. */
+  const riskHintRef = useRef(riskHighlight);
+  riskHintRef.current = riskHighlight;
+  /* Une enveloppe est-elle demandée ? (l'eau ne se peint que si le moteur
+     compte quelque chose : au-dessous de son seuil, `impact` est null) */
+  const impactOn = impact !== null;
+  /* Épaisseur déjà écrite dans la couche : évite un setPaintProperty par tick
+     de curseur quand le pas de 5 cm n'a pas bougé. */
+  const impactSlabRef = useRef(-1);
+  /* Emprise du bâti déjà chargée (+ adresse cible) — cf. `loadBuildings`. */
+  const loadedBboxRef = useRef<{
+    west: number; south: number; east: number; north: number; target: string | null;
+  } | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
   const pinElRef = useRef<HTMLDivElement | null>(null);
-  /* Indicateur du bâtiment cible (épingle accrochée à la géométrie BDNB),
-   * visible en 2D comme en 3D. */
-  const buildingPinRef = useRef<mapboxgl.Marker | null>(null);
   /* Pastille du point recentré en mode overview (adresse diagnostiquée). */
   const focusMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const focusRef = useRef(focus);
   focusRef.current = focus;
 
-  const [is3d, setIs3d] = useState(initial3D);
   const [showParcels, setShowParcels] = useState(defaultParcels);
   const [riskBuildingMode, setRiskBuildingMode] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -471,8 +594,40 @@ export function UnifiedMap({
   lightPresetRef.current = lightPreset;
   const showParcelsRef = useRef(showParcels);
   showParcelsRef.current = showParcels;
-  const showWindRef = useRef(showWind);
-  showWindRef.current = showWind;
+  const weatherMetricRef = useRef(weatherMetric);
+  weatherMetricRef.current = weatherMetric;
+  const weatherTimeRef = useRef(weatherTime);
+  weatherTimeRef.current = weatherTime;
+  /* Overlay Windy (carte « Wind ») : la carte météo Windy (Leaflet) est
+     superposée à la carte Mapbox et synchronisée en caméra. L'instance est
+     créée paresseusement (script libBoot.js + windyInit) et conservée : on
+     l'affiche/masque plutôt que de la recréer à chaque sélection. */
+  const windyRef = useRef<{
+    el: HTMLDivElement | null;
+    api: unknown | null;
+    map: unknown | null;
+    lib: Promise<void> | null;
+    seq: number;
+    warnedNoKey: boolean;
+    onMove: (() => void) | null;
+    /* Sync inversé en « mode météo » : Windy devient la carte, Mapbox le suit.
+       onWindyMove = listener Leaflet 'move' → Mapbox ; weatherMode = true tant
+       que Windy est la carte affichée (Mapbox masqué). */
+    onWindyMove: (() => void) | null;
+    weatherMode: boolean;
+    prevRot: { dragRotate: boolean; touchPitch: boolean } | null;
+  }>({
+    el: null,
+    api: null,
+    map: null,
+    lib: null,
+    seq: 0,
+    warnedNoKey: false,
+    onMove: null,
+    onWindyMove: null,
+    weatherMode: false,
+    prevRot: null,
+  });
   const onRegionSelectRef = useRef(onRegionSelect);
   onRegionSelectRef.current = onRegionSelect;
   const showRisksRef = useRef(showRisks);
@@ -529,6 +684,10 @@ export function UnifiedMap({
       zoom: rep ? fitZoom : 5,
       pitch: is3dRef.current ? 55 : 0,
       bearing: is3dRef.current ? -20 : 0,
+      /* Vue analyse/risque = mercator (plat) pour aligner l'overlay météo ;
+         étape Adresse = globe 3D (« planète »). On repasse à la projection
+         voulue plus tard via l'effet `flatProjection`. */
+      projection: flatProjection ? 'mercator' : 'globe',
       antialias: true,
       minZoom: 3,
       maxZoom: 19,
@@ -538,6 +697,8 @@ export function UnifiedMap({
       map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
     }
     mapRef.current = map;
+    // DEBUG(temp): expose map for inspection.
+    (window as any).__mbMap = map;
 
     map.on('error', (e) => {
       // Erreurs de tuiles/sources (WMS BRGM, cadastre…) : non bloquantes.
@@ -603,22 +764,39 @@ export function UnifiedMap({
         } else {
           map.fitBounds(FRANCE_BOUNDS, { padding: 12, duration: 0 });
         }
-        // Particules de vent si la carte météo « Wind » est déjà active
-        // au montage (le ref lit l'état courant, fermeture du 1er rendu).
-        applyWindLayer(map, showWindRef.current);
+        // Projection : si une adresse était déjà diagnostiquée au montage, la
+        // bascule globe→mercator demandée par l'effet n'a pas pu s'appliquer
+        // (carte pas prête) — on la force ici, au load.
+        try {
+          map.setProjection(flatProjectionRef.current ? 'mercator' : 'globe');
+        } catch {
+          /* ignore */
+        }
+        // Couche météo (vent / température / pression / pluie) si une carte
+        // est déjà active au montage (le ref lit l'état courant, fermeture du
+        // 1er rendu). N'appliquée QUE si une adresse est déjà diagnostiquée
+        // (flatProjection) : avant cela, aucune couche météo n'est affichée
+        // par défaut — elle apparaît après le diagnostic.
+        if (flatProjectionRef.current) {
+          applyWeatherLayer(map, weatherMetricRef.current, weatherTimeRef.current);
+          applyRainEffect(map, weatherMetricRef.current === 'rainfall');
+        } else {
+          applyRainEffect(map, false);
+        }
         return;
       }
       ensureCadastreLayer(map);
       ensureNativeBuildings(map);
       ensureBuildingsLayer(map);
       updateBuildingsTarget(map);
-      placeBuildingPin(map);
       void loadBuildings(map);
       if (showRisks) renderReport(map, latestReportRef.current);
     });
 
     map.on('moveend', () => {
-      if (!is3dRef.current) return;
+      /* Le bâti suit le cadrage en 3D, en vue d'analyse (bâtiment cible) et
+         tant qu'une enveloppe d'inondation peut se peindre dans son empreinte. */
+      if (!is3dRef.current && !impactRef.current && !riskHintRef.current) return;
       if (buildingsTimerRef.current) window.clearTimeout(buildingsTimerRef.current);
       buildingsTimerRef.current = window.setTimeout(() => void loadBuildings(map), 500);
     });
@@ -656,10 +834,9 @@ export function UnifiedMap({
       popupRef.current = null;
       pinElRef.current?.remove();
       pinElRef.current = null;
-      buildingPinRef.current?.remove();
-      buildingPinRef.current = null;
       focusMarkerRef.current?.remove();
       focusMarkerRef.current = null;
+      disposeWindy();
       map.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -693,13 +870,43 @@ export function UnifiedMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview, focusKey]);
 
+  /* ── Mode « risques bâtiment » (panneau ouvert) ──
+     En overview (France), l'init de la carte ne crée ni couches BDNB ni pin :
+     à l'ouverture du panneau on les crée et on cadre le bâtiment ; à la
+     fermeture on retire le pin et on revient au cadrage France. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current || !overview) return;
+    if (riskHighlightRef.current) {
+      ensureBuildingsLayer(map);
+      /* En overview le mode 3D est éteint par défaut (extrusion BDNB en
+         « none ») : on force la visibilité des couches du bâtiment cible
+         pour qu'il ressorte même sans basculer tout le mode 3D. */
+      for (const id of [BUILDINGS_LAYER, BUILDINGS_OUTLINE_LAYER]) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
+      }
+      if (map.getLayer(BUILDINGS_2D_LAYER)) map.setLayoutProperty(BUILDINGS_2D_LAYER, 'visibility', 'none');
+      updateBuildingsTarget(map);
+      void loadBuildings(map);
+      const b = currentBatiment();
+      if (b?.geom_groupe) {
+        try {
+          const wgs = geomToWgs84(b.geom_groupe as Record<string, unknown>);
+          const c = polygonCenter(wgs?.coordinates);
+          if (c) map.easeTo({ center: c, zoom: fitZoom, pitch: 55, bearing: -20, duration: 900 });
+        } catch { /* */ }
+      }
+    } else {
+      map.fitBounds(FRANCE_BOUNDS, { padding: 12, duration: 900 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riskHighlight, batiment, report]);
+
   /* ── Changement de bâtiment/adresse ── */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
-    updateBuildingsTarget(map);
-    placeBuildingPin(map);
-    const b = currentBatiment();
+    if (!map || !mapReadyRef.current) return;      updateBuildingsTarget(map);
+      const b = currentBatiment();
     if (b?.geom_groupe) {
       try {
         const wgs = geomToWgs84(b.geom_groupe as Record<string, unknown>);
@@ -759,15 +966,244 @@ export function UnifiedMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRisks, report]);
 
-  /* ── Particules de vent GFS (carte météo « Wind ») ──
-     Ajoute/supprime la couche raster-particle selon `showWind`. Si la carte
-     n'est pas encore prête (montage), le handler onload applique l'état via
-     le ref. */
+  /* ── Couche météo (vent / température / pression / pluie) ──
+     Re-applique la couche quand la carte météo change (ou l'heure de
+     prévision, pour le mode time-aware). Si la carte n'est pas encore prête
+     (montage), le handler onload applique l'état via le ref. */
+  /* Projection : globe 3D (avant diagnostic) ↔ mercator plat (dès qu'une
+     adresse est diagnostiquée — l'overlay météo, tuiles plates, ne peut pas
+     suivre la courbure du globe). On bascule à la volée sans forcer le
+     rechargement de la carte : setProjection garde la caméra. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      map.setProjection(flatProjection ? 'mercator' : 'globe');
+    } catch {
+      /* carte pas encore prête : le handler onload reprendra */
+    }
+    if (flatProjection) {
+      if (mapReadyRef.current) applyWeatherLayer(map, weatherMetricRef.current, weatherTimeRef.current);
+    } else {
+      disableWindyOverlay(map);
+    }
+  }, [flatProjection]);
+
+  /* ── Effet pluie plein écran (setRain, style Standard) ──
+     Actif UNIQUEMENT quand la carte « Rainfall » est sélectionnée (et que la
+     vue météo est active : adresse diagnostiquée → flatProjection). Retiré
+     sur les autres cartes (temp/pression/vent), au retour globe, ou quand
+     la carte est désélectionnée (double-clic). */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReadyRef.current) return;
-    applyWindLayer(map, showWindRef.current);
-  }, [showWind]);
+    applyRainEffect(map, flatProjection && weatherMetric === 'rainfall');
+  }, [flatProjection, weatherMetric]);
+
+  /* ── Flood Mapping (Vigicrues) : affiche/masque les tronçons de vigilance
+     crues colorés par niveau sur la carte. Basculé par le toggle FLOOD
+     MAPPING de la console. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (showFloodVigilance) addFloodVigilanceLayer(map);
+    else removeFloodVigilanceLayer(map);
+  }, [showFloodVigilance]);
+
+  /* ── Alertes → couches VECTORIELLES (synchronisées avec le globe) ──
+     Les anciens marqueurs DOM flottaient à l'écran sur le globe 3D. On rend
+     maintenant les cloches + l'indicateur ciblé en symboles mapbox : ils
+     épousent la sphère, restent ancrés à leur coordonnée et disparaissent à
+     l'horizon comme le reste de la carte. */
+
+  /* Sprite « cloche » colorée par niveau → ImageData (map.addImage). */
+  function makeBellSprite(color: string): ImageData {
+    const S = 64;
+    const cv = document.createElement('canvas');
+    cv.width = S;
+    cv.height = S;
+    const g = cv.getContext('2d');
+    if (!g) return new ImageData(S, S);
+    g.clearRect(0, 0, S, S);
+    // Halo doux autour de la pastille.
+    g.globalAlpha = 0.25;
+    g.beginPath();
+    g.arc(S / 2, S / 2, 27, 0, Math.PI * 2);
+    g.fillStyle = color;
+    g.fill();
+    g.globalAlpha = 1;
+    // Pastille pleine + liseré clair.
+    g.beginPath();
+    g.arc(S / 2, S / 2, 17, 0, Math.PI * 2);
+    g.fillStyle = color;
+    g.fill();
+    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    g.stroke();
+    // Glyphe « cloche » (Material notifications) en blanc.
+    g.translate(8, 8);
+    g.scale(2, 2);
+    g.fillStyle = '#ffffff';
+    const p = new Path2D(
+      'M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z'
+    );
+    g.fill(p);
+    return g.getImageData(0, 0, S, S);
+  }
+
+  /* Enregistre une icône `fr-bell-{1..4}` par niveau (idempotent). */
+  function ensureAlertIcons(map: mapboxgl.Map) {
+    for (let l = 1; l <= 4; l += 1) {
+      const id = `fr-bell-${l}`;
+      if (!map.hasImage(id)) map.addImage(id, makeBellSprite(ALERT_LEVEL_COLORS[l - 1]));
+    }
+  }
+
+  const alertLevel = (l: number) => (l >= 1 && l <= 4 ? l : 1);
+
+  /* Met à jour les couches cloches (toutes les alertes) + indicateur ciblé. */
+  function updateAlertLayers(map: mapboxgl.Map, bells: AlertPoint[], focus: AlertPoint | null) {
+    try {
+      const bellData: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: bells.map((a) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [a.lon, a.lat] },
+          properties: { level: alertLevel(a.level) },
+        })),
+      };
+      const bellSrc = map.getSource(ALERT_BELLS_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+      if (bells.length > 0) {
+        if (!bellSrc) {
+          map.addSource(ALERT_BELLS_SOURCE, { type: 'geojson', data: bellData });
+          map.addLayer({
+            id: ALERT_BELLS_LAYER,
+            type: 'symbol',
+            source: ALERT_BELLS_SOURCE,
+            layout: {
+              'icon-image': [
+                'match',
+                ['get', 'level'],
+                4,
+                'fr-bell-4',
+                3,
+                'fr-bell-3',
+                2,
+                'fr-bell-2',
+                'fr-bell-1',
+              ],
+              'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 0.6, 6, 0.5, 12, 0.4],
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true,
+            },
+          });
+        } else {
+          bellSrc.setData(bellData);
+        }
+      } else if (bellSrc) {
+        if (map.getLayer(ALERT_BELLS_LAYER)) map.removeLayer(ALERT_BELLS_LAYER);
+        map.removeSource(ALERT_BELLS_SOURCE);
+      }
+
+      const fData: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: focus
+          ? [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [focus.lon, focus.lat] },
+                properties: { name: focus.name, level: alertLevel(focus.level) },
+              },
+            ]
+          : [],
+      };
+      const fSrc = map.getSource(ALERT_FOCUS_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+      if (focus) {
+        if (!fSrc) {
+          map.addSource(ALERT_FOCUS_SOURCE, { type: 'geojson', data: fData });
+          map.addLayer({
+            id: ALERT_FOCUS_LAYER,
+            type: 'symbol',
+            source: ALERT_FOCUS_SOURCE,
+            layout: {
+              'icon-image': [
+                'match',
+                ['get', 'level'],
+                4,
+                'fr-bell-4',
+                3,
+                'fr-bell-3',
+                2,
+                'fr-bell-2',
+                'fr-bell-1',
+              ],
+              'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 1.05, 6, 0.9, 12, 0.75],
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true,
+              'text-field': ['get', 'name'],
+              'text-size': ['interpolate', ['linear'], ['zoom'], 3, 11, 9, 14],
+              'text-anchor': 'bottom',
+              'text-offset': [0, -1.8],
+              'text-allow-overlap': true,
+              'text-font': ['Arial Unicode MS Regular'],
+              'text-max-width': 16,
+            },
+            paint: {
+              'text-color': '#ffffff',
+              'text-halo-color': 'rgba(0,0,0,0.8)',
+              'text-halo-width': 1.6,
+            },
+          });
+        } else {
+          fSrc.setData(fData);
+        }
+      } else if (fSrc) {
+        if (map.getLayer(ALERT_FOCUS_LAYER)) map.removeLayer(ALERT_FOCUS_LAYER);
+        map.removeSource(ALERT_FOCUS_SOURCE);
+      }
+    } catch (err) {
+      console.warn('[alert] couches:', err);
+    }
+  }
+
+  /* ── Alertes affichées → cloches vectorielles sur la carte ── */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    try {
+      ensureAlertIcons(map);
+    } catch (err) {
+      console.warn('[alert] icônes:', err);
+    }
+    updateAlertLayers(map, alertMarkers, alertFocus);
+  }, [alertMarkers, alertFocus]);
+
+  /* ── Clic « Voir » sur une alerte : voler vers le tronçon + allumer la
+     couche de vigilance pour contextualiser (l'indicateur ciblé est posé par
+     la couche `updateAlertLayers` ci-dessus). */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (!alertFocus) return;
+    const { lat, lon } = alertFocus;
+    if (!showFloodVigilance) addFloodVigilanceLayer(map);
+    map.easeTo({
+      center: [lon, lat],
+      zoom: Math.max(map.getZoom(), 8),
+      duration: 1100,
+      essential: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alertFocus]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    /* L'overlay météo (Windy) ne s'applique qu'en mercator (flatProjection) :
+       sur le globe il ne peut pas suivre la courbure de la sphère. */
+    if (flatProjection) applyWeatherLayer(map, weatherMetricRef.current, weatherTimeRef.current);
+    else disableWindyOverlay(map);
+  }, [weatherMetric, weatherTime]);
 
   /* ── visibleLayerKeys → masquer/afficher les couches WMS/WFS ──
      Ne s'applique que quand showRisks est vrai (étape Cartographie/Synthèse).
@@ -783,6 +1219,37 @@ export function UnifiedMap({
       hideLayersModeLayers(map);
     }
   }, [visibleLayerKeys, showRisks]);
+
+  /* ── Trajet de l'eau (étape 2) : le PARCOURS RÉEL, dessiné sur la carte.
+     Ce qui est dessiné est de la géographie réelle (IGN BD TOPO) : tracé du
+     cours d'eau, bassin versant contributeur, extrémités et site analysé.
+     Aucune surface d'eau n'est peinte : le trajet dit par où l'eau passe et
+     où la reconstruction s'arrête, il ne simule pas de niveau. ── */
+
+  /* Montage / démontage des couches du trajet. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (!journey) {
+      clearJourney(map);
+      return;
+    }
+    const rep = latestReportRef.current;
+    const site = rep ? { lon: rep.lon, lat: rep.lat } : null;
+    mountJourney(map, journey, site, basinGeometry ?? null);
+    return () => {
+      /* mapReadyRef est l'indicateur de vie de la carte : l'effet de création
+         (déclaré PLUS HAUT dans le composant) exécute son nettoyage avant
+         celui-ci et le fait retomber à false juste avant map.remove().
+         Sans ce garde, clearJourney() appelait getLayer/getSource sur une
+         carte détruite, levait une exception — et une exception dans un
+         nettoyage d'effet démonte tout l'arbre React. C'est ce qui laissait
+         la page /report entièrement blanche à l'arrivée depuis l'étape 3,
+         alors qu'un chargement direct de /report fonctionnait.
+         alors qu'un chargement direct de /report fonctionnait. */
+      if (mapReadyRef.current) clearJourney(map);
+    };
+  }, [journey, basinGeometry]);
 
   /* ── Défauts d'étape (pilotés par Zone.tsx) : parcelles + éclairage ──
      Chaque changement d'étape change la prop et ré-applique son défaut ; le
@@ -893,71 +1360,588 @@ export function UnifiedMap({
     });
   }
 
-  /** Particules de vent GFS (raster-particle, doc Mapbox) — activées quand
-   *  la carte météo « Wind » est sélectionnée. La source raster-array fournit
-   *  les bandes de vitesse ; la couche raster-particle anime les trajectoires.
-   *  On l'ajoute/supprime selon `show` (idempotent). */
-  function applyWindLayer(map: mapboxgl.Map, show: boolean) {
-    if (show) {
-      if (!map.getSource(WIND_SOURCE)) {
-        map.addSource(WIND_SOURCE, {
-          type: 'raster-array',
-          url: 'mapbox://rasterarrayexamples.gfs-winds',
-          tileSize: 512,
+
+  /* ── Overlay Windy (carte « Wind ») ──────────────────────────────────
+     La carte Windy (Leaflet, api.windy.com) est superposée à la carte Mapbox
+     et sa caméra est synchronisée (centre + zoom) à chaque move. On retire la
+     basemap Windy (pane de tuiles) pour ne garder que les particules de vent.
+     Sans clé VITE_WINDY_API_KEY, tout est désactivé (avertissement console).
+     NB (docs Windy) : libBoot.js exige Leaflet 1.4.0 chargé AVANT lui (il
+     utilise le global `L`) — on injecte donc Leaflet en premier. */
+  function loadScriptOnce(src: string, check: () => boolean): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (check()) {
+        resolve();
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = () => (check() ? resolve() : reject(new Error(`${src} chargé mais symbole absent`)));
+      s.onerror = () => reject(new Error(`Échec du chargement de ${src} (réseau / CSP ?)`));
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadWindyLib(): Promise<void> {
+    const st = windyRef.current;
+    if (st.lib) return st.lib;
+    const w = window as unknown as { windyInit?: unknown; L?: unknown };
+    // Leaflet 1.4.0 d'abord (global `L` requis par libBoot.js), puis Windy.
+    st.lib = loadScriptOnce(WINDY_LEAFLET_URL, () => typeof w.L !== 'undefined').then(() =>
+      loadScriptOnce(WINDY_LIB_URL, () => typeof (window as unknown as { windyInit?: unknown }).windyInit === 'function')
+    );
+    // Autorise une nouvelle tentative après un échec.
+    st.lib.catch(() => {
+      st.lib = null;
+    });
+    return st.lib;
+  }
+
+  function syncWindyCamera(map: mapboxgl.Map) {
+    const m = windyRef.current.map as unknown as
+      | { setView: (latlng: [number, number], zoom: number, o: { animate: boolean }) => void }
+      | null
+      | undefined;
+    if (!m) return;
+    try {
+      const c = map.getCenter();
+      m.setView([c.lat, c.lng], map.getZoom(), { animate: false });
+    } catch {
+      /* noop */
+    }
+  }
+
+  /* Active/désactive l'interaction Leaflet côté Windy (drag, zoom molette,
+     double-clic, clavier…). En mode météo c'est Windy qui reçoit les gestes. */
+  function setWindyInteractive(enabled: boolean) {
+    const m = windyRef.current.map as any;
+    if (!m) return;
+    for (const h of ['dragging', 'touchZoom', 'scrollWheelZoom', 'doubleClickZoom', 'keyboard', 'boxZoom'] as const) {
+      try {
+        const hh = m?.[h];
+        if (hh && typeof hh[enabled ? 'enable' : 'disable'] === 'function') {
+          hh[enabled ? 'enable' : 'disable']();
+        }
+      } catch {
+        /* noop */
+      }
+    }
+  }
+
+  /** Mode météo : Windy DEVIENT la carte affichée (avec son propre fond —
+   *  l'overlay n'est plus transparent sur Mapbox, donc la météo est enfin
+   *  visible) et la scène Mapbox est masquée (plus de double rendu). Mapbox
+   *  n'est plus qu'un stock de caméra synchronisé depuis Windy. */
+  function enterWeatherMode(map: mapboxgl.Map) {
+    const st = windyRef.current;
+    if (st.weatherMode) return;
+    st.weatherMode = true;
+    try {
+      map.getContainer().classList.add('windy-active');
+    } catch {
+      /* noop */
+    }
+    if (st.el) st.el.style.pointerEvents = 'auto';
+    /* Coupe le sync Mapbox→Windy pour éviter une boucle avec le sync inversé. */
+    if (st.onMove) {
+      try {
+        map.off('move', st.onMove);
+      } catch {
+        /* noop */
+      }
+      st.onMove = null;
+    }
+    const m = st.map as any;
+    if (m) {
+      setWindyInteractive(true);
+      if (!st.onWindyMove) {
+        st.onWindyMove = () => syncMapboxFromWindy(map);
+        try {
+          m.on('move', st.onWindyMove);
+        } catch {
+          /* noop */
+        }
+      }
+    }
+  }
+
+  /** Retour au mode normal : Mapbox redevient la carte, Windy est masqué. */
+  function exitWeatherMode(map: mapboxgl.Map) {
+    const st = windyRef.current;
+    if (!st.weatherMode) return;
+    st.weatherMode = false;
+    try {
+      map.getContainer().classList.remove('windy-active');
+    } catch {
+      /* noop */
+    }
+    if (st.el) st.el.style.pointerEvents = 'none';
+    const m = st.map as any;
+    if (m) {
+      setWindyInteractive(false);
+      if (st.onWindyMove) {
+        try {
+          m.off('move', st.onWindyMove);
+        } catch {
+          /* noop */
+        }
+        st.onWindyMove = null;
+      }
+    }
+    /* Rétablit le sync Mapbox→Windy (Windy redevient overlay masqué). */
+    if (!st.onMove) {
+      let rafId = 0;
+      const onMove = () => {
+        if (rafId) return;
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          syncWindyCamera(map);
+        });
+      };
+      map.on('move', onMove);
+      st.onMove = onMove;
+    }
+    syncWindyCamera(map);
+    // Le canvas Mapbox vient d'être ré-affiché (retiré du display:none) : on
+    // force une nouvelle frame pour ne pas rester sur une scène périmée.
+    try {
+      map.triggerRepaint?.();
+    } catch {
+      /* noop */
+    }
+  }
+
+  /** Met à jour la caméra Mapbox depuis Windy (mode météo, sens inversé). */
+  function syncMapboxFromWindy(map: mapboxgl.Map) {
+    const m = windyRef.current.map as unknown as
+      | { getCenter: () => { lng: number; lat: number }; getZoom: () => number }
+      | null
+      | undefined;
+    if (!m) return;
+    try {
+      const c = m.getCenter();
+      const z = m.getZoom();
+      if (c && isFinite(c.lng) && isFinite(c.lat) && isFinite(z)) {
+        map.setCenter([c.lng, c.lat]);
+        map.setZoom(z);
+      }
+    } catch {
+      /* noop */
+    }
+  }
+
+  /** Affiche (ou initialise puis affiche) l'overlay Windy synchronisé, à
+   *  l'heure de prévision `timeIndex` de la timeline. `metric` choisit la
+   *  couche Windy : 'wind' (particules) ou temp/pressure/rainfall. */
+  async function enableWindyOverlay(map: mapboxgl.Map, timeIndex: number, metric = 'wind') {
+    const st = windyRef.current;
+    st.seq += 1;
+    const seq = st.seq;
+    /* `metric` est déjà l'identifiant d'overlay Windy (wind/temperature/
+       pressure/rain) — cf. WINDY_OVERLAY dans applyWeatherLayer. */
+    const windyOverlay = metric;
+    const isParticles = metric === 'wind';
+    if (!WINDY_KEY) {
+      if (!st.warnedNoKey) {
+        st.warnedNoKey = true;
+        console.warn(
+          '[windy] VITE_WINDY_API_KEY absente — les couches météo Windy sont désactivées. Ajoutez la clé Windy dans le .env racine (frontend, envDir = ..).'
+        );
+        // Signale l'état sur le conteneur de la carte : le CSS peut afficher
+        // un indice (cartes météo sans données tant que la clé est absente).
+        try {
+          map.getContainer().setAttribute('data-windy-state', 'no-key');
+        } catch {
+          /* noop */
+        }
+      }
+      return;
+    }
+    try {
+      map.getContainer().setAttribute('data-windy-state', 'on');
+    } catch {
+      /* noop */
+    }
+    try {
+      await loadWindyLib();
+      if (seq !== st.seq) return;
+      // Heure cible : `timeIndex` = offset en HEURES depuis maintenant
+      // (jour du calendrier × 24 + heure du curseur — cf. FloodConsole).
+      // On part de l'heure courante tronquée (pas horaire exact, les
+      // prévisions Windy sont des fichiers horaires) et on borne à la
+      // fenêtre de prévision (≈ 10 jours / 240 h) pour ne jamais demander
+      // un timestamp sans données.
+      const nowHour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+      const hourOffset = Math.max(0, Math.min(Math.floor(timeIndex) || 0, 240));
+      const startTs = nowHour + hourOffset * 3_600_000;
+      // Conteneur transparent superposé à la carte Mapbox (au-dessus du fond,
+      // sous les marqueurs/popups qui arrivent plus tard dans le DOM).
+      let el = st.el;
+      if (!el || !el.isConnected) {
+        el = document.createElement('div');
+        // Windy libBoot.js récupère le conteneur via document.getElementById('windy')
+        // — il ignore l'option `container` passée à windyInit et jette
+        // « Missing <div id=\"windy\"></div> » s'il est absent. C'est donc l'id
+        // exact « windy » (et pas un nom custom) qu'il faut poser ici.
+        el.id = 'windy';
+        el.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden;';
+        map.getContainer().appendChild(el);
+        st.el = el;
+      } else {
+        el.style.display = 'block';
+      }
+
+      if (!st.map) {
+        const center = map.getCenter();
+        await new Promise<void>((resolve, reject) => {
+          const windyInit = (window as unknown as { windyInit?: (o: unknown, cb: (a: unknown) => void) => void })
+            .windyInit;
+          if (!windyInit) {
+            reject(new Error('windyInit indisponible'));
+            return;
+          }
+          windyInit(
+            {
+              key: WINDY_KEY,
+              lat: center.lat,
+              lon: center.lng,
+              zoom: map.getZoom(),
+              container: el,
+              timestamp: startTs,
+            },
+            (api: unknown) => {
+              try {
+                const a = api as any;
+                st.api = api;
+                st.map = a?.map ?? null;
+                const m = a?.map;
+                if (m) {
+                  m.dragging?.disable?.();
+                  m.touchZoom?.disable?.();
+                  m.doubleClickZoom?.disable?.();
+                  m.scrollWheelZoom?.disable?.();
+                  m.keyboard?.disable?.();
+                  m.boxZoom?.disable?.();
+                  if (m.zoomControl) {
+                    try {
+                      m.removeControl(m.zoomControl);
+                    } catch {
+                      /* noop */
+                    }
+                  }
+                  try {
+                    m.getContainer?.()
+                      ?.querySelectorAll?.('.leaflet-control-container, .leaflet-top, .leaflet-bottom')
+                      .forEach((n: Element) => {
+                        (n as HTMLElement).style.display = 'none';
+                      });
+                  } catch {
+                    /* noop */
+                  }
+                  const mo = m.options ?? {};
+                  mo.zoomSnap = 0.1;
+                  mo.zoomDelta = 0.1;
+                }
+                // Couche météo Windy + timestamp calé sur la timeline. Le
+                // vent passe en particules animées ; les autres métriques en
+                // tuiles colorées. Les particles-mode ne masquent la basemap
+                // Windy (pane de tuiles) QUE pour 'wind'.
+                try {
+                  a?.store?.set?.('overlay', windyOverlay);
+                  /* particlesAnim='on' active les particules animées (layer
+                     windParticles) ; 'off' affiche le champ coloré. */
+                  a?.store?.set?.('particlesAnim', isParticles ? 'on' : 'off');
+                  el.classList.toggle('windy-particles-mode', isParticles);
+                  a?.store?.set?.('timestamp', startTs);
+                } catch {
+                  /* noop */
+                }
+                resolve();
+              } catch (e) {
+                reject(e);
+              }
+            }
+          );
+        });
+        if (seq !== st.seq) {
+          disableWindyOverlay(map);
+          return;
+        }
+      }
+
+      // Mode météo : Windy devient la carte (fond + météo), Mapbox est masqué
+      // et ne fait que suivre la caméra de Windy. Idempotent.
+      enterWeatherMode(map);
+
+      // Réactive la couche météo + heure de la timeline + synchronise la
+      // caméra et rattache les moves de la carte.
+      try {
+        (st.api as any)?.store?.set?.('overlay', windyOverlay);
+        (st.api as any)?.store?.set?.('particlesAnim', isParticles ? 'on' : 'off');
+        st.el?.classList.toggle('windy-particles-mode', isParticles);
+        (st.api as any)?.store?.set?.('timestamp', startTs);
+      } catch {
+        /* noop */
+      }
+      // Leaflet (Windy) ne gère ni bearing ni pitch : on repasse la carte
+      // Mapbox à 0° et on bloque la rotation pendant l'overlay (rétablie à la
+      // désactivation).
+      try {
+        if (st.prevRot == null) {
+          st.prevRot = {
+            dragRotate: map.dragRotate?.isEnabled?.() ?? false,
+            touchPitch: map.touchPitch?.isEnabled?.() ?? false,
+          };
+        }
+        if (map.getBearing() !== 0) map.easeTo({ bearing: 0, duration: 350 });
+        map.dragRotate?.disable?.();
+        map.touchPitch?.disable?.();
+      } catch {
+        /* noop */
+      }
+      if (!st.onMove && !st.weatherMode) {
+        /* `move` Mapbox se déclenche plusieurs fois par image : on coalesce
+           le setView Leaflet via requestAnimationFrame pour ne synchroniser
+           l'overlay qu'une fois par frame (et surtout ne pas relancer un
+           re-layout + re-rendu Leaflet à chaque événement move). En mode
+           météo (weatherMode) c'est Windy qui pilote — ce listener n'est pas
+           posé pour éviter une boucle Mapbox↔Windy. */
+        let rafId = 0;
+        const onMove = () => {
+          if (rafId) return;
+          rafId = window.requestAnimationFrame(() => {
+            rafId = 0;
+            syncWindyCamera(map);
+          });
+        };
+        map.on('move', onMove);
+        st.onMove = onMove;
+      }
+      syncWindyCamera(map);
+      const m = st.map as any;
+      if (m) {
+        try {
+          m.invalidateSize?.({ pan: false });
+        } catch {
+          /* noop */
+        }
+      }
+    } catch (err) {
+      console.warn('[windy]', err);
+      // Propage l'échec (réseau / clé invalide) à l'appelant.
+      throw err;
+    }
+  }
+
+  /** Masque (sans détruire) l'overlay Windy — ex. autre carte météo choisie. */
+  function disableWindyOverlay(map: mapboxgl.Map) {
+    const st = windyRef.current;
+    st.seq += 1;
+    // Sort du mode météo d'abord : Mapbox redevient la carte, puis on retire
+    // le listener et on masque l'overlay.
+    exitWeatherMode(map);
+    if (st.onMove) {
+      try {
+        map.off('move', st.onMove);
+      } catch {
+        /* noop */
+      }
+      st.onMove = null;
+    }
+    try {
+      if (st.prevRot?.dragRotate) map.dragRotate?.enable?.();
+      if (st.prevRot?.touchPitch) map.touchPitch?.enable?.();
+    } catch {
+      /* noop */
+    }
+    st.prevRot = null;
+    if (st.el) st.el.style.display = 'none';
+  }
+
+  /** Destruction complète (démontage du composant). */
+  function disposeWindy() {
+    const st = windyRef.current;
+    st.seq += 1;
+    const m = st.map as any;
+    if (st.el && st.el.isConnected) {
+      try {
+        if (st.onWindyMove && m) m.off('move', st.onWindyMove);
+      } catch {
+        /* noop */
+      }
+      try {
+        m?.remove?.();
+      } catch {
+        /* noop */
+      }
+      st.el.remove();
+    }
+    st.api = null;
+    st.map = null;
+    st.el = null;
+    st.lib = null;
+    st.onMove = null;
+    st.onWindyMove = null;
+    st.weatherMode = false;
+  }
+
+  /** Couche météo active. Tout passe par l'overlay Windy (api.windy.com)
+   *  synchronisé sur la carte : « wind » affiche les particules de vent, les
+   *  autres métriques basculent l'overlay Windy sur l'overlay correspondant
+   *  (température / pression / pluie). `timeIndex` sélectionne l'heure de
+   *  prévision. */
+  /* Les identifiants d'overlay Windy sont ceux du module `overlays` de
+     libBoot.js : wind, temp, pressure, rain… — PAS « temperature ». Passer
+     une valeur invalide (ex. « temperature ») fait jeter « Invalid value for
+     overlay » et plonge la lib dans une boucle de rendu qui ré-upload sans
+     cesse des textures WebGL vides (« Texture has not been initialized…
+     This may be slow ») — la cause n°1 du lag météo. */
+  const WINDY_OVERLAY: Record<string, string> = {
+    wind: 'wind',
+    temp: 'temp',
+    pressure: 'pressure',
+    rainfall: 'rain',
+  };
+  function applyWeatherLayer(map: mapboxgl.Map, metric: string | undefined, timeIndex: number) {
+    if (!metric) {
+      disableWindyOverlay(map);
+      return;
+    }
+    void enableWindyOverlay(map, timeIndex, WINDY_OVERLAY[metric] ?? 'wind');
+  }
+
+  /* ── Flood Mapping — Vigicrues (tronçons de vigilance crues) ──
+     Charge InfoVigiCru.geojson (via le proxy dev /vigicrues) et ajoute une
+     couche GeoJSON des tronçons colorés par niveau de vigilance :
+       1 = vert (pas de vigilance particulière)
+       2 = jaune (risque modéré de crue)
+       3 = orange (risque élevé de crue)
+       4 = rouge (crue majeure, menace directe)
+     La couche est retirée quand le toggle FLOOD MAPPING est désactivé. */
+  const VIGICRUES_SOURCE = 'vigicrues-flood';
+  const VIGICRUES_LAYER = 'vigicrues-flood-lines';
+
+  function addFloodVigilanceLayer(map: mapboxgl.Map) {
+    if (map.getLayer(VIGICRUES_LAYER)) return;
+    const addSource = (data: GeoJSON.FeatureCollection) => {
+      if (!map.getSource(VIGICRUES_SOURCE)) {
+        map.addSource(VIGICRUES_SOURCE, {
+          type: 'geojson',
+          data,
         });
       }
-      if (!map.getLayer(WIND_LAYER)) {
+      if (!map.getLayer(VIGICRUES_LAYER)) {
         map.addLayer({
-          id: WIND_LAYER,
-          type: 'raster-particle',
-          source: WIND_SOURCE,
-          'source-layer': '10winds',
+          id: VIGICRUES_LAYER,
+          type: 'line',
+          source: VIGICRUES_SOURCE,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: {
-            'raster-particle-speed-factor': 0.4,
-            'raster-particle-fade-opacity-factor': 0.9,
-            'raster-particle-reset-rate-factor': 0.4,
-            'raster-particle-count': 4000,
-            'raster-particle-max-speed': 40,
-            'raster-particle-color': [
-              'interpolate', ['linear'], ['raster-particle-speed'],
-              1.5, 'rgba(134,163,171,256)',
-              2.5, 'rgba(126,152,188,256)',
-              4.12, 'rgba(110,143,208,256)',
-              4.63, 'rgba(110,143,208,256)',
-              6.17, 'rgba(15,147,167,256)',
-              7.72, 'rgba(15,147,167,256)',
-              9.26, 'rgba(57,163,57,256)',
-              10.29, 'rgba(57,163,57,256)',
-              11.83, 'rgba(194,134,62,256)',
-              13.37, 'rgba(194,134,63,256)',
-              14.92, 'rgba(200,66,13,256)',
-              16.46, 'rgba(200,66,13,256)',
-              18.0, 'rgba(210,0,50,256)',
-              20.06, 'rgba(215,0,50,256)',
-              21.6, 'rgba(175,80,136,256)',
-              23.66, 'rgba(175,80,136,256)',
-              25.21, 'rgba(117,74,147,256)',
-              27.78, 'rgba(117,74,147,256)',
-              29.32, 'rgba(68,105,141,256)',
-              31.89, 'rgba(68,105,141,256)',
-              33.44, 'rgba(194,251,119,256)',
-              42.18, 'rgba(194,251,119,256)',
-              43.72, 'rgba(241,255,109,256)',
-              48.87, 'rgba(241,255,109,256)',
-              50.41, 'rgba(256,256,256,256)',
-              57.61, 'rgba(256,256,256,256)',
-              59.16, 'rgba(0,256,256,256)',
-              68.93, 'rgba(0,256,256,256)',
-              69.44, 'rgba(256,37,256,256)',
+            'line-color': [
+              'match',
+              ['get', 'NivInfViCr'],
+              4,
+              '#ff3b30',
+              3,
+              '#ff9f0a',
+              2,
+              '#f0c33c',
+              1,
+              '#2fbf71',
+              '#2fbf71',
             ],
+            'line-width': 2.6,
+            'line-opacity': 0.9,
           },
         });
       }
-    } else {
-      if (map.getLayer(WIND_LAYER)) map.removeLayer(WIND_LAYER);
-      if (map.getSource(WIND_SOURCE)) map.removeSource(WIND_SOURCE);
-    }
+    };
+    fetch('/vigicrues/services/InfoVigiCru.geojson')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(addSource)
+      .catch(() => {
+        /* Vigicrues indisponible : on retire toute source résiduelle. */
+        removeFloodVigilanceLayer(map);
+      });
   }
+
+  function removeFloodVigilanceLayer(map: mapboxgl.Map) {
+    if (map.getLayer(VIGICRUES_LAYER)) map.removeLayer(VIGICRUES_LAYER);
+    if (map.getSource(VIGICRUES_SOURCE)) map.removeSource(VIGICRUES_SOURCE);
+  }
+
+  /* ── Enveloppe d'inondation MODÉLISÉE ──
+     Un volume d'eau de la hauteur du moteur, dans l'empreinte RÉELLE de
+     chaque bâtiment de la vue, plafonné par sa hauteur BDNB. Ce n'est pas
+     une surface de crue : c'est la profondeur du modèle (uniforme, au pas de
+     5 cm) dessinée à l'échelle du bâti — la même hypothèse que les compteurs
+     de dommages. Aucune géométrie n'est écrite : tout passe par les
+     propriétés de peinture (littéraux), donc la lecture de la timeline ne
+     réécrit jamais la collection GeoJSON. */
+  function ensureBuildingsWaterLayer(map: mapboxgl.Map) {
+    if (map.getLayer(BUILDINGS_WATER_LAYER)) return;
+    if (!map.getSource(BUILDINGS_SOURCE)) return;
+    map.addLayer({
+      id: BUILDINGS_WATER_LAYER,
+      type: 'fill-extrusion',
+      source: BUILDINGS_SOURCE,
+      layout: { visibility: 'none' },
+      paint: {
+        'fill-extrusion-height': waterHeightExpr(0),
+        'fill-extrusion-base': 0,
+        'fill-extrusion-color': '#4fb4e8',
+        'fill-extrusion-opacity': 0.85,
+      },
+    });
+  }
+
+  /** Applique l'enveloppe courante : hauteur d'eau, teinte, visibilité.
+   *  Aucun `setData` : la profondeur est UNIFORME (hypothèse du modèle), donc
+   *  elle s'exprime en littéraux dans l'expression de hauteur. */
+  function applyImpact(map: mapboxgl.Map, next: { slabM: number; color: string } | null) {
+    ensureBuildingsWaterLayer(map);
+    if (!map.getLayer(BUILDINGS_WATER_LAYER)) return;
+    const slab = quantiseSlab(next?.slabM ?? 0);
+    if (next?.color) {
+      map.setPaintProperty(BUILDINGS_WATER_LAYER, 'fill-extrusion-color', next.color);
+    }
+    if (slab !== impactSlabRef.current) {
+      impactSlabRef.current = slab;
+      map.setPaintProperty(BUILDINGS_WATER_LAYER, 'fill-extrusion-height', waterHeightExpr(slab));
+    }
+    map.setLayoutProperty(
+      BUILDINGS_WATER_LAYER,
+      'visibility',
+      next && slab > 0 ? 'visible' : 'none'
+    );
+  }
+
+  /* L'enveloppe suit l'instant t : la lecture de la timeline fait monter
+     l'eau du modèle sans retélécharger le bâti. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    /* `null` est un état à part entière : le scénario le plus faible repasse
+       SOUS le seuil du moteur, et la couche doit alors disparaître (ne pas
+       sortir tôt sur `!impactOn`, sinon l'eau du scénario précédent reste
+       peinte sous un compteur qui dit « sous le seuil »). */
+    applyImpact(map, impact);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [impactOn, impact?.slabM, impact?.color]);
+
+  /* L'eau se peint dans l'empreinte RÉELLE du bâti : elle exige donc le bâti
+     du cadrage courant. On (re)charge la vue dès l'entrée en analyse et dès
+     qu'une enveloppe s'ouvre (le bâti de l'étape 1 couvre le cadrage France,
+     pas la scène) — sinon la première montée d'eau attendrait un aller-retour
+     réseau avant d'apparaître. */
+  useEffect(() => {
+    if (!riskHighlight && !impactOn) return;
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    void loadBuildings(map);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riskHighlight, impactOn]);
 
   function ensureBuildingsLayer(map: mapboxgl.Map) {
     if (map.getLayer(BUILDINGS_LAYER)) return;
@@ -1001,28 +1985,6 @@ export function UnifiedMap({
         'fill-outline-color': currentAccent(),
       },
     });
-    /* Étiquette flottante du bâtiment cible (P9) — id BDNB tronqué, visible
-       à partir du zoom 15 (identification même sous des volumes de risque). */
-    map.addLayer({
-      id: TARGET_LABEL_LAYER,
-      type: 'symbol',
-      source: BUILDINGS_SOURCE,
-      filter: targetId ? ['==', ['get', 'batiment_groupe_id'], targetId] : ['==', ['get', 'batiment_groupe_id'], ''],
-      minzoom: 15,
-      layout: {
-        'text-field': ['slice', ['get', 'batiment_groupe_id'], -9],
-        'text-size': 11,
-        'text-anchor': 'bottom',
-        'text-offset': [0, -1.2],
-        'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
-        'symbol-placement': 'point',
-      },
-      paint: {
-        'text-color': currentAccent(),
-        'text-halo-color': 'rgba(10,14,20,0.85)',
-        'text-halo-width': 1.2,
-      },
-    });
   }
 
   function updateBuildingsTarget(map: mapboxgl.Map) {
@@ -1048,10 +2010,6 @@ export function UnifiedMap({
       map.setFilter(BUILDINGS_2D_LAYER, filterExpr);
       map.setPaintProperty(BUILDINGS_2D_LAYER, 'fill-color', fillColor);
       map.setPaintProperty(BUILDINGS_2D_LAYER, 'fill-outline-color', accent);
-    }
-    if (map.getLayer(TARGET_LABEL_LAYER)) {
-      map.setFilter(TARGET_LABEL_LAYER, filterExpr);
-      map.setPaintProperty(TARGET_LABEL_LAYER, 'text-color', accent);
     }
   }
 
@@ -1079,40 +2037,6 @@ export function UnifiedMap({
     popupRef.current = null;
 
     if (!rep) return;
-
-    const aleaRows = (rep.aleas || [])
-      .filter((a) => a.present === true && a.resolution)
-      .map((a) => {
-        const band = bandForResolution(a.resolution);
-        const color = band?.color ?? '#8A8984';
-        const label = band?.label ?? '';
-        const icon = ALEA_ICONS[a.code] ?? 'crisis_alert';
-        return (
-          `<div class="mb-risk-row">` +
-          `<md-icon aria-hidden="true">${icon}</md-icon>` +
-          `<span class="mb-risk-name">${escHtml(a.libelle)}</span>` +
-          `<span class="mb-risk-pill" style="--risk-color:${color}">${escHtml(label)}</span>` +
-          `</div>`
-        );
-      })
-      .join('');
-
-    /* Indicateur d'adresse compact : en-tête adresse + aléas présents en
-       pastilles de niveau colorées (pas de gros popup ni de liens externes —
-       la carte et le panneau latéral restent les interactions principales). */
-    popupRef.current = new mapboxgl.Popup({ offset: 22, closeButton: true, maxWidth: '300px', className: 'mb-risk-popup' })
-      .setLngLat([rep.lon, rep.lat])
-      .setHTML(
-        `<div class="mb-risk-head">` +
-        `<md-icon aria-hidden="true">pin_drop</md-icon>` +
-        `<span class="mb-risk-addr">${escHtml(rep.adresse_normalisee)}</span>` +
-        `</div>` +
-        `<div class="mb-risk-rows">` +
-        (aleaRows ||
-          `<div class="mb-risk-row"><span class="mb-risk-name">Aucun aléa présent</span><span class="mb-risk-pill">—</span></div>`) +
-        `</div>`
-      )
-      .addTo(map);
 
     map.easeTo({ center: [rep.lon, rep.lat], zoom: fitZoom, duration: 1200 });
 
@@ -1375,27 +2299,6 @@ export function UnifiedMap({
       .addTo(map);
   }
 
-  /** Épingle « bâtiment cible » : accrochée au centre de l'empreinte BDNB
-   *  (géométrie réelle), visible en 2D comme en 3D. Le surlignage accent
-   *  de la couche BDNB fait le reste en 3D. */
-  function placeBuildingPin(map: mapboxgl.Map) {
-    buildingPinRef.current?.remove();
-    buildingPinRef.current = null;
-    const b = currentBatiment();
-    if (!b?.geom_groupe) return;
-    try {
-      const wgs = geomToWgs84(b.geom_groupe as Record<string, unknown>);
-      const c = polygonCenter(wgs?.coordinates);
-      if (!c) return;
-      const el = document.createElement('div');
-      el.className = 'bldg-pin';
-      el.innerHTML = '<span class="bldg-pin-dot"></span>';
-      buildingPinRef.current = new mapboxgl.Marker({ element: el, anchor: 'bottom', offset: [0, 0] })
-        .setLngLat([c[0], c[1]])
-        .addTo(map);
-    } catch { /* */ }
-  }
-
   async function loadBuildings(map: mapboxgl.Map) {
     let west = 0, south = 0, east = 0, north = 0;
     try {
@@ -1404,8 +2307,27 @@ export function UnifiedMap({
       west = bounds.getWest(); south = bounds.getSouth(); east = bounds.getEast(); north = bounds.getNorth();
       if (!isFinite(west) || !isFinite(east)) return;
     } catch { return; }
+    /* Cache de cadrage : tant que la vue reste DANS l'emprise déjà chargée et
+       pour la même adresse, aucun appel réseau (le bâti est déjà là). Sans ce
+       garde-fou, chaque fin de déplacement en vue d'analyse relançait un
+       téléchargement d'empreintes. */
+    const target = currentBatiment()?.batiment_groupe_id ?? null;
+    const prev = loadedBboxRef.current;
+    if (
+      prev &&
+      prev.target === target &&
+      west >= prev.west && south >= prev.south && east <= prev.east && north <= prev.north
+    ) {
+      return;
+    }
     const seq = ++buildingsSeqRef.current;
-    const url = `${API}/diagnostic/zone/buildings?west=${west}&south=${south}&east=${east}&north=${north}&limit=${buildingsLimitRef.current}`;
+    /* Marge de 20 % demandée au serveur : la couverture mémorisée dépasse
+       alors la vue, ce qui absorbe les petits déplacements (le cache de
+       cadrage ci-dessus évite un aller-retour par micro-pan). */
+    const padX = (east - west) * 0.2;
+    const padY = (north - south) * 0.2;
+    const req = { west: west - padX, south: south - padY, east: east + padX, north: north + padY };
+    const url = `${API}/diagnostic/zone/buildings?west=${req.west}&south=${req.south}&east=${req.east}&north=${req.north}&limit=${buildingsLimitRef.current}`;
     try {
       const resp = await fetch(url);
       if (seq !== buildingsSeqRef.current || !mapRef.current) return;
@@ -1422,26 +2344,16 @@ export function UnifiedMap({
           if (wgsGeom) fc.features.push({ type: 'Feature', geometry: wgsGeom as unknown as GeoJSON.Geometry, properties: { batiment_groupe_id: b.batiment_groupe_id, hauteur_mean: b.hauteur_mean || 10 } });
         }
       }
+      /* La couverture n'est mémorisée QUE pour un chargement de scène (vue
+         d'analyse / 3D) : le chargement « France » du premier écran est trop
+         large et trop clairsemé pour servir de couverture à une scène. */
+      if (riskHintRef.current || is3dRef.current) {
+        loadedBboxRef.current = { ...req, target };
+      }
       (map.getSource(BUILDINGS_SOURCE) as mapboxgl.GeoJSONSource)?.setData(fc);
+      /* Le bâti vient d'être (re)chargé : l'enveloppe se repose dessus. */
+      applyImpact(map, impactRef.current);
     } catch { /* */ }
-  }
-
-  function toggle3D(enabled: boolean) {
-    const map = mapRef.current;
-    if (!map) return;
-    is3dRef.current = enabled; setIs3d(enabled);
-    for (const id of [BUILDINGS_LAYER, BUILDINGS_OUTLINE_LAYER, NATIVE_BUILDINGS_LAYER]) {
-      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', enabled ? 'visible' : 'none');
-    }
-    if (map.getLayer(BUILDINGS_2D_LAYER)) {
-      map.setLayoutProperty(BUILDINGS_2D_LAYER, 'visibility', enabled ? 'none' : 'visible');
-    }
-    if (enabled && !overview) updateBuildingsTarget(map); // filtre BDNB → bâtiment cible
-    applyRiskLayersVisibility(map); // couches de risque : 2D uniquement
-    map.easeTo({ pitch: enabled ? 55 : 0, duration: 800 });
-    // En mode overview (France) les bâtiments 3D sont natifs du style
-    // Standard — pas de chargement BDNB pour tout le pays.
-    if (enabled && !overview) void loadBuildings(map);
   }
 
   function toggleParcels(enabled: boolean) {
@@ -1463,19 +2375,6 @@ export function UnifiedMap({
     riskBuildingModeRef.current = enabled;
     setRiskBuildingMode(enabled);
     updateBuildingsTarget(map);
-  }
-
-  /** Toggle éclairage du style Standard : crépuscule (dusk) ↔ jour (day). */
-  function toggleLight() {
-    const map = mapRef.current;
-    if (!map || !IS_STANDARD_STYLE) return;
-    const next = lightPreset === 'dusk' ? 'day' : 'dusk';
-    try {
-      map.setConfigProperty('basemap', 'lightPreset', next);
-      setLightPreset(next);
-    } catch {
-      // Style non-Standard : la config est ignorée, rien à faire.
-    }
   }
 
   /* Légende bas-gauche (P4) : bandes D03 réellement affichées sur la carte en
@@ -1508,7 +2407,10 @@ export function UnifiedMap({
           </div>
         </div>
       )}
-      {!mapError && !(points?.length) && (
+      {/* Barre d'outils : ne s'affiche que s'il reste un chip (parcelles ou
+         bâtiment cible) — les toggles 3D et éclairage jour/crépuscule ont
+         été retirés. */}
+      {!mapError && !(points?.length) && (allowParcels || batimentRiskBand(batimentRisques)) && (
         <div className="mb-demo-tools" role="group" aria-label="Options de la carte">
           {allowParcels && (
             <button type="button"
@@ -1520,14 +2422,6 @@ export function UnifiedMap({
               <span>Parcelles</span>
             </button>
           )}
-          <button type="button"
-            className={`map-3d-toggle analyse${is3d ? ' active' : ''}`}
-            onClick={() => toggle3D(!is3d)} aria-pressed={is3d}
-            title={is3d ? 'Revenir à la vue 2D' : 'Passer en vue 3D (bâtiments extrudés BDNB)'}
-            aria-label={is3d ? 'Revenir à la vue 2D' : 'Passer en vue 3D'}>
-            <md-icon>view_in_ar</md-icon>
-            <span>{is3d ? '2D' : '3D'}</span>
-          </button>
           {batimentRiskBand(batimentRisques) && (
             <button type="button"
               className={`map-3d-toggle analyse${riskBuildingMode ? ' active' : ''}`}
@@ -1538,18 +2432,6 @@ export function UnifiedMap({
               aria-label={riskBuildingMode ? 'Désactiver le mode risques bâtiment' : 'Activer le mode risques bâtiment'}>
               <md-icon>home_work</md-icon>
               <span>Bâtiment</span>
-            </button>
-          )}
-          {IS_STANDARD_STYLE && (
-            <button type="button"
-              className={`map-3d-toggle analyse${lightPreset === 'dusk' ? ' active' : ''}`}
-              onClick={toggleLight} aria-pressed={lightPreset === 'dusk'}
-              title={lightPreset === 'dusk'
-                ? 'Passer en mode jour (éclairage standard)'
-                : 'Passer en mode crépuscule (coucher de soleil)'}
-              aria-label={lightPreset === 'dusk' ? 'Passer en mode jour' : 'Passer en mode crépuscule'}>
-              <md-icon>{lightPreset === 'dusk' ? 'light_mode' : 'wb_twilight'}</md-icon>
-              <span>{lightPreset === 'dusk' ? 'Jour' : 'Crépuscule'}</span>
             </button>
           )}
         </div>
