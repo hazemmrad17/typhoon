@@ -76,6 +76,18 @@ les variables `VITE_*` depuis là via `envDir: '..'`) et renseigner :
 | `CDSAPI_KEY` / `CDSAPI_URL` | Copernicus CDS |
 | `PARTNER_API_KEYS` | Endpoints fermés si absent (mode dev) |
 
+## Démo — adresses de référence (vérifiées live 2026-09-14)
+
+| Adresse | Rôle | Résultat vérifié |
+|---|---|---|
+| **Quai de la Rapée, 75012 Paris** | Démo principale — eau sur le bâtiment | `available: true` · Moyen 0–1 m · Faible 2–3 m · bassin Seine |
+| **10 Quai de la Charente, 75019 Paris** | Absence honnête — dans un TRI sans classe au point | `in_tri: true`, 6/13 aléas, fiche BDNB 699 m² |
+| Adresse intérieure hors TRI (ex. Brou, 28300) | Contraste « hors TRI ≠ jamais inondé » | `available: false, in_tri: false` |
+
+Déroulé suggéré : Rapée (diagnostic → étape 2 → Moyen → scrub → Play) →
+Charente (rigueur : message distinct, aucun chiffre inventé) → hors TRI →
+export PDF.
+
 ## Tests & qualité
 
 ```bash
