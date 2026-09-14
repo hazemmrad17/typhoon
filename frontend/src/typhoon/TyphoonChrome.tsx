@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ACCENTS, BRAND_ACCENT, useTyphoonTheme } from './useTyphoonTheme';
 

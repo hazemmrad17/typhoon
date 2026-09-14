@@ -29,7 +29,6 @@ import {
   fetchFloodAlea,
   triDepthForScenario,
   bandPeakM,
-  triProvenanceLabel,
   type FloodAleaResult,
 } from '../zone/floodAlea';
 import {
@@ -101,10 +100,6 @@ function categoryIcon(category: string): string {
   if (category === 'conduit') return 'water_damage';
   if (category === 'vegetation') return 'park';
   return 'shield';
-}
-
-function riskLevelClass(level: string): string {
-  return (level ?? '').toLowerCase() || 'unknown';
 }
 
 function cap(s: string | null | undefined): string | null {
@@ -416,11 +411,6 @@ export function ReportPage({
       ],
     ];
   }, [hydro, journey]);
-
-  const orderedCats = useMemo(
-    () => stream.catOrder.map((k) => stream.cats[k]).filter((c) => !!c),
-    [stream.catOrder, stream.cats]
-  );
 
   /* ── Synthèse DÉTERMINISTE (façon Géorisques) — dérivée de report.aleas.
      Aucune intervention du LLM : le comptage et les statuts viennent des

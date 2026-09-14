@@ -209,10 +209,10 @@ def test_scenario_keys_map_to_layers() -> None:
     assert set(flood_alea.SCENARIO_QUERY) == set(flood_alea.SCENARIO_KEYS)
     for layers in flood_alea.SCENARIO_QUERY.values():
         assert layers
-        assert all(l.startswith("ms:ISO_HT_") for l in layers)
+        assert all(layer.startswith("ms:ISO_HT_") for layer in layers)
     # 11 couches méropole uniques : typ 01 (4 classes) + typ 02 (3, pas de
     # 03MCC) + typ 03 (4) — vérifié sur le GetCapabilities live (2026-09-14).
-    assert len({l for ls in flood_alea.SCENARIO_QUERY.values() for l in ls}) == 11
+    assert len({layer for layers_ in flood_alea.SCENARIO_QUERY.values() for layer in layers_}) == 11
 
 
 def test_scenario_from_scenario_attr() -> None:

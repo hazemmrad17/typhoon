@@ -96,7 +96,7 @@ export function ScenarioPanel({
   report,
   scenarioKey,
   onScenarioChange,
-  timeMin,
+  timeMin: _timeMin,
   photo,
   floodAlea = null,
   triFailed = false,

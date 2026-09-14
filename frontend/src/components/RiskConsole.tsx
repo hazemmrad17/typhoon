@@ -9,7 +9,6 @@ import {
 import type { RisqueReport } from '../zone/config';
 import { INFRA_THRESHOLD_M, impactState } from '../zone/impactModel';
 import {
-  accumFracAt,
   curveIsHypothesis,
   rainProfileFrom,
   scenarioDepthAt,
@@ -19,7 +18,6 @@ import type { MeteoData } from '../zone/hydroRoute';
 import {
   gustAt,
   gustBand,
-  gustProfileFrom,
   type GustProfile,
 } from '../zone/windSim';
 
@@ -54,12 +52,6 @@ const HOUR_MARKS = Array.from({ length: 9 }, (_, i) => i * 3 * 60);
 /* Piste façon règle : segments par heure (rectangles fins). */
 const TRACK_SEGMENTS = Array.from({ length: 24 }, (_, i) => i);
 
-const hourLabel = (iso: string | null): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2, '0')}h`;
-};
-
 /** Libellé d'heure de prévision (« 14h ») → minute de la journée (840).
  *  `null` si le libellé n'est pas exploitable : on ne devine pas une heure. */
 const hourLabelToMin = (label: string | null | undefined): number | null => {
@@ -69,7 +61,7 @@ const hourLabelToMin = (label: string | null | undefined): number | null => {
 };
 
 export function RiskConsole({
-  report,
+  report: _report,
   timeMin,
   onTimeChange,
   meteo,

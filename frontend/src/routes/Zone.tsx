@@ -74,7 +74,7 @@ import {
   type FloodAleaResult,
 } from '../zone/floodAlea';
 import { mapImpactFromDepth } from '../zone/impactModel';
-import { curveIsHypothesis, rainProfileFrom, scenarioDepthAt } from '../zone/floodSim';
+import { rainProfileFrom, scenarioDepthAt } from '../zone/floodSim';
 import { SCENARIOS } from '../zone/damageModel';
 import { gustProfileFrom, gustAt, gustBand } from '../zone/windSim';
 import { fireConePolygon } from '../zone/hazardSim';
@@ -296,8 +296,8 @@ export function Zone() {
   }, [isRiskView, hazardEvent, rainProfile, riskTimeMin, triPeak]);
 
   /* Le régime de courbe affiché : piloté par la pluie réelle, ou hypothèse
-     documentée (journée sèche). Partagé par la console et le panneau. */
-  const curveHypothesis = curveIsHypothesis(rainProfile);
+     documentée (journée sèche). La console et le panneau le recalculent via
+     curveIsHypothesis — une seule source de vérité (fonction pure). */
 
   /* Sélection utile : dès que la cartographie TRI arrive, si le scénario
      sélectionné n'est PAS cartographié au point, basculer sur la classe la
