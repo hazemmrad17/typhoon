@@ -171,6 +171,56 @@ frontend/
 - Arrondissements Paris/Lyon/Marseille : retranslater vers la commune parente
 - Géocodeur : 429 + Retry-After à 50 req/s/IP — helper `_get_with_429_retry`
 
+## Déploiement
+
+Deux hôtes : **Render** (backend FastAPI, gratuit) + **Vercel** (frontend,
+gratuit).
+
+### 1. Backend sur Render
+
+1. Pousser ce dépôt sur GitHub (fait).
+2. Sur [render.com](https://render.com) : **New → Blueprint**, choisir le dépôt
+   — le fichier `render.yaml` à la racine pré-configure tout (Python 3.12,
+   `pip install -r requirements.txt`, démarrage `uvicorn app.render_server:app`,
+   health-check `/health`, plan free).
+3. Renseigner la variable d'environnement `CORS_ALLOWED_ORIGINS` avec l'URL
+   Vercel (étape 2 ci-dessous), ex. `https://typhoon.vercel.app`.
+   Optionnel : `MISTRAL_API_KEY` pour la prose du rapport.
+4. Déployer → l'API vit sur `https://typhoon-api-xxxx.onrender.com`.
+   Health-check : `GET /health` → `{"status":"ok"}`.
+
+> Plan gratuit : l'instance s'endort après 15 min d'inactivité — la première
+> requête du réveil prend ~30 s. Un cron-ping (UptimeRobot sur `/health`)
+> la garde éveillée pendant une démo.
+
+### 2. Frontend sur Vercel
+
+1. Sur [vercel.com](https://vercel.com) : **Add New → Project**, importer le
+   même dépôt GitHub.
+2. **Root Directory** : `frontend` (le `vercel.json` à la racine configure le
+   build Vite et le fallback SPA).
+3. Variables d'environnement (production) :
+
+   | Variable | Valeur |
+   |---|---|
+   | `VITE_API_BASE` | URL Render de l'étape 1 (`https://typhoon-api-xxxx.onrender.com`) |
+   | `VITE_MAPBOX_TOKEN` | Jeton public Mapbox (même valeur que le `.env` local) |
+   | `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` | Auth |
+   | `VITE_WINDY_API_KEY` | Overlay météo (optionnel) |
+
+4. Déployer → partager l'URL obtenue.
+5. **Boucle de retour** : remettre l'URL Vercel finale dans
+   `CORS_ALLOWED_ORIGINS` côté Render (sinon le navigateur bloque les appels
+   API) puis redeployer Render.
+
+### Vérification post-déploiement
+
+```bash
+curl https://<render-url>/health
+curl "https://<render-url>/api/flood-alea?lat=48.848&lon=2.370" | head -c 200
+# puis ouvrir l'URL Vercel et diagnostiquer « Quai de la Rapée, Paris »
+```
+
 ## Documentation
 
 - `constitution.md` — règles non négociables (amendement avant spec)

@@ -1,0 +1,27 @@
+services:
+  # ── Backend FastAPI ──
+  # Racine du dépôt = backend/ : Render construit ici, pas à la racine.
+  - type: web
+    name: typhoon-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Entry point dédié : `app.render_server:app` ré-exporte `app.main:app`
+    # (Render démarre depuis rootDir, donc `app.` se résout).
+    startCommand: uvicorn app.render_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      # CORS : domaine réel du frontend Vercel (à mettre à jour après le
+      # premier déploiement Vercel — voir README §Déploiement).
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: MISTRAL_MODEL
+        value: ministral-8b-latest
+      # Mode dev : endpoints ouverts. Mettre PARTNER_API_KEYS en prod réelle.
+      - key: API_KEYS
+        value: ""
