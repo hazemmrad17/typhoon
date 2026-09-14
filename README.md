@@ -179,7 +179,8 @@ des rewrites — une seule URL, pas de CORS à gérer.
 
 ### A. Vercel monorepo (tout-en-un)
 
-Le `vercel.json` à la racine fait tout :
+Le `vercel.json` à la racine fait tout (le `package.json` racine préexistant
+n'est pas utilisé par Vercel : le build installe et compile `frontend/`) :
 
 - build : `cd frontend && npm install && npm run build` → servi depuis
   `frontend/dist`
