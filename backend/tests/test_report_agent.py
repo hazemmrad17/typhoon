@@ -265,6 +265,29 @@ async def test_stream_emits_sections_then_done(tmp_path, monkeypatch):
     assert by_type["header"][0]["sector"] == _request().sector
 
 
+def test_grounded_accepts_french_ordinal_and_decimal_comma():
+    """Prose française : « 12ᵉ arrondissement » (déduit du code postal) et
+    « 0,5 mètre » doivent rester ancrés — sinon toute réponse en français était
+    rejetée et le rapport retombait en template."""
+    allowed = {
+        int(round(n))
+        for n in [*report_agent._numbers_in("Quai de la Rapée, 75012 Paris"), 0]
+    }
+    prose = (
+        "Le quai de la Rapée, situé dans le 12ᵉ arrondissement de Paris, "
+        "présente une profondeur de crue estimée à 0,5 mètre."
+    )
+    assert report_agent._grounded(prose, allowed)
+
+
+def test_numbers_in_still_catches_hallucination():
+    """Le nettoyage des ordinaux ne doit pas affaiblir l'ancrage : un nombre
+    absent des données reste rejeté."""
+    allowed = {0, 75012}
+    assert not report_agent._grounded("Dommages estimés à 999 999 999 €.", allowed)
+    assert report_agent._numbers_in("12ᵉ arrondissement") == []
+
+
 @pytest.mark.asyncio
 async def test_stream_patches_validated_llm(tmp_path, monkeypatch):
     """Avec une prose LLM ancrée, le flux émet des « patch » ; un nombre halluciné est rejeté."""

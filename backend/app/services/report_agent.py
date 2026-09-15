@@ -55,6 +55,10 @@ CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "app" / "cache" / "r
 
 _NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
+# Ordinaux français adossés à un nombre (« 12ᵉ », « 1er », « 2e », « 3ème ») :
+# le nombre qui les porte n'est pas une donnée chiffrée du rapport.
+_ORDINAL_RE = re.compile(r"\b\d+\s*(?:ᵉʳᵉ|ᵉʳ|ᵉ|ème|eme|ère|er|e)\b", re.IGNORECASE | re.UNICODE)
+
 
 # ---------------------------------------------------------------------------
 # Formatage des nombres (fr) — cohérent avec le panneau gauche
@@ -414,9 +418,14 @@ def _allowed_numbers(req: ReportRequest) -> set[int]:
 
 
 def _numbers_in(text: str) -> list[float]:
-    # Réunit les séparateurs de milliers français (« 408 700 » → « 408700 »)
-    # pour que l'ancrage reconnaisse la valeur complète.
-    normalized = re.sub(r"(?<=\d) (?=\d)", "", text)
+    # 1. Ordinaux retirés AVANT l'extraction (« 12ᵉ arrondissement ») : ce sont
+    #    des qualificatifs grammaticaux, pas des grandeurs. Sans ce nettoyage,
+    #    un « 12ᵉ » déduit du code postal (75012) était lu comme le nombre 12,
+    #    non ancré, et la phrase entière était rejetée.
+    # 2. Séparateurs de milliers français réunis (« 408 700 » → « 408700 »)
+    # 3. Virgule décimale française gérée par float() (« 0,5 » → 0.5).
+    normalized = _ORDINAL_RE.sub(" ", text)
+    normalized = re.sub(r"(?<=\d) (?=\d)", "", normalized)
     return [float(s.replace(",", ".")) for s in _NUM_RE.findall(normalized)]
 
 
