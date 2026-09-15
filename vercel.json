@@ -1,40 +1,40 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxDuration": 60
-      }
-    },
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60
     }
-  ],
-  "routes": [
+  },
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
+      "source": "/api/(.*)",
+      "destination": "/api/index"
     },
     {
-      "src": "/diagnostic/(.*)",
-      "dest": "/api/index.py"
+      "source": "/diagnostic/(.*)",
+      "destination": "/api/index"
     },
     {
-      "src": "/health",
-      "dest": "/api/index.py"
+      "source": "/geocode",
+      "destination": "/api/index"
     },
     {
-      "handle": "filesystem"
+      "source": "/geocode/(.*)",
+      "destination": "/api/index"
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/health",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/health/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/((?!api/|diagnostic/|geocode|health).*)",
+      "destination": "/index.html"
     }
   ]
 }
