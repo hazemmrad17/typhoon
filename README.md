@@ -8,6 +8,12 @@
 ![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+**Démo en ligne** — <https://typhoon-rose.vercel.app> : frontend statique et
+backend FastAPI servis par le **même projet Vercel** (fonction Python
+`api/index.py` derrière les rewrites du domaine, donc même origine et aucun
+CORS). Ce qui a été rejoué sur cette URL est listé dans
+[Déploiement → Vérifié live](#déploiement-de-référence-vérifié-live).
+
 Service de données climatiques **par bâtiment** pour les assureurs français.
 Une adresse → un JSON canonique joignant aléas réglementaires (Géorisques,
 point-in-polygon WFS) et vulnérabilité BDNB (139 champs verbatim), avec
@@ -192,6 +198,13 @@ n'est pas utilisé par Vercel : le build installe et compile `frontend/`) :
   aucune URL à configurer, aucun CORS. Un `VITE_API_BASE` qui pointe vers
   `http://127.0.0.1:8000` est **ignoré en production** (il désignerait la
   machine du visiteur, d'où « backend inaccessible ? »)
+- ⚠️ `api/index.py` doit lier `app` (ou `application` / `handler`) **au niveau
+  racine du module**, hors `try`/`if`. Sinon le build échoue sur
+  « Could not find a top-level "app"… », et en configuration moderne Vercel
+  écarte silencieusement la fonction de la découverte avec un message trompeur
+  (« pattern `api/index.py` doesn't match any Serverless Functions »). Le
+  diagnostic de démarrage peut donc rester, mais l'appel `_handler` doit
+  remonter par une affectation non indentée (`app = _handler`)
 
 1. Sur [vercel.com](https://vercel.com) : **Add New → Project** → importer le
    dépôt. **Root Directory : laisser VIDE** (la racine du dépôt).
@@ -207,15 +220,50 @@ n'est pas utilisé par Vercel : le build installe et compile `frontend/`) :
    | `MISTRAL_API_KEY` / `MISTRAL_MODEL` | prose du rapport (backend) |
    | `CORS_ALLOWED_ORIGINS` | l'URL Vercel finale (ex. `https://typhoon.vercel.app`) — inutile en option A car même origine, mais sans risque |
 
-4. Déployer. Vérifier :
+4. Déployer. Vérifier (adresse TRI de référence) :
 
    ```bash
-   curl https://<projet>.vercel.app/health
-   curl "https://<projet>.vercel.app/api/flood-alea?lat=48.848&lon=2.370" | head -c 200
+   BASE=https://<projet>.vercel.app
+   curl $BASE/health
+   curl "$BASE/api/flood-alea?lat=48.848&lon=2.370" | head -c 200
+   curl -X POST "$BASE/diagnostic/adresse" -H 'Content-Type: application/json' \
+     -d '{"adresse":"Quai de la Rapée, 75012 Paris"}' | head -c 200
    ```
 
-   (Le réveil d'une fonction froide prend quelques secondes — normal sur le
-   plan gratuit.)
+   (Le réveil d'une fonction froide prend 5 à 10 s, et un diagnostic complet
+   peut atteindre ~15 s à froid : normal sur le plan gratuit — appeler
+   `/health` une fois avant une démo.)
+
+### Déploiement de référence (vérifié live)
+
+Instance vérifiée le **2026-09-15** : <https://typhoon-rose.vercel.app>.
+Configuration : *Root Directory* vide, *Framework Preset* Other — tout le reste
+vient du `vercel.json`.
+
+| Contrôle | Résultat |
+|---|---|
+| `/` et `/zone` | 200 — application servie (fallback SPA) |
+| `/health`, `/health/detailed` | 200 `{"status":"ok"}` |
+| `/api/flood-alea?lat=48.848&lon=2.370` | 200 — `in_tri: true`, classes TRI réelles |
+| `/api/meteo`, `/api/hydro`, `/api/photo` | 200 |
+| `/api/geocode/search?q=rapée` | 200 — géocodage réel |
+| `POST /diagnostic/adresse` (Quai de la Rapée) | 200 en ~9–16 s |
+| `POST /api/report` | 200, `fallback_used: false`, prose française |
+| `POST /api/report/stream` | 200 en ~1,6 s — `header`, `summary`, `mitigations`, `confidence`, `appendix`, `patch`, `done` |
+| Jeton Mapbox injecté dans le bundle | oui |
+
+**Comportements propres au serverless** (à connaître avant une démo) :
+
+- Le **cache de rapports ne persiste pas** (système de fichiers de la fonction) :
+  `cache_hit` est toujours `false`, chaque rapport consomme un appel Mistral et
+  la prose varie légèrement entre deux requêtes identiques. En local, le cache
+  rejoue le rapport à l'identique — c'est la différence attendue.
+- Sans `VITE_SUPABASE_*`, l'auth reste en **mode démo (`MOCK_USER`)** : la
+  connexion fonctionne sans comptes réels.
+- Sans `MISTRAL_MODEL`, le défaut est `mistral-large-latest` ; si la clé n'a pas
+  accès à ce modèle (403 `tier_not_allowed`), mettre `ministral-8b-latest`.
+- Un `VITE_API_BASE` loopback resté dans le dashboard est **sans effet** : la
+  résolution ignore un override local sur un hôte déployé (`config.ts`).
 
 ### B. Deux hôtes (Render + Vercel) — si les fonctions serverless sont trop lentes
 
