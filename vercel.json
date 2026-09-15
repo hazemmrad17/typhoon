@@ -4,12 +4,26 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "echo 'deps installees par buildCommand'",
   "functions": {
-    "api/index.py": { "maxDuration": 60 }
+    "api/**/*.py": {
+      "maxDuration": 60
+    }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.py" },
-    { "source": "/diagnostic/(.*)", "destination": "/api/index.py" },
-    { "source": "/health", "destination": "/api/index.py" },
-    { "source": "/((?!api/|diagnostic/|health).*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/diagnostic/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/((?!api/|diagnostic/|health).*)",
+      "destination": "/index.html"
+    }
   ]
 }
