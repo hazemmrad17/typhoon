@@ -3,10 +3,36 @@
 //   Reprend le contrat du legacy zone.html (backend port 8000).
 // =============================================================================
 
-export const API: string =
-  (import.meta as any).env?.VITE_API_BASE ||
-  (window as any).TYPHOON_API ||
-  'http://127.0.0.1:8000';
+/**
+ * Base des appels API (tous les appels sont écrits `${API}/chemin`).
+ *
+ *  1. VITE_API_BASE — override explicite (dev sur backend distant) ;
+ *  2. TYPHOON_API sur window — override runtime (legacy) ;
+ *  3. hôte local (dev)   → backend FastAPI sur http://127.0.0.1:8000 ;
+ *  4. tout autre hôte    → '' , c'est-à-dire MÊME ORIGINE : le déploiement
+ *     Vercel réécrit /api/*, /diagnostic/* et /health vers la fonction Python,
+ *     donc aucune URL ni variable d'environnement n'est nécessaire — et plus
+ *     aucun CORS à configurer.
+ */
+const LOCAL_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]', '::1', ''];
+
+/** Une URL de base qui désigne la machine du VISITEUR (backend local). */
+const LOOPBACK_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
+
+function resolveApiBase(): string {
+  const isLocalPage = LOCAL_HOSTNAMES.includes(window.location.hostname);
+  const override =
+    (window as any).TYPHOON_API || (import.meta as any).env?.VITE_API_BASE || '';
+
+  // Un override loopback ne vaut que si la PAGE est servie en local. Sur un
+  // déploiement il viserait la machine du visiteur (le front chercherait son
+  // propre :8000 → « backend inaccessible ? »), donc on l'ignore.
+  if (override && (isLocalPage || !LOOPBACK_URL.test(override))) return override;
+
+  return isLocalPage ? 'http://127.0.0.1:8000' : '';
+}
+
+export const API: string = resolveApiBase();
 
 // ---------------------------------------------------------------------------
 // Bandes D03 (5 niveaux — mêmes clés que le backend risque_report.py)

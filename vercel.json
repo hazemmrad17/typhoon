@@ -17,14 +17,6 @@
       "destination": "/api/index"
     },
     {
-      "source": "/geocode",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/geocode/(.*)",
-      "destination": "/api/index"
-    },
-    {
       "source": "/health",
       "destination": "/api/index"
     },
@@ -33,7 +25,7 @@
       "destination": "/api/index"
     },
     {
-      "source": "/((?!api/|diagnostic/|geocode|health).*)",
+      "source": "/((?!api/|diagnostic/|health).*)",
       "destination": "/index.html"
     }
   ]

@@ -184,8 +184,14 @@ n'est pas utilisé par Vercel : le build installe et compile `frontend/`) :
 
 - build : `cd frontend && npm install && npm run build` → servi depuis
   `frontend/dist`
-- rewrites `/api/*`, `/diagnostic/*`, `/health` → `api/index.py` (fonction
-  Python qui monte `backend/app/main.py`)
+- rewrites `/api/*`, `/diagnostic/*`, `/health` (+ `/health/*`) → `api/index.py`
+  (fonction Python qui monte `backend/app/main.py`) — la géocodification vit
+  sous `/api/geocode/*`, donc déjà couverte
+- le frontend appelle le backend **en même origine** (URLs relatives
+  `${API}/api/...`) dès que la page n'est pas servie depuis un hôte local :
+  aucune URL à configurer, aucun CORS. Un `VITE_API_BASE` qui pointe vers
+  `http://127.0.0.1:8000` est **ignoré en production** (il désignerait la
+  machine du visiteur, d'où « backend inaccessible ? »)
 
 1. Sur [vercel.com](https://vercel.com) : **Add New → Project** → importer le
    dépôt. **Root Directory : laisser VIDE** (la racine du dépôt).
@@ -194,7 +200,7 @@ n'est pas utilisé par Vercel : le build installe et compile `frontend/`) :
 
    | Variable | Valeur |
    |---|---|
-   | `VITE_API_BASE` | **VIDE ou absent** — le frontend appelle son propre domaine (`/api/...`) |
+   | `VITE_API_BASE` | **absent** (recommandé). Override possible si le backend est ailleurs ; une valeur loopback (`http://127.0.0.1:8000`) est sans effet en production |
    | `VITE_MAPBOX_TOKEN` | jeton Mapbox |
    | `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` | auth |
    | `VITE_WINDY_API_KEY` | optionnel |
