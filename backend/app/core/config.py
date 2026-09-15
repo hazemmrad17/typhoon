@@ -19,8 +19,12 @@ ROOT_DIR = BASE_DIR.parent
 
 class Settings(BaseSettings):
     # Un seul .env à la racine du projet (pas de backend/.env).
+    # env_ignore_empty : sur Vercel, des variables d'environnement vides
+    # (ex. RATE_LIMIT_REQUESTS="") faisaient échouer la validation pydantic
+    # au démarrage (int_parsing sur "") → 500 FUNCTION_INVOCATION_FAILED sur
+    # TOUTES les routes. Une variable vide = non renseignée = valeur défaut.
     model_config = SettingsConfigDict(
-        env_file=(ROOT_DIR / ".env",), extra="ignore"
+        env_file=(ROOT_DIR / ".env",), env_ignore_empty=True, extra="ignore"
     )
 
     # BDNB (aucune cle necessaire, confirme par un test reel - voir le guide)
