@@ -5,8 +5,7 @@
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": {
-        "maxDuration": 60,
-        "includeFiles": "{backend/**,../backend/**}"
+        "maxDuration": 60
       }
     },
     {
@@ -19,9 +18,6 @@
   ],
   "routes": [
     {
-      "handle": "filesystem"
-    },
-    {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
     },
@@ -32,6 +28,9 @@
     {
       "src": "/health",
       "dest": "/api/index.py"
+    },
+    {
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",
