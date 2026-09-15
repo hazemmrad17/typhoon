@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 
 # ── Versions : changer l'un de ces numéros = nouveau namespace de cache ──
 DATA_VERSION = "1"
-PROMPT_VERSION = "6"  # + ancrage depthPeakM=0 (cas sans classe TRI / hors TRI)
+PROMPT_VERSION = "7"  # + garde-fou « depthPeakM 0 = absence de classe, pas 0 m »
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "app" / "cache" / "reports"
 
@@ -568,7 +568,11 @@ def _mistral_io(req: ReportRequest) -> tuple[str, str]:
         "Every number you write must appear in the input payload. "
         "Write ALL prose in French (fr-FR) — the reader is a French-speaking "
         "underwriter. Keep proper nouns, hazard codes and source labels as "
-        "given in the payload; do not translate them."
+        "given in the payload; do not translate them. "
+        "If scenario.depthPeakM is 0, it means NO regulatory water-depth class "
+        "is mapped at this point — never present it as a measured depth of "
+        "'0 meter' or '0,0 mètre' : write that no depth class is mapped "
+        "(« aucune classe de hauteur d'eau cartographiée ») instead."
         + (
             " The \"hydro\" payload describes the REAL watercourse the "
             "diagnosed point belongs to (French IGN BD TOPO network): write "
