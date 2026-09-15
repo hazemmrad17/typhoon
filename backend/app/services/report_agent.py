@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 
 # ── Versions : changer l'un de ces numéros = nouveau namespace de cache ──
 DATA_VERSION = "1"
-PROMPT_VERSION = "4"  # + section « trajet de l'eau » (hydrographie réelle) en flux
+PROMPT_VERSION = "5"  # + consigne de langue (prose en français, lecteur assureur FR)
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "app" / "cache" / "reports"
 
@@ -556,7 +556,10 @@ def _mistral_io(req: ReportRequest) -> tuple[str, str]:
             else "}"
         )
         + ". "
-        "Every number you write must appear in the input payload."
+        "Every number you write must appear in the input payload. "
+        "Write ALL prose in French (fr-FR) — the reader is a French-speaking "
+        "underwriter. Keep proper nouns, hazard codes and source labels as "
+        "given in the payload; do not translate them."
         + (
             " The \"hydro\" payload describes the REAL watercourse the "
             "diagnosed point belongs to (French IGN BD TOPO network): write "
