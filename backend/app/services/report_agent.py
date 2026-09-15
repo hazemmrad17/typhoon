@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 
 # ── Versions : changer l'un de ces numéros = nouveau namespace de cache ──
 DATA_VERSION = "1"
-PROMPT_VERSION = "5"  # + consigne de langue (prose en français, lecteur assureur FR)
+PROMPT_VERSION = "6"  # + ancrage depthPeakM=0 (cas sans classe TRI / hors TRI)
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "app" / "cache" / "reports"
 
@@ -398,11 +398,11 @@ def _allowed_numbers(req: ReportRequest) -> set[int]:
             allowed.add(int(round(v * 10)))
             allowed.add(int(round(v * 100)))
     s = req.scenario
-    allowed.update(
-        int(round(x))
-        for x in (s.depthPeakM,)
-        if x > 0
-    )
+    # depthPeakM == 0 est un fait à part entière (« aucune classe cartographiée
+    # au point ») : l'ancrer aussi, sinon toute prose IA évoquant ce cas
+    # légitime (Charente, hors-TRI) était rejetée et le rapport retombait en
+    # template précisément sur les adresses de démonstration.
+    allowed.add(int(round(s.depthPeakM)))
     # Le nom du secteur (adresse diagnostiquée) fait partie des faits : les
     # nombres qu'il contient (numéro de rue, code postal, code INSEE) sont
     # légitimes dans la prose. Sans cet ancrage, toute phrase citant l'adresse

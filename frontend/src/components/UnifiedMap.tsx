@@ -1890,12 +1890,28 @@ export function UnifiedMap({
     pressure: 'pressure',
     rainfall: 'rain',
   };
+  /** Les identifiants valides évoluent avec libBoot.js (« Invalid value for
+      overlay, rain » sur les libs récentes) : on demande au module `overlays`
+      de la lib la liste réellement autorisée, et on ne retombe sur un défaut
+      (wind > radar > premier disponible) que si la métrique n'y figure pas. */
+  function resolveWindyOverlay(metric: string): string {
+    const requested = WINDY_OVERLAY[metric] ?? 'wind';
+    const st = windyRef.current as { api?: { overlays?: unknown[] } | null };
+    const allowed = st.api?.overlays as unknown[] | undefined;
+    if (Array.isArray(allowed) && allowed.length) {
+      if (allowed.includes(requested)) return requested;
+      for (const fallback of ['wind', 'radar', ...allowed]) {
+        if (typeof fallback === 'string' && allowed.includes(fallback)) return fallback;
+      }
+    }
+    return requested;
+  }
   function applyWeatherLayer(map: mapboxgl.Map, metric: string | undefined, timeIndex: number) {
     if (!metric) {
       disableWindyOverlay(map);
       return;
     }
-    void enableWindyOverlay(map, timeIndex, WINDY_OVERLAY[metric] ?? 'wind');
+    void enableWindyOverlay(map, timeIndex, resolveWindyOverlay(metric));
   }
 
   /* ── Flood Mapping — Vigicrues (tronçons de vigilance crues) ──
@@ -2191,6 +2207,10 @@ export function UnifiedMap({
                   'line-dasharray': [4, 3],
                 },
               });
+              /* La SOURCE est partagée par la couche outline : la tracer aussi,
+                 sinon le nettoyage ne retire jamais `src-alea-ppr` et le rendu
+                 suivant lève « There is already a source with ID » */
+              track(layerId);
               track(outlineId);
             } else {
               map.addLayer({
