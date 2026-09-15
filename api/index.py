@@ -12,8 +12,22 @@ Le code backend vit dans backend/ : on l'ajoute au path pour que
 import sys
 from pathlib import Path
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
-sys.path.insert(0, str(BACKEND_DIR))
+# Vercel exécute la fonction depuis /var/task/ avec la racine du dépôt en CWD —
+# mais selon le runtime le chemin relatif peut différer : chercher backend/
+# de façon robuste (fichier → api/ → racine).
+_HERE = Path(__file__).resolve()
+_CANDIDATES = [
+    _HERE.parent.parent / "backend",          # déploiement standard : /var/task/api/index.py
+    _HERE.parent / "backend",                 # variante : /var/task/backend
+    Path.cwd() / "backend",                   # dernier recours : CWD/backend
+]
+for _cand in _CANDIDATES:
+    if (_cand / "app" / "main.py").exists():
+        sys.path.insert(0, str(_cand))
+        break
+else:
+    # Dernier recours : chemin relatif brut (lève une erreur explicite dans les logs)
+    sys.path.insert(0, str(_HERE.parent.parent / "backend"))
 
 from app.main import app  # noqa: E402
 
