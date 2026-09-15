@@ -2,10 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "echo 'deps installees par buildCommand'",
+  "installCommand": "pip install -r api/requirements.txt",
   "functions": {
     "api/index.py": {
-      "memory": 1024,
       "maxDuration": 60
     }
   },
