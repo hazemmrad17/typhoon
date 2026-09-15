@@ -979,46 +979,6 @@ export function ReportPage({
             ) : null}
 
           </section>
-          {/* ── Graphique : pluie PRÉVUE réelle (Open-Meteo). Aucune courbe n'est
-              dessinée si la prévision est indisponible : une courbe
-              plate laisserait croire à un événement sans pluie. ── */}
-          {/* La section n'existe QUE s'il y a une courbe à montrer. Un cadre
-              vide intitulé « aucune pluie prévue » n'apprenait rien : sur une
-              journée sèche, le fait tient en une ligne dans « Contexte météo »,
-              pas dans un graphique sans données. */}
-          {rainData.length > 0 ? (
-          <section className="rp-block">
-            <h2 className="rp-h2">Pluie prévue (Open-Meteo, mm/h)</h2>
-            <div className="rp-charts">
-                <div className="rp-chart-card">
-                  <div className="rp-chart">
-                    <ResponsiveContainer width="100%" height={220}>
-                      <AreaChart data={rainData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="rainGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#4c9aff" stopOpacity={0.5} />
-                            <stop offset="100%" stopColor="#4c9aff" stopOpacity={0.02} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                        <XAxis dataKey="hour" stroke="var(--rp-muted)" fontSize={9} tickLine={false} axisLine={false} interval={3} />
-                        <YAxis stroke="var(--rp-muted)" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
-                        <Tooltip
-                          contentStyle={{
-                            background: 'var(--md-sys-color-surface-container-high)',
-                            border: '1px solid var(--md-sys-color-outline-variant)',
-                            borderRadius: 10,
-                            fontSize: 12,
-                          }}
-                        />
-                        <Area type="monotone" dataKey="rain" stroke="#4c9aff" strokeWidth={2} fill="url(#rainGrad)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-            </div>
-          </section>
-          ) : null}
 
           {/* ── Contexte météo/hydrologique RÉEL — toujours affiché, en une
               ligne de faits : c'est l'information que le graphique vide ne
