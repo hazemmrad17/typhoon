@@ -9,6 +9,10 @@
   },
   "rewrites": [
     {
+      "source": "/vigicrues/(.*)",
+      "destination": "https://www.vigicrues.gouv.fr/$1"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/index"
     },
@@ -25,7 +29,7 @@
       "destination": "/api/index"
     },
     {
-      "source": "/((?!api/|diagnostic/|health).*)",
+      "source": "/((?!api/|diagnostic/|health|vigicrues/).*)",
       "destination": "/index.html"
     }
   ]

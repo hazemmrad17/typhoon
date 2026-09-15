@@ -193,6 +193,11 @@ n'est pas utilisé par Vercel : le build installe et compile `frontend/`) :
 - rewrites `/api/*`, `/diagnostic/*`, `/health` (+ `/health/*`) → `api/index.py`
   (fonction Python qui monte `backend/app/main.py`) — la géocodification vit
   sous `/api/geocode/*`, donc déjà couverte
+- rewrite `/vigicrues/*` → `https://www.vigicrues.gouv.fr/*` : Vigicrues
+  n'envoie pas d'en-têtes CORS, le front passe donc par un proxy — **en dev**
+  c'est le `server.proxy` de Vite, **en production** c'est cette règle Vercel
+  (sans elle, `/vigicrues/...` tombe dans le fallback SPA et renvoie du HTML :
+  « Vigilance crues indisponible »)
 - le frontend appelle le backend **en même origine** (URLs relatives
   `${API}/api/...`) dès que la page n'est pas servie depuis un hôte local :
   aucune URL à configurer, aucun CORS. Un `VITE_API_BASE` qui pointe vers
@@ -264,6 +269,12 @@ vient du `vercel.json`.
   accès à ce modèle (403 `tier_not_allowed`), mettre `ministral-8b-latest`.
 - Un `VITE_API_BASE` loopback resté dans le dashboard est **sans effet** : la
   résolution ignore un override local sur un hôte déployé (`config.ts`).
+- ⚠️ **Clé Windy liée au domaine** : l'API Windy n'autorise une clé que sur les
+  domaines déclarés dans le tableau de bord (`POST /api/map-forecast/v2/auth`
+  répond `403 key is used from unauthorized domain`). Le domaine de production
+  (et tout domaine personnalisé ajouté ensuite) doit y figurer, sinon les
+  couches météo échouent — la console nomme alors explicitement le domaine à
+  ajouter.
 
 ### B. Deux hôtes (Render + Vercel) — si les fonctions serverless sont trop lentes
 

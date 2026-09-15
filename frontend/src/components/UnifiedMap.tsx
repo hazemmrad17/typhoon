@@ -1804,7 +1804,18 @@ export function UnifiedMap({
         }
       }
     } catch (err) {
-      console.warn('[windy]', err);
+      // Un 403 Windy n'est presque jamais un bug de code : la clé est verrouillée
+      // sur une LISTE DE DOMAINES (API Windy). Un domaine déployé qui n'y figure
+      // pas fait échouer `windyInit` avec « Failed to authorize Windy API key »,
+      // sans autre indication — on nomme donc le domaine fautif ici.
+      const host = typeof window !== 'undefined' ? window.location.hostname : '';
+      console.warn(
+        `[windy] overlay météo indisponible sur « ${host} ». Si le message ci-dessus ` +
+          "est « Failed to authorize Windy API key », ce n'est pas la valeur de la clé " +
+          `mais son domaine : ajoutez « ${host} » aux domaines autorisés de la clé ` +
+          'dans le tableau de bord Windy.',
+        err
+      );
       // Propage l'échec (réseau / clé invalide) à l'appelant.
       throw err;
     }
