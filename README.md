@@ -141,8 +141,8 @@ les variables `VITE_*` depuis là via `envDir: '..'`) et renseigner :
 
 | Adresse | Rôle | Résultat vérifié |
 |---|---|---|
-| **Quai de la Rapée, 75012 Paris** | Démo principale — eau sur le bâtiment | `available: true` · Moyen 0–1 m · Faible 2–3 m · bassin Seine |
-| **10 Quai de la Charente, 75019 Paris** | Absence honnête — dans un TRI sans classe au point | `in_tri: true`, 6/13 aléas, fiche BDNB 699 m² |
+| **Quai de la Rapée, 75012 Paris** | Démo principale — eau sur le bâtiment | `in_tri: true` · classes `moyen` et `faible` cartographiées au point · 4/13 aléas constatés présents (ICPE, inondation, sismicité, radon) |
+| **10 Quai de la Charente, 75019 Paris** | Absence honnête — dans un TRI sans classe au point | `in_tri: true`, aucune classe cartographiée au point : message distinct, aucun chiffre inventé |
 | **Rue de la République, 28160 Brou** | Contraste « hors TRI ≠ jamais inondé » | `available: false` — commune rurale, hors périmètre TRI |
 
 ⚠️ `Brou 28300` **n'est pas** une adresse valide : le code postal de Brou est
