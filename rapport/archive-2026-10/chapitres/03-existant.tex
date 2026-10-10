@@ -1,0 +1,217 @@
+% =====================================================================
+\chapter{Analyse de l'existant et recentrage}
+\label{ch:existant}
+% =====================================================================
+
+Ce chapitre raconte la décision la plus importante du stage, et la moins
+confortable : supprimer une grande partie de ce qui avait été construit.
+
+\section{État de départ : un prototype fonctionnel}
+
+Au début du stage, le dépôt contenait déjà une plateforme climatique pour
+l'immobilier français. Elle interrogeait quatre sources publiques — Géorisques,
+BDNB, Copernicus, Open-Meteo — et présentait les résultats dans un tableau de
+bord. Techniquement, cela fonctionnait : les connecteurs répondaient, les
+données s'affichaient, une couche de notation produisait un score, une
+visualisation 3D extrudait les bâtiments.
+
+La couche géométrique la plus difficile était même déjà écrite : un parseur GML
+3.2 fait main et un test point-in-polygon par lancer de rayon, sans dépendance
+à \texttt{shapely}.
+
+\section{Le diagnostic : quatre symptômes, une cause}
+
+En auditant le prototype, quatre problèmes sont apparus.
+
+\subsection{La redondance avec les portails sources}
+
+C'est le problème central. Pour chaque aléa, le prototype affichait ce que
+Géorisques affiche déjà, à la même résolution, gratuitement. Pour chaque
+bâtiment, il affichait ce que la BDNB affiche déjà. Le test appliqué à chaque
+fonctionnalité a été formulé ainsi :
+
+\begin{quote}
+\itshape
+L'acheteur pourrait-il obtenir ceci directement depuis la source ?
+\end{quote}
+
+Si la réponse est oui, la fonctionnalité ne justifie pas son existence. Un
+agrégateur qui reproduit ses sources n'apporte pas de valeur : il apporte une
+dépendance supplémentaire.
+
+\subsection{Le score composite}
+
+Le prototype produisait un score global par bâtiment, agrégé à partir des
+aléas. C'est intuitivement satisfaisant — un chiffre, facile à comparer, facile
+à afficher. Mais c'est précisément ce que le métier refuse (chapitre~\ref{ch:metier}) :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item un score tiers engage la responsabilité de son producteur ;
+  \item un score opaque est soit ignoré, soit reconstruit par l'actuaire ;
+  \item un score mélange des aléas non comparables (inondation et sismicité ne
+        se compensent pas) ;
+  \item sous Solvabilité~II, une décision doit être justifiable par des faits,
+        pas par un indice.
+\end{itemize}
+
+\subsection{Le tableau de bord climatique}
+
+Copernicus et Open-Meteo alimentaient un panneau de variables climatiques. Le
+problème n'était pas la donnée, mais sa forme : les valeurs exposées étaient un
+\emph{indice d'exposition de 0 à 100}, dérivé, et non des variables
+climatiques en unités réelles (jours de canicule par an, degrés Celsius,
+mètres par seconde). Un indice 0--100 n'est pas une donnée climatique : c'est
+un jugement déguisé. Il tombait sous le coup de la règle sur les scores.
+
+\subsection{La décoration 3D}
+
+Les extrusions 3D des bâtiments n'apportaient aucune information : elles
+montraient une forme sans dire si le bâtiment était exposé. C'était un coût de
+performance et de complexité pour zéro contenu.
+
+\subsection{La cause commune}
+
+Ces quatre symptômes ont une racine unique : \textbf{le produit n'était pas
+organisé autour de la seule chose qu'il faisait et que personne d'autre ne
+faisait} — la jointure entre exposition et vulnérabilité, à l'échelle du
+bâtiment. L'effort était réparti sur quatre connecteurs, une couche de
+notation, un tableau de bord et de la 3D, plutôt que concentré sur cette
+jointure.
+
+\section{La décision de recentrage}
+
+Le 25 août 2026, une session de cadrage a produit une réorientation complète,
+documentée dans \fichier{docs/workflow/concept.md} et
+\fichier{01-brainstorm-notes.md}. Elle tient en cinq points.
+
+\begin{enumerate}[leftmargin=1.6em]
+  \item \textbf{Le livrable est un contrat de données.} L'interface devient un
+        outil de vente et de démonstration, pas le produit.
+  \item \textbf{Le score composite est mort.} Faits et provenance uniquement.
+  \item \textbf{Le périmètre de la v1 est la jointure Géorisques $\times$
+        BDNB.} Copernicus et Open-Meteo n'ont pas d'usage assureur en v1.
+  \item \textbf{Le champ de résolution devient le signal de qualité.} Puisque
+        le score disparaît, c'est lui qui porte l'intégrité du contrat.
+  \item \textbf{Le code mort est supprimé, pas mis en sommeil.}
+\end{enumerate}
+
+\section{L'exécution : supprimer}
+
+La conséquence la plus visible du recentrage est une phase de suppression.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Suppressions de la phase de recentrage, par catégorie.}
+\label{tab:suppressions}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Catégorie} & \textbf{Éléments supprimés} \\
+\midrule
+Connecteurs backend &
+  \fichier{copernicus.py}, \fichier{era5\_land.py}, \fichier{flood.py},
+  \fichier{fire\_danger.py}, \fichier{heat\_stress.py}, \fichier{wind\_risk.py},
+  \fichier{seasonal.py} \\
+\addlinespace
+Routes backend &
+  \fichier{climate.py}, routes \api{/diagnostic/copernicus/*} \\
+\addlinespace
+Schémas &
+  \fichier{zone\_assessment.py}, schéma \code{RecommandationsIA} et le champ
+  \code{recommandations} \\
+\addlinespace
+Scoring &
+  \fichier{risk\_model.py} et toutes ses références, \fichier{app/scoring/} \\
+\addlinespace
+Dépendances &
+  \code{cdsapi}, \code{xarray}, \code{netCDF4} retirés de
+  \fichier{requirements.txt} \\
+\addlinespace
+Tests &
+  \fichier{test\_climate\_dashboard.py}, \fichier{test\_copernicus\_*.py} (4),
+  \fichier{test\_trajectoire\_brute.py} \\
+\addlinespace
+Composants frontend &
+  \fichier{CopernicusPanel.tsx}, \fichier{CopernicusStatusBanner.tsx},
+  répertoire \fichier{jumeau/} (moteur de scène, LIDAR, recommandations),
+  \fichier{Artisans.tsx} \\
+\addlinespace
+Styles &
+  \fichier{copernicus.css}, \fichier{jumeau.css}, \fichier{artisans.css} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Deux règles de méthode ont été respectées pendant ces suppressions. D'abord,
+elles constituent un \emph{change set dédié} : on ne supprime pas du code au
+milieu d'une tâche de fonctionnalité, car cela rend la revue impossible. Ensuite,
+le critère n'était pas \og c'est ancien \fg{} mais \og c'est inatteignable \fg :
+avant de supprimer, on vérifie qu'aucune route, aucun import, aucune référence
+ne pointe vers l'élément. Un code partagé et vivant, comme le module de
+recommandations du répertoire \fichier{jumeau/}, a été \emph{déplacé} plutôt que
+supprimé.
+
+\section{Le compromis assumé : ce qui n'a pas été supprimé}
+
+Deux éléments ont été conservés malgré la logique de recentrage, et il faut le
+dire.
+
+\begin{description}[leftmargin=0em,style=nextline]
+  \item[La carte.] Elle n'est pas de la décoration : le souscripteur fait du
+  jugement spatial. Mais elle a été ré-orientée : au lieu d'afficher les
+  couches sources, elle affiche la jointure. L'empreinte du bâtiment est
+  colorée par le résultat du test géométrique, accompagnée d'une fiche de
+  vulnérabilité.
+  \item[Les projections climatiques.] La direction produit initiale les
+  excluait de la v1, mais la non-stationnarité (chapitre~\ref{ch:metier}) est
+  l'argument de fond du produit. Les projections sont donc revenues, sous une
+  forme différente : non plus comme un tableau de bord de variables, mais comme
+  une extension honnête du contrat, avec de vraies unités et une étiquette de
+  résolution.
+\end{description}
+
+\section{Enseignement}
+
+La leçon de ce chapitre est méthodologique. Un projet technique n'est pas
+\og bien avancé \fg{} parce qu'il contient beaucoup de code. Il est bien avancé
+quand il devient difficile de lui retirer quelque chose sans le casser. Le
+recentrage a réduit le périmètre fonctionnel de manière significative et
+augmenté la valeur du livrable — parce que la valeur n'était pas dans le
+nombre de fonctionnalités, mais dans l'exactitude de la jointure et dans la
+traçabilité de chaque fait.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  scale=0.95, transform shape,
+  box/.style={draw,rounded corners=2pt,align=center,inner sep=5pt,font=\small},
+  removed/.style={box,draw=typhoonRed,fill=typhoonRed!6,text width=2.6cm},
+  kept/.style={box,draw=typhoonGreen,fill=typhoonGreen!8,text width=2.6cm},
+  core/.style={box,draw=typhoonBlue,very thick,fill=typhoonBlue!10,text width=3.4cm}
+]
+\node[removed] (c1) at (0,2.4) {Connecteurs climatiques};
+\node[removed] (c2) at (0,1.2) {Couche de notation};
+\node[removed] (c3) at (0,0) {Tableau de bord climat};
+\node[removed] (c4) at (0,-1.2) {Extrusions 3D décoratives};
+\node[removed] (c5) at (0,-2.4) {Rapport narratif IA};
+
+\node[core] (core) at (5.6,0) {\textbf{La jointure}\\[3pt]
+  Aléa Géorisques $\times$ Vulnérabilité BDNB\\[3pt]
+  {\footnotesize par bâtiment, avec provenance}};
+
+\node[kept] (k1) at (11.2,1.8) {Carte de la jointure};
+\node[kept] (k2) at (11.2,0.6) {13 aléas normalisés};
+\node[kept] (k3) at (11.2,-0.6) {Contrat JSON canonique};
+\node[kept] (k4) at (11.2,-1.8) {Moteur de scénarios TRI};
+
+\foreach \x in {c1,c2,c3,c4,c5} \draw[-{Latex[length=2mm]},typhoonRed,dashed] (\x) -- (core);
+\foreach \x in {k1,k2,k3,k4} \draw[-{Latex[length=2mm]},typhoonGreen] (core) -- (\x);
+
+\node[font=\small\itshape,color=typhoonRed] at (2.6,3.3) {retiré du périmètre};
+\node[font=\small\itshape,color=typhoonGreen] at (11.2,3.3) {conservé / construit};
+\end{tikzpicture}
+\caption{Le recentrage en une image. Tout ce qui ne sert pas la jointure
+aléa $\times$ vulnérabilité est retiré du périmètre ou relégué à la couche de
+présentation.}
+\label{fig:recentrage}
+\end{figure}

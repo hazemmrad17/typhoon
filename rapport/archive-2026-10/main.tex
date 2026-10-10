@@ -1,0 +1,546 @@
+% =====================================================================
+%  Rapport de stage — Typhoon : données climatiques par bâtiment
+%  Stage d'été — SummerCamp 2026, Talan
+%  Auteur : Hazem Mrad
+%
+%  Compilation : pdflatex main && pdflatex main
+%  (aucune dependance BibTeX ; voir rapport/README.md pour les details)
+% =====================================================================
+\documentclass[11pt,a4paper,oneside]{report}
+
+% ---------------------------------------------------------------------
+%  Encodage, langue, police
+%
+%  Portabilite de moteur : pdfLaTeX garde le chemin historique
+%  (inputenc + fontenc T1 + lmodern). Sous XeTeX (tectonic, XeLaTeX sur
+%  Overleaf), inputenc est ignore par le moteur : les caracteres UTF-8
+%  « - » et « œ » sont alors simplement ABSENTS de la police T1 et le
+%  PDF sort ampute (299 glyphes manquants). fontspec est la solution
+%  standard sous XeTeX. pdfLaTeX n'est pas modifie par ce garde-fou.
+% ---------------------------------------------------------------------
+\ifdefined\XeTeXversion
+  \usepackage{fontspec}
+\else
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+  \usepackage{lmodern}
+\fi
+\usepackage[english,french]{babel}
+\usepackage{csquotes}
+
+% ---------------------------------------------------------------------
+%  Mise en page
+% ---------------------------------------------------------------------
+\usepackage[a4paper,margin=2.4cm,top=2.6cm,bottom=2.6cm,headheight=15pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{parskip}
+
+% ---------------------------------------------------------------------
+%  Mathématiques, tableaux, couleurs, graphiques
+% ---------------------------------------------------------------------
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+
+% ---------------------------------------------------------------------
+%  Code source
+% ---------------------------------------------------------------------
+\usepackage{listings}
+\usepackage{textcomp}
+
+% ---------------------------------------------------------------------
+%  Encadrés
+% ---------------------------------------------------------------------
+\usepackage[most]{tcolorbox}
+
+% =====================================================================
+%  Palette (doit etre definie AVANT hyperref, qui l'utilise)
+% =====================================================================
+\definecolor{typhoonBlue}{HTML}{0B5FA5}
+\definecolor{typhoonDeep}{HTML}{073E6C}
+\definecolor{typhoonSand}{HTML}{F4F1EC}
+\definecolor{typhoonGrey}{HTML}{6B7280}
+\definecolor{typhoonGreen}{HTML}{1B7F5A}
+\definecolor{typhoonAmber}{HTML}{B7791F}
+\definecolor{typhoonRed}{HTML}{A6262C}
+\definecolor{codeBg}{HTML}{F7F7F5}
+\definecolor{codeKey}{HTML}{0B5FA5}
+\definecolor{codeCom}{HTML}{6B7280}
+\definecolor{codeStr}{HTML}{1B7F5A}
+
+% ---------------------------------------------------------------------
+%  Liens (à charger en dernier)
+% ---------------------------------------------------------------------
+\usepackage[hidelinks,colorlinks=true,linkcolor=typhoonBlue,
+            citecolor=typhoonBlue,urlcolor=typhoonBlue]{hyperref}
+
+% =====================================================================
+%  Style des titres
+% =====================================================================
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{typhoonDeep}}
+  {\filright\normalsize\sffamily\color{typhoonGrey}\MakeUppercase{\chaptertitlename}~\thechapter}
+  {6pt}
+  {\Huge\filright}
+  [\vspace{4pt}{\color{typhoonBlue}\titlerule[1.2pt]}]
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{typhoonDeep}}{\thesection}{0.8em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{typhoonBlue}}{\thesubsection}{0.8em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\color{typhoonGrey}}{\thesubsubsection}{0.8em}{}
+
+\titlespacing*{\chapter}{0pt}{-10pt}{26pt}
+\titlespacing*{\section}{0pt}{18pt}{8pt}
+\titlespacing*{\subsection}{0pt}{13pt}{5pt}
+
+% =====================================================================
+%  En-têtes et pieds de page
+% =====================================================================
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{typhoonGrey}Typhoon — Rapport de stage}
+\fancyhead[R]{\small\sffamily\color{typhoonGrey}\leftmark}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{typhoonBlue!40}\leaders\hrule height \headrulewidth\hfill}}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% =====================================================================
+%  Légendes
+% =====================================================================
+\captionsetup{
+  font=small,
+  labelfont={bf,color=typhoonDeep},
+  labelsep=period,
+  justification=raggedright,
+  singlelinecheck=false
+}
+
+% =====================================================================
+%  Listings
+% =====================================================================
+\lstdefinestyle{typhoon}{
+  backgroundcolor=\color{codeBg},
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{codeKey}\bfseries,
+  commentstyle=\color{codeCom}\itshape,
+  stringstyle=\color{codeStr},
+  numberstyle=\tiny\color{typhoonGrey},
+  numbers=left,
+  numbersep=8pt,
+  frame=single,
+  rulecolor=\color{typhoonBlue!25},
+  framesep=6pt,
+  breaklines=true,
+  breakatwhitespace=false,
+  postbreak=\mbox{\textcolor{typhoonBlue}{$\hookrightarrow$}\space},
+  showstringspaces=false,
+  tabsize=2,
+  captionpos=b,
+  xleftmargin=12pt,
+  xrightmargin=6pt,
+  columns=fullflexible,
+  keepspaces=true,
+  upquote=true
+}
+\lstset{style=typhoon}
+
+\lstdefinelanguage{jsonc}{
+  morecomment=[l]{//},
+  morestring=[b]",
+  literate=
+    *{:}{{{\color{typhoonBlue}{:}}}}{1}
+     {,}{{{\color{typhoonBlue}{,}}}}{1}
+}
+\lstdefinestyle{json}{
+  style=typhoon,
+  language=jsonc,
+  numbers=none,
+  morekeywords={true,false,null}
+}
+
+% =====================================================================
+%  Encadrés
+% =====================================================================
+\newtcolorbox{invariant}[1][]{
+  colback=typhoonBlue!5,
+  colframe=typhoonBlue,
+  boxrule=0.6pt,
+  left=8pt,right=8pt,top=7pt,bottom=7pt,
+  arc=2pt,
+  fonttitle=\bfseries\sffamily,
+  title=Invariant produit,
+  #1
+}
+\newtcolorbox{honesty}[1][]{
+  colback=typhoonAmber!7,
+  colframe=typhoonAmber,
+  boxrule=0.6pt,
+  left=8pt,right=8pt,top=7pt,bottom=7pt,
+  arc=2pt,
+  fonttitle=\bfseries\sffamily,
+  title=Honnêteté de la donnée,
+  #1
+}
+\newtcolorbox{encadre}[1][]{
+  colback=typhoonSand,
+  colframe=typhoonGrey!60,
+  boxrule=0.5pt,
+  left=8pt,right=8pt,top=7pt,bottom=7pt,
+  arc=2pt,
+  #1
+}
+
+% =====================================================================
+%  Raccourcis
+% =====================================================================
+\newcommand{\typhoon}{\textsc{Typhoon}}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\fichier}[1]{\texttt{\small #1}}
+\newcommand{\api}[1]{\texttt{\small #1}}
+\newcommand{\frref}[1]{FR-#1}
+\newcommand{\scn}[1]{SCN-#1}
+\newcommand{\vfx}[1]{VFX-#1}
+
+% =====================================================================
+%  MÉTADONNÉES DU RAPPORT
+%  ---------------------------------------------------------------------
+%  Toutes les informations de la page de garde sont regroupées ici.
+%  Modifier UNIQUEMENT ce bloc pour mettre le rapport à jour.
+% =====================================================================
+
+% --- Auteur -----------------------------------------------------------
+\newcommand{\reportAuthor}{Hazem Mrad}
+
+% --- Établissement ----------------------------------------------------
+\newcommand{\reportSchool}{ESPRIT}
+\newcommand{\reportSchoolLong}{École Supérieure Privée d'Ingénierie et de Technologie}
+
+% --- Intitulé du diplôme (à adapter à votre cursus) --------------------
+\newcommand{\reportDegree}{Diplôme d'ingénieur}
+\newcommand{\reportCycle}{Cycle d'ingénieur}
+
+% --- Entreprise d'accueil ---------------------------------------------
+\newcommand{\reportCompany}{Talan}
+\newcommand{\reportCompanyLong}{Groupe Talan --- Conseil et ingénierie technologique}
+\newcommand{\reportProgramme}{SummerCamp 2026}
+
+% --- Période de stage --------------------------------------------------
+\newcommand{\reportPeriod}{14 août 2026 -- 15 septembre 2026}
+
+% --- Année universitaire ----------------------------------------------
+\newcommand{\reportAcademicYear}{2026--2027}
+
+% --- Tuteurs ----------------------------------------------------------
+%  Laisser les pointillés, ou remplacer par les noms.
+\newcommand{\reportTutorAcademic}{\dotfill}
+\newcommand{\reportTutorCompany}{\dotfill}
+
+% ---------------------------------------------------------------------
+%  LOGO DE L'ÉCOLE
+%  Déposez le fichier sous rapport/logos/esprit.png (ou .jpg / .pdf).
+%  Tant qu'aucun fichier n'est présent, un cadre de remplacement
+%  explicite est affiché : le rapport compile quand même.
+% ---------------------------------------------------------------------
+\newcommand{\reportSchoolLogo}[1][2.4cm]{%
+  \IfFileExists{logos/esprit.png}{\includegraphics[height=#1]{logos/esprit.png}}{%
+  \IfFileExists{logos/esprit.jpg}{\includegraphics[height=#1]{logos/esprit.jpg}}{%
+  \IfFileExists{logos/esprit.pdf}{\includegraphics[height=#1]{logos/esprit.pdf}}{%
+    \begin{tikzpicture}
+      \node[draw=typhoonGrey,dashed,rounded corners=3pt,inner sep=9pt,
+            text width=2.4cm,align=center,font=\sffamily\scriptsize,
+            text=typhoonGrey,minimum height=#1]
+        {Logo de l'école\\[2pt]à déposer dans\\[2pt]\texttt{logos/}};
+    \end{tikzpicture}}}}%
+}
+
+% ---------------------------------------------------------------------
+%  LOGO TALAN (vectorisé depuis le SVG officiel du dépôt :
+%  frontend/public/vetter-consulting/assets/img/talan-logo-white.svg)
+%  Tracé blanc, à poser sur un fond sombre.
+% ---------------------------------------------------------------------
+\newcommand{\reportCompanyLogo}{%
+\begin{tikzpicture}[x=0.0032cm,y=-0.0032cm]
+  \fill[white]
+    (1160,0) -- (1160,280.78) -- (1084.14,280.78) -- (968.48,154.207) --
+    (968.48,280.78) -- (905.856,280.78) -- (875.875,203.506) -- (875.875,0) --
+    (951.732,0) -- (1067.39,132.409) -- (1067.39,0) -- cycle;
+  \fill[white]
+    (875.875,203.518) -- (905.856,280.791) -- (875.875,280.791) -- cycle;
+  \fill[white]
+    (875.887,203.506) -- (875.887,280.767) -- (806.954,280.767) --
+    (795.636,246.812) -- (692.132,246.812) -- (680.394,280.767) --
+    (640.931,280.767) -- (667.791,202.811) -- (611.75,202.811) --
+    (690.467,0) -- (796.908,0) -- cycle
+    (770.088,171.387) -- (744.107,95.1234) -- (718.126,171.387) -- cycle;
+  \fill[white]
+    (667.784,202.828) -- (640.924,280.784) -- (581.5,280.784) --
+    (611.743,202.828) -- cycle;
+  \fill[white]
+    (611.744,202.824) -- (581.501,280.78) -- (523.978,280.78) --
+    (493.656,202.614) -- (493.656,0) -- (586.275,0) -- (586.275,202.824) --
+    cycle;
+  \fill[white]
+    (493.656,202.619) -- (523.978,280.785) -- (493.656,280.785) -- cycle;
+  \fill[white]
+    (493.646,202.614) -- (493.646,280.767) -- (425.08,280.767) --
+    (413.762,246.812) -- (310.258,246.812) -- (298.52,280.767) --
+    (199.633,280.767) -- (278.336,77.9427) -- (308.579,77.9427) --
+    (308.579,0) -- (415.034,0) -- (493.659,202.614) -- cycle
+    (388.188,171.387) -- (362.22,95.1234) -- (336.239,171.387) -- cycle;
+  \fill[white]
+    (308.575,0) -- (308.575,77.9558) -- (278.332,77.9558) -- cycle;
+  \fill[white]
+    (308.571,0) -- (278.327,77.9558) -- (199.624,77.9558) --
+    (199.624,280.78) -- (107.006,280.78) -- (107.006,77.9558) --
+    (0,77.9558) -- (0,0) -- cycle;
+\end{tikzpicture}%
+}
+
+% =====================================================================
+%  Métadonnées PDF
+% =====================================================================
+\hypersetup{
+  pdftitle={Typhoon — Service de données climatiques par bâtiment},
+  pdfauthor={Hazem Mrad},
+  pdfsubject={Rapport de stage — SummerCamp 2026, Talan},
+  pdfkeywords={assurance, climat, Géorisques, BDNB, FastAPI, React, SIG}
+}
+
+% =====================================================================
+%  DOCUMENT
+% =====================================================================
+\begin{document}
+
+\selectlanguage{french}
+
+% ---------------------------------------------------------------------
+%  Page de garde — conforme aux usages académiques français
+% ---------------------------------------------------------------------
+\begin{titlepage}
+\thispagestyle{empty}
+
+% Bandeau supérieur (logo Talan en blanc sur fond sombre)
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[typhoonDeep] (current page.north west) rectangle
+      ([yshift=-3.5cm]current page.north east);
+  \fill[typhoonBlue] ([yshift=-3.5cm]current page.north west) rectangle
+      ([yshift=-3.56cm]current page.north east);
+\end{tikzpicture}
+
+\noindent\begin{minipage}[c]{0.46\textwidth}
+  \color{white}\sffamily
+  {\bfseries\large \reportCompany}\\[2pt]
+  {\footnotesize \reportProgramme}\\[2pt]
+  {\scriptsize\color{white!75}\reportCompanyLong}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.30\textwidth}
+  \raggedleft\reportCompanyLogo
+\end{minipage}
+
+\vspace{1.5cm}
+
+% --- Établissement ---------------------------------------------------
+\begin{center}
+  \reportSchoolLogo[2.3cm]\\[10pt]
+  {\sffamily\bfseries\large \reportSchool}\\[2pt]
+  {\sffamily\small\color{typhoonGrey} \reportSchoolLong}
+\end{center}
+
+\vspace{1.2cm}
+
+% --- Nature et titre du travail --------------------------------------
+\begin{center}
+  {\sffamily\small\color{typhoonGrey}\MakeUppercase{Rapport de stage de fin de cycle}}\\[6pt]
+  {\color{typhoonBlue}\rule{4cm}{0.8pt}}\\[14pt]
+
+  {\sffamily\bfseries\LARGE\color{typhoonDeep}
+   Service de données climatiques\\[4pt] par bâtiment}\\[12pt]
+
+  {\sffamily\large\color{typhoonDeep}
+   Concevoir et industrialiser une jointure aléa $\times$ vulnérabilité\\
+   à l'échelle du bâtiment pour les assureurs français}\\[10pt]
+
+  {\sffamily\small\color{typhoonGrey}
+   De la maquette de démonstration à un contrat de données traçable,\\
+   testé et déployé sur une infrastructure serverless.}
+\end{center}
+
+\vfill
+
+% --- Identification ---------------------------------------------------
+\begin{center}
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{4.6cm}@{\hspace{4pt}}p{7.6cm}@{}}
+  \textcolor{typhoonGrey}{\sffamily\small Présenté par} &
+    \textbf{\reportAuthor} \\
+  \textcolor{typhoonGrey}{\sffamily\small Intitulé du diplôme} &
+    \reportDegree \\
+  \textcolor{typhoonGrey}{\sffamily\small Cycle} &
+    \reportCycle \\
+  \textcolor{typhoonGrey}{\sffamily\small Structure d'accueil} &
+    \reportCompanyLong \\
+  \textcolor{typhoonGrey}{\sffamily\small Période de stage} &
+    \reportPeriod \\
+  \textcolor{typhoonGrey}{\sffamily\small Tuteur pédagogique} &
+    \reportTutorAcademic \\
+  \textcolor{typhoonGrey}{\sffamily\small Tuteur entreprise} &
+    \reportTutorCompany \\
+  \textcolor{typhoonGrey}{\sffamily\small Année universitaire} &
+    \textbf{\reportAcademicYear} \\
+\end{tabular}
+\end{center}
+
+\vfill
+
+\begin{center}
+  {\color{typhoonBlue}\rule{\textwidth}{0.6pt}}\\[6pt]
+  {\sffamily\footnotesize\color{typhoonGrey}
+   Rapport de stage --- \reportAcademicYear \hspace{2em}·\hspace{2em}
+   \reportAuthor \hspace{2em}·\hspace{2em} \reportCompany}
+\end{center}
+
+\end{titlepage}
+
+% ---------------------------------------------------------------------
+%  Remerciements
+% ---------------------------------------------------------------------
+\chapter*{Remerciements}
+\addcontentsline{toc}{chapter}{Remerciements}
+\markboth{Remerciements}{Remerciements}
+
+Ce stage d'été n'aurait pas pris cette forme sans plusieurs personnes que je
+souhaite remercier ici.
+
+Je remercie \textbf{Talan} de m'avoir accueilli dans le cadre du SummerCamp
+2026 et de m'avoir laissé une latitude réelle sur le sujet : proposer une
+problématique, la reformuler, puis la construire jusqu'au déploiement. Un stage
+où l'on peut supprimer du code parce qu'il ne sert pas le produit vaut plus
+qu'un stage où l'on empile des fonctionnalités.
+
+Je remercie les personnes de l'écosystème assurance — l'actuaire et le
+professionnel de l'assurance qui ont accepté de réagir au projet au démarrage.
+Leurs réponses, parfois dérangeantes, ont directement réécrit la direction
+produit : le \og score \fg{} que je pensais être le livrable a été explicitement
+refusé, et cette conversation a probablement été le meilleur investissement des
+deux mois.
+
+Je remercie enfin les équipes et les projets open data qui rendent ce travail
+possible : Géorisques, la BDNB du CSTB, la Géoplateforme de l'IGN, Sandre,
+Panoramax, Open-Meteo et le Copernicus Climate Data Store. Un service comme
+\typhoon{} ne remplace aucune de ces sources : il existe parce qu'elles sont
+publiques, documentées et réutilisables.
+
+\vspace{1em}
+\begin{flushright}
+\textit{Hazem Mrad}
+\end{flushright}
+
+% ---------------------------------------------------------------------
+%  Résumé
+% ---------------------------------------------------------------------
+\chapter*{Résumé}
+\addcontentsline{toc}{chapter}{Résumé}
+\markboth{Résumé}{Résumé}
+
+Ce rapport présente le travail réalisé pendant un stage d'été au sein du
+programme SummerCamp 2026 de Talan. Le sujet est un service de données
+climatiques \textbf{par bâtiment} destiné aux assureurs français, baptisé
+\typhoon{}.
+
+Le problème de départ est concret. Les données publiques existent et sont
+gratuites : Géorisques publie les aléas réglementaires, la BDNB décrit les
+bâtiments, Copernicus produit des projections climatiques. Mais aucune de ces
+sources ne relie l'exposition d'un bâtiment à sa vulnérabilité. Géorisques ne
+sait pas ce qu'est le bâtiment ; la BDNB ne sait pas s'il est dans un périmètre
+d'inondation. Aujourd'hui, un souscripteur résout ce manque en ouvrant deux
+onglets et en jugeant à l'œil.
+
+La contribution du stage tient en trois apports. D'abord, une
+\textbf{reformulation produit} : le livrable n'est pas une interface, c'est un
+contrat de données unique, l'adresse en entrée, un JSON canonique en sortie, où
+chaque fait porte sa source et son niveau de résolution, et où aucun score
+composite n'apparaît — la notation reste le métier de l'assureur. Ensuite, une
+\textbf{industrialisation de la jointure} : un connecteur WFS Géorisques
+(point-in-polygon écrit à la main, parseur GML 3.2) croisé avec un passage
+verbatim de la BDNB, 13 aléas normalisés, un cache, un quota, une
+authentification par clé et une suite de tests hors-ligne. Enfin, une
+\textbf{couche de mise en situation} sur la carte : des classes de retour
+officielles du TRI, une timeline horaire, un moteur où le scénario pilote le
+niveau et la pluie n'en pilote que la forme, et un mode de rendu cinématique
+explicitement étiqueté comme non contractuel.
+
+Le résultat est une application déployée et vérifiée en ligne, un backend de
+70 fichiers Python, un frontend de 68 modules TypeScript, \textbf{214 tests
+backend et 143 tests frontend} hors-ligne, une constitution d'ingénierie qui
+interdit les scores dans le contrat sérialisé, et un ensemble de décisions
+documentées — y compris celles qui ont consisté à \emph{supprimer} du code
+livré.
+
+\vspace{1em}
+\noindent\textbf{Mots-clés :} assurance, risque climatique, open data,
+Géorisques, BDNB, TRI, jointure spatiale, FastAPI, React, Mapbox GL JS,
+serverless.
+
+\clearpage
+
+\input{synthese}
+\clearpage
+
+% ---------------------------------------------------------------------
+%  Sommaire
+% ---------------------------------------------------------------------
+\tableofcontents
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+
+% ---------------------------------------------------------------------
+%  Chapitres
+% ---------------------------------------------------------------------
+\input{chapitres/01-contexte}
+\input{chapitres/02-metier}
+\input{chapitres/03-existant}
+\input{chapitres/04-methodologie}
+\input{chapitres/05-donnees}
+\input{chapitres/06-architecture}
+\input{chapitres/07-scenarios}
+\input{chapitres/08-vfx}
+\input{chapitres/09-qualite}
+\input{chapitres/10-deploiement}
+\input{chapitres/11-resultats}
+\input{chapitres/12-bilan}
+\input{chapitres/13-conclusion}
+
+% ---------------------------------------------------------------------
+%  Annexes
+% ---------------------------------------------------------------------
+\appendix
+\input{annexes/A-contrat}
+\input{annexes/B-api}
+\input{annexes/C-glossaire}
+
+% ---------------------------------------------------------------------
+%  Bibliographie
+% ---------------------------------------------------------------------
+\input{bibliographie}
+
+\end{document}

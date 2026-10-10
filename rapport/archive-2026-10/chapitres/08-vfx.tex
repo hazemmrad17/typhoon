@@ -1,0 +1,219 @@
+% =====================================================================
+\chapter{Le mode de rendu cinématique (VFX)}
+\label{ch:vfx}
+% =====================================================================
+
+Ce chapitre décrit une fonctionnalité volontairement contradictoire avec le
+reste du projet, et la manière dont la contradiction a été encadrée.
+
+\section{Le problème : la tension}
+
+Le produit est fondé sur l'honnêteté de la donnée : pas de score, pas
+d'invention, une provenance sur chaque fait, une étiquette de résolution. Une
+démonstration cinématique — caméra qui vole, eau qui monte avec des reflets,
+particules, effets — est à l'opposé : elle vise l'impression, pas la preuve.
+
+La tentation était double :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{commerciale} — une démonstration spectaculaire vend un concept
+        mieux qu'un JSON ;
+  \item \textbf{technique} — un rendu 3D temps réel est un objet d'ingénierie
+        intéressant.
+\end{itemize}
+
+Le risque était tout aussi double : introduire un rendu qui \emph{paraît}
+factuel alors qu'il est illustratif, et laisser ce rendu contaminer le contrat
+de données.
+
+\section{La solution : gouverner la contradiction}
+
+Plutôt que de refuser la fonctionnalité ou de l'accepter telle quelle, le
+projet l'a encadrée par un amendement constitutionnel. La constitution a été
+portée en version~0.2 le 14 septembre 2026, avec un paragraphe §2.1 dédié.
+
+\subsection{Deux modes obligatoires}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Les deux modes de rendu et leurs contrats respectifs.}
+\label{tab:modes}
+\begin{tabularx}{\textwidth}{@{}l X X@{}}
+\toprule
+& \textbf{Mode \code{data}} & \textbf{Mode \code{vfx}} \\
+\midrule
+Rendu & Enveloppes honnêtes, extrusion Mapbox sur les empreintes réelles &
+  Couche personnalisée Three.js sur Mapbox, terrain, particules,
+  post-traitement \\
+\addlinespace
+Défaut & \textbf{oui} & non — activé explicitement \\
+\addlinespace
+Étiquetage & Aucun (le rendu est factuel) &
+  Bandeau permanent \og Simulation visuelle — non contractuelle \fg \\
+\addlinespace
+Données partielles & Mention d'indisponibilité explicite &
+  Étiquette secondaire \og Données partielles — rendu illustratif \fg \\
+\addlinespace
+Contrat API & Inchangé & \textbf{inchangé} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{invariant}
+Aucune route backend, aucun champ de schéma, aucune charge de lot ne peut
+transporter de géométrie VFX, de score ou de jugement synthétique. Le mode VFX
+est strictement confiné à la présentation.
+\end{invariant}
+
+\subsection{Règles d'entrée}
+
+Le mode VFX doit consommer \emph{les mêmes} pilotes que le mode données
+lorsqu'ils sont disponibles : l'heure simulée, les profils météorologiques, les
+bandes de profondeur TRI, le trajet hydrographique, la hauteur et l'emprise
+BDNB. Il peut exagérer l'\emph{apparence} — montée lissée, plan d'eau suivant
+le terrain, floraison lumineuse, mouvement de caméra — mais il ne peut pas
+revendiquer une précision hydraulique.
+
+Les replis illustratifs sont autorisés \emph{uniquement} en mode VFX et
+\emph{uniquement} avec l'étiquette de données partielles.
+
+\subsection{Le bus d'entrée unique}
+
+Un module dédié, \fichier{vfxInputs.ts}, est le seul point d'entrée du rendu
+cinématique. La règle est explicite : le rendu VFX passe par ce module et rien
+d'autre.
+
+\begin{lstlisting}[caption={Le bus d'entrée du mode VFX et sa règle de repli.},
+label={lst:vfxinputs}]
+vfxWaterLevel({ rainProfile, hourIndex, triPeak, allowFallback })
+  -> { levelM, partial, source: 'forecast' | 'fallback' | 'none' }
+\end{lstlisting}
+
+Deux garanties ont été codées dans ce module :
+
+\begin{enumerate}[leftmargin=1.6em]
+  \item Le repli illustratif est \textbf{plafonné par la classe TRI} :
+        $\min(\text{triPeak}, 1{,}0~\text{m})$. Le rendu ne peut donc jamais
+        exagérer au-delà de l'exposition réglementaire réelle.
+  \item \textbf{Sans classe TRI, la source vaut \code{none} et le niveau
+        vaut 0}, même si le repli est autorisé. On n'invente pas une exposition
+        qui n'existe pas.
+\end{enumerate}
+
+Ce point est important : le mode cinématique peut embellir la \emph{forme},
+jamais créer un \emph{fait}. Une adresse hors zone inondable reste sèche, même
+en mode spectaculaire.
+
+\begin{honesty}
+Un problème d'incohérence a été détecté et corrigé pendant la conception : la
+spécification initiale prévoyait une constante de repli de 1,0~m indépendante
+de la classe TRI. Elle était à la fois incohérente — elle pouvait afficher plus
+que le risque réel — et inatteignable, puisque le mode données consommait une
+autre fonction. Elle a été supprimée : le repli ne porte plus que sur la
+\emph{forme} de la courbe.
+\end{honesty}
+
+\section{Contraintes d'intégration}
+
+\subsection{Exclusion mutuelle avec la couche météo}
+
+La couche météo Windy impose une projection plate (Mercator sans inclinaison).
+La caméra 3D du mode VFX, elle, exige une inclinaison forte. Les deux sont
+incompatibles.
+
+\begin{invariant}
+La couche Windy et la caméra 3D du mode VFX sont mutuellement exclusives tant
+que le mode VFX est actif. Cette exclusivité est vérifiée par un test.
+\end{invariant}
+
+Concrètement : à l'activation du mode VFX, la couche Windy est désactivée et
+l'inclinaison de la carte est forcée au-delà de 55 degrés. À la sortie, la
+politique du mode données reprend la main et l'état précédent est restauré.
+
+\subsection{Le montage et le démontage}
+
+Le mode VFX doit s'activer et se désactiver proprement. La contrainte est
+double : aucune fuite de contexte WebGL au changement de route, et aucun
+doublon de couche en cas de bascule répétée.
+
+\begin{invariant}
+La couche VFX se monte et se démonte proprement lors de la bascule de mode.
+Aucune fuite de contexte WebGL au changement de route. Objectif de performance :
+au moins 30~images par seconde sur un ordinateur portable de milieu de gamme au
+niveau de zoom d'un bâtiment avec le plan d'eau actif, avec dégradation
+gracieuse — le post-traitement est désactivé en premier.
+\end{invariant}
+
+\section{Étiquetage}
+
+L'étiquetage n'est pas cosmétique : c'est la condition qui rend la
+fonctionnalité acceptable.
+
+\begin{itemize}[leftmargin=1.4em]
+  \item Le bandeau \og \textbf{Simulation visuelle — non contractuelle} \fg{}
+        est affiché en permanence en mode VFX.
+  \item Une étiquette secondaire \og \textbf{Données partielles — rendu
+        illustratif} \fg{} apparaît lorsque les entrées réelles sont
+        incomplètes.
+  \item Le mode VFX \textbf{ne doit pas réutiliser le vocabulaire du contrat}
+        (\code{resolution}, \code{present}, libellés de bandes) comme s'il
+        s'agissait d'un fait sourcé.
+\end{itemize}
+
+Le composant d'avertissement ne s'affiche \emph{que} en mode VFX : il n'existe
+pas de bandeau dormant en mode données.
+
+\section{État d'avancement}
+
+Toutes les tâches du mode VFX n'ont pas été menées à terme pendant la durée du
+stage. Le tableau~\ref{tab:vfx-etat} distingue ce qui est livré de ce qui
+reste, sans embellissement.
+
+\begin{table}[H]
+\centering
+\small
+\caption{État d'avancement des tâches du mode VFX.}
+\label{tab:vfx-etat}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Tâche} & \textbf{État} & \textbf{Contenu} \\
+\midrule
+\vfx{001} & Livré & Amendement constitutionnel, spécification et plan \\
+\vfx{002} & Livré & Bascule de mode, bandeau, mise en page atténuée \\
+\vfx{003} & Livré & Bus d'entrée, pilote de niveau d'eau, plafonnement TRI \\
+\vfx{006} & Livré & Politique de caméra, exclusion mutuelle Windy \\
+\vfx{008} & Livré (partiel) & Isolation des modes, pas de double nappe d'eau \\
+\vfx{004} & Restant & Dépendance Three.js et couche personnalisée Mapbox \\
+\vfx{005} & Restant & Grille de terrain et nuanceur d'eau \\
+\vfx{007} & Restant & Réalisateur caméra (\og Play scenario \fg{}) \\
+\vfx{009} & Optionnel & Post-traitement \\
+\vfx{010} & Optionnel & Effets secondaires vent et feu \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Un point d'honnêteté sur cet état : le niveau d'eau calculé par le mode VFX
+n'alimente pas encore de couche de rendu 3D, puisque la tâche \vfx{004} n'est
+pas achevée. En revanche, ce niveau n'est pas du code dormant : il alimente
+l'étiquette de données partielles du bandeau, ce qui est un usage réel — la
+constitution interdit le code non référencé.
+
+\section{Bilan de la démarche}
+
+L'intérêt de ce chapitre n'est pas le rendu cinématique lui-même, mais la
+manière dont une tension produit a été traitée. Trois éléments ont rendu la
+fonctionnalité acceptable :
+
+\begin{enumerate}[leftmargin=1.6em]
+  \item \textbf{un amendement explicite} — la règle a été changée avant le
+        code, pas après ;
+  \item \textbf{une étanchéité vérifiée par des tests} — le mode VFX ne peut
+        pas modifier le contrat ;
+  \item \textbf{un étiquetage obligatoire} — le spectateur sait toujours qu'il
+        regarde une illustration.
+\end{enumerate}
+
+Sans ces trois éléments, la fonctionnalité aurait été soit refusée, soit
+introduite en silence — et dans le second cas, elle aurait probablement érodé
+la confiance dans l'ensemble du produit.

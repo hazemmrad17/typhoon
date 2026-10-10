@@ -1,0 +1,164 @@
+% =====================================================================
+\chapter{Contexte du stage}
+\label{ch:contexte}
+% =====================================================================
+
+\section{La structure d'accueil}
+
+Talan est un groupe de conseil et d'ingénierie technologique dont l'activité
+couvre le conseil en organisation, l'intégration de systèmes et, de plus en
+plus, la \emph{data} et l'intelligence artificielle. Ses interventions
+s'adressent à plusieurs secteurs, dont la banque, l'assurance, l'énergie et les
+transports.
+
+Ce stage s'est déroulé dans le cadre du \textbf{SummerCamp 2026}, le programme
+d'été du groupe. Le format est celui d'un stage projet : un sujet ouvert, une
+durée courte — environ un mois de travail effectif, du 14 août au 15 septembre
+2026 d'après l'historique du dépôt — et une obligation de résultat tangible.
+Contrairement à un stage d'observation, il fallait livrer quelque chose qui
+tourne : un service déployé, pas une présentation.
+
+Le sujet proposé portait sur le \textbf{risque climatique appliqué à
+l'assurance}, un thème qui n'est pas un exercice académique. La France a
+effectivement ouvert une discussion de politique publique sur l'adaptation du
+régime d'indemnisation des catastrophes naturelles (CatNat) au changement
+climatique. Travailler sur la donnée climatique appliquée au bâti, dans ce
+contexte, n'est pas un problème inventé pour un stage : c'est un problème que
+des professionnels cherchent activement à outiller.
+
+\section{Le problème posé}
+
+\subsection{Trois sources, aucune jointure}
+
+Le point de départ du projet est un constat simple, mais qui n'avait pas été
+exploité. La France dispose d'un écosystème open data remarquable sur le
+risque :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Géorisques} publie les aléas réglementaires : périmètres de
+        plans de prévention des risques (PPR), sites et sols pollués, réseaux
+        de transport de matières dangereuses, cavités, retrait-gonflement des
+        argiles, etc. La donnée est servie en WFS, donc interrogeable
+        géométriquement.
+  \item La \textbf{BDNB} (Base de Données Nationale des Bâtiments, CSTB) décrit
+        chaque bâtiment : usage, hauteur, emprise, matériaux de construction,
+        année, performance énergétique, avec des indicateurs de fiabilité.
+  \item \textbf{Copernicus} et \textbf{Open-Meteo} fournissent la dimension
+        temporelle : projections climatiques à 2050 et 2100, prévisions
+        météorologiques horaires, débits de rivière.
+\end{itemize}
+
+Aucune de ces sources ne fait la jointure. Géorisques ne sait pas ce qu'est le
+bâtiment : il dit qu'un périmètre existe, pas si \emph{ce} bâtiment est dedans.
+La BDNB ne sait pas si le bâtiment est inondable. Copernicus travaille sur une
+grille d'environ 10~km, donc ne dit rien d'un bâtiment précis.
+
+\begin{encadre}
+\textbf{La jointure aléa $\times$ vulnérabilité est le produit.} Un aléa sans
+vulnérabilité est une carte. Une vulnérabilité sans aléa est une fiche
+technique. Les deux ensemble, pour une même adresse, avec la provenance de
+chaque fait, constituent une information qui n'existe nulle part ailleurs.
+\end{encadre}
+
+\subsection{Le contournement actuel}
+
+Un souscripteur qui reçoit un dossier d'assurance habitation ou professionnelle
+doit aujourd'hui évaluer l'exposition du bien. La pratique observée — décrite
+dans les notes de cadrage du projet et confirmée lors des échanges avec un
+professionnel du secteur — consiste à ouvrir Géorisques dans un onglet, la BDNB
+dans un autre, et à juger visuellement : la rivière est-elle proche ? le
+périmètre enveloppe-t-il la parcelle ? le bâtiment est-il en rez-de-chaussée ?
+
+C'est lent, non reproductible, non traçable, et cela ne passe pas l'épreuve
+d'un audit. Sous Solvabilité~II, une décision de souscription doit pouvoir être
+justifiée. \og J'ai regardé la carte et ça m'a paru bon \fg{} n'est pas une
+justification.
+
+\section{La mission}
+
+La mission confiée peut se formuler ainsi :
+
+\begin{quote}
+\itshape
+Concevoir un service qui, à partir d'une adresse française, produit une fiche
+de risque climatique \textbf{au niveau du bâtiment}, en croisant les aléas
+réglementaires et la vulnérabilité du bâti, avec une provenance explicite pour
+chaque fait — et le rendre utilisable par un souscripteur dans son travail
+quotidien.
+\end{quote}
+
+Cette formulation est volontairement large. Elle laisse ouvertes trois
+questions qui se sont révélées être les vraies décisions du stage :
+
+\begin{enumerate}[leftmargin=1.6em]
+  \item \textbf{Quel est le livrable ?} Une interface graphique, un rapport
+        narratif, ou une donnée structurée ? La réponse n'était pas évidente
+        au départ.
+  \item \textbf{Quel est le niveau de résolution acceptable ?} Faire du
+        per-bâtiment partout est-il possible ? Sinon, comment le dire
+        honnêtement ?
+  \item \textbf{Que fait-on de la synthèse ?} Un assureur attend souvent un
+        \og score \fg. Est-ce le bon livrable ?
+\end{enumerate}
+
+\section{Démarche et organisation du rapport}
+
+Le stage s'est déroulé en trois mouvements, qui structurent ce rapport.
+
+\begin{description}[leftmargin=0em,style=nextline]
+  \item[Phase 1 — Exploration (mi-août 2026).] Construction d'une première
+        version fonctionnelle : quatre connecteurs de données, une couche de
+        notation, un tableau de bord climatique, des extrusions 3D. Le produit
+        \emph{marchait}, mais son intérêt était difficile à défendre : il
+        reproduisait, à résolution égale et gratuitement, ce que chaque portail
+        source fournissait déjà.
+  \item[Phase 2 — Recentrage (25 août 2026).] Une remise à plat complète. Le
+        livrable a été redéfini comme un contrat de données, le score composite
+        a été supprimé, et une grande partie du code de la phase 1 a été
+        \emph{supprimée}. Une constitution d'ingénierie a été écrite pour
+        verrouiller ces choix par des tests et des règles non négociables.
+  \item[Phase 3 — Industrialisation et mise en scène (fin août à
+        mi-septembre).] Durcissement du contrat, ajout d'un moteur de scénarios
+        interactifs sur la carte, d'un mode de rendu cinématique, et d'un
+        déploiement serverless vérifié en ligne.
+\end{description}
+
+Le rapport suit cette logique. Le chapitre~\ref{ch:metier} décrit le métier de
+l'assurance et ce que le produit doit — ou ne doit pas — être. Le
+chapitre~\ref{ch:existant} analyse l'existant et la décision de recentrage. Les
+chapitres~\ref{ch:methodo} à \ref{ch:architecture} traitent de la méthode, des
+sources de données et de l'architecture. Les chapitres~\ref{ch:scenarios} et
+\ref{ch:vfx} décrivent le moteur de scénarios et le mode VFX. Le
+chapitre~\ref{ch:qualite} détaille la stratégie de test. Le
+chapitre~\ref{ch:deploiement} couvre le déploiement, le
+chapitre~\ref{ch:resultats} les résultats mesurés, et le
+chapitre~\ref{ch:bilan} le bilan critique.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=8mm,
+  phase/.style={draw=typhoonBlue,thick,fill=typhoonBlue!6,rounded corners=3pt,
+                text width=3.55cm,align=center,minimum height=2.5cm,inner sep=6pt},
+  arrow/.style={-{Latex[length=2.4mm]},thick,typhoonBlue}
+]
+\node[phase] (p1) {\textbf{\color{typhoonDeep}Phase 1}\\[3pt]
+  {\small Exploration}\\[4pt]
+  {\footnotesize 4 connecteurs, notation, tableau de bord, 3D}\\[3pt]
+  {\scriptsize\color{typhoonGrey}14--24 août}};
+\node[phase,right=of p1] (p2) {\textbf{\color{typhoonDeep}Phase 2}\\[3pt]
+  {\small Recentrage}\\[4pt]
+  {\footnotesize Contrat de données, suppression du score, constitution}\\[3pt]
+  {\scriptsize\color{typhoonGrey}25--31 août}};
+\node[phase,right=of p2] (p3) {\textbf{\color{typhoonDeep}Phase 3}\\[3pt]
+  {\small Industrialisation}\\[4pt]
+  {\footnotesize Scénarios TRI, mode VFX, tests, déploiement Vercel}\\[3pt]
+  {\scriptsize\color{typhoonGrey}1--15 sept.}};
+\draw[arrow] (p1) -- (p2);
+\draw[arrow] (p2) -- (p3);
+\end{tikzpicture}
+\caption{Les trois phases du stage. La phase 2 est une phase de soustraction :
+elle retire davantage qu'elle n'ajoute, et c'est ce qui a rendu le produit
+défendable.}
+\label{fig:phases}
+\end{figure}

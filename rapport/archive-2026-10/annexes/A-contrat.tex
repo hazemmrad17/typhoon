@@ -1,0 +1,153 @@
+% =====================================================================
+\chapter{Référence du contrat canonique}
+\label{ann:contrat}
+% =====================================================================
+
+Cette annexe reprend la spécification complète du contrat de données, telle
+qu'elle figure dans la spécification du projet. Elle est destinée à un
+intégrateur qui souhaite consommer l'API.
+
+\section{Structure complète}
+
+\begin{lstlisting}[style=json,caption={Contrat canonique \texttt{DiagnosticRecord}
+v1.0.},label={lst:contrat-full}]
+POST /diagnostic/adresse
+body: { "adresse": "10 rue de Rivoli, 75004 Paris" }
+
+200 ->
+{
+  "schema_version": "1.0",
+  "adresse": {
+    "saisie": "...",              // entree brute
+    "normalisee": "...",          // libelle du geocodeur
+    "citycode": "75056",
+    "postcode": "75004",
+    "city": "Paris",
+    "lat": 48.8566,
+    "lon": 2.3522,
+    "geocode_score": 0.95
+  },
+  "aleas": [                      // 13 objets, referentiel complet
+    {
+      "code": "inondation",
+      "libelle": "Inondation",
+      "present": true,            // true | false | null
+      "present_commune": true,
+      "zonage": "Dans un perimetre PPR inondation",   // texte verbatim
+      "hauteur_eau_m": 1.5,       // optionnels specifiques a l'alea,
+      "zone_sismique": null,      // TOUJOURS presents, null si non applicable
+      "catnat_historique": [],
+      "per_building": {           // present uniquement si teste geometriquement
+        "method": "point-in-polygon",  // "point-in-polygon" | "proximity"
+        "radius_m": null,              // echo de la proximite si applicable
+        "count": 2
+      },
+      "source": "georisques",
+      "url_detail": "https://www.georisques.gouv.fr/risques/inondations",
+      "erreur": null,             // string | null
+      "resolution": "per-building"
+      // "per-building" | "commune-level" | "commune-level-estimate"
+    }
+  ],
+  "bdnb": {                       // bloc entier null si BDNB indisponible
+    "donnees": {
+      // ~139 champs BDNB verbatim
+      // batiment = batiment principal
+      // autres_batiments_meme_adresse = [...]
+    },
+    "_source": {
+      "provider": "BDNB",
+      "url": "https://api.bdnb.io",
+      "attribution": "Source BDNB (CSTB) - donnees a jour au <millesime>",
+      "recuperee_le": "2026-08-25T10:00:00+00:00"
+    }
+  },
+  "georisques_source": {
+    "provider": "Georisques",
+    "url": "https://www.georisques.gouv.fr",
+    "attribution": "Source Georisques (BRGM / MTE) - donnees a jour au <millesime>",
+    "recuperee_le": "2026-08-25T10:00:00+00:00"
+  },
+  "erreurs_partielles": [],
+  "genere_le": "2026-08-25T10:00:01+00:00",
+  "avertissement": "Ce rapport agrege les donnees publiques Georisques..."
+}
+\end{lstlisting}
+
+\section{Champs interdits}
+
+Les champs suivants ne peuvent pas exister dans le contrat. Leur présence fait
+échouer la validation du schéma, et une porte de recherche automatique échoue si
+l'un d'eux apparaît dans un schéma émis :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \code{niveau} et les bandes D03 ;
+  \item tout score numérique, agrégé ou composite ;
+  \item \code{recommandations} et toute évaluation générée par IA ;
+  \item \code{copernicus} dans le contrat canonique v1.
+\end{itemize}
+
+\section{Règles de sérialisation}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Règles de sérialisation à respecter par tout consommateur.}
+\label{tab:serialisation}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Règle} & \textbf{Énoncé} \\
+\midrule
+Optionnels toujours présents &
+  Les champs spécifiques à un aléa sont toujours présents, à \code{null}
+  lorsqu'ils ne s'appliquent pas. Une clé n'est jamais absente. \\
+\addlinespace
+Exception \code{per\_building} &
+  L'objet \code{per\_building} n'existe que si le point a été testé
+  géométriquement. Sa présence porte l'information. \\
+\addlinespace
+BDNB verbatim &
+  Les clés BDNB reçues et émises sont identiques — vérifié par test de
+  conformité. \\
+\addlinespace
+Attribution non vide &
+  Chaque bloc \code{\_source} porte une chaîne d'attribution non vide. \\
+\addlinespace
+Résolution contrainte &
+  Le RGA ne peut sérialiser aucune autre valeur que
+  \code{commune-level-estimate}. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Le référentiel des treize aléas}
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Les treize aléas, leur libellé et leur niveau de résolution attendu.}
+\label{tab:aleas}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Code} & \textbf{Libellé} & \textbf{Résolution attendue} \\
+\midrule
+\code{icpe} & Installations classées &
+  \code{per-building} ou \code{commune-level} \\
+\code{inondation} & Inondation & \code{per-building} \\
+\code{sismicite} & Sismicité & \code{commune-level} (décret, permanent) \\
+\code{mouvement\_terrain} & Mouvement de terrain & \code{per-building} \\
+\code{radon} & Radon & \code{commune-level} (permanent) \\
+\code{rga} & Retrait-gonflement des argiles &
+  \code{commune-level-estimate} (forcé) \\
+\code{cavite} & Cavités souterraines & \code{per-building} ou communal \\
+\code{feu\_foret} & Feu de forêt & \code{per-building} \\
+\code{avalanche} & Avalanche & \code{per-building} \\
+\code{canalisations} & Canalisations (TMD) &
+  \code{per-building} par proximité (200~m) \\
+\code{vent\_cyclonique} & Vent cyclonique & \code{commune-level} \\
+\code{ppr} & PPR (agrégat) & \code{per-building} \\
+\code{ssp} & Sites et sols pollués &
+  \code{per-building} par proximité (200~m) \\
+\bottomrule
+\end{tabularx}
+\end{table}

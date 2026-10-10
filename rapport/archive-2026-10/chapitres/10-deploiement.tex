@@ -1,0 +1,221 @@
+% =====================================================================
+\chapter{Déploiement et mise en production}
+\label{ch:deploiement}
+% =====================================================================
+
+Un service non déployé n'est pas un service. Ce chapitre décrit l'architecture
+de déploiement retenue, les obstacles rencontrés, et la vérification qui a été
+faite sur l'instance en ligne.
+
+\section{L'objectif : une URL, zéro configuration}
+
+Le choix d'architecture de déploiement a été guidé par une contrainte
+d'usage : un utilisateur qui reçoit un lien doit pouvoir l'ouvrir et
+l'utiliser. Il ne doit pas avoir à configurer une URL de backend, ni à
+comprendre un problème de CORS.
+
+Cela a conduit à un déploiement \textbf{mono-projet} : le frontend statique et
+le backend FastAPI servis depuis le même domaine.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  scale=0.9, transform shape,
+  node distance=7mm,
+  dom/.style={draw=typhoonDeep,fill=typhoonDeep!8,rounded corners=3pt,
+              align=center,inner sep=6pt,font=\small,text width=4.2cm},
+  fn/.style={draw=typhoonGreen,fill=typhoonGreen!8,rounded corners=3pt,
+             align=center,inner sep=5pt,font=\footnotesize,text width=3.1cm},
+  ext/.style={draw=typhoonGrey!70,fill=typhoonSand,rounded corners=3pt,
+              align=center,inner sep=5pt,font=\footnotesize,text width=3.1cm},
+  arrow/.style={-{Latex[length=2mm]},thick,typhoonBlue}
+]
+\node[dom] (dom) at (0,0) {\textbf{Domaine unique}\\[2pt]
+  {\footnotesize \texttt{typhoon-rose.vercel.app}}};
+
+\node[fn] (static) at (-4.6,-2.4) {Frontend statique\\{\tiny build Vite servi depuis /dist}};
+\node[fn] (api) at (0,-2.4) {Fonction Python\\{\tiny \texttt{api/index.py} monte FastAPI}};
+\node[fn] (proxy) at (4.6,-2.4) {Proxy Vigicrues\\{\tiny relais same-origin}};
+
+\node[ext] (src) at (0,-4.8) {Sources externes\\{\tiny Géorisques · BDNB · IGN · Open-Meteo}};
+
+\draw[arrow] (dom) -- (static);
+\draw[arrow] (dom) -- (api);
+\draw[arrow] (dom) -- (proxy);
+\draw[arrow] (api) -- (src);
+\draw[arrow] (proxy) -- (src);
+\end{tikzpicture}
+\caption{Architecture de déploiement mono-domaine. Tout passe par une seule
+URL : pas de CORS, pas de variable d'environnement côté client.}
+\label{fig:deploy}
+\end{figure}
+
+\section{Le principe du mono-domaine}
+
+Le fichier de configuration à la racine du dépôt orchestre l'ensemble :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{build} — installation et compilation du frontend, servi depuis
+        le répertoire de sortie ;
+  \item \textbf{rewrites} — les chemins \api{/api/*}, \api{/diagnostic/*} et
+        \api{/health} sont routés vers la fonction Python qui monte
+        l'application FastAPI ;
+  \item \textbf{proxy Vigicrues} — un relais vers le service de vigilance
+        crues, nécessaire car ce service n'envoie pas d'en-têtes CORS. En
+        développement, c'est le proxy de Vite qui joue ce rôle ; en production,
+        c'est une règle de réécriture ;
+  \item \textbf{fallback SPA} — toute route cliente inconnue est servie par
+        l'application, pour que \api{/zone} ou \api{/dashboard} ne renvoient
+        pas une erreur 404.
+\end{itemize}
+
+Côté client, une règle importante : le frontend appelle le backend
+\textbf{en même origine} (URLs relatives) dès que la page n'est pas servie
+depuis un hôte local. Aucune URL n'est à configurer, aucun CORS n'est à gérer.
+
+\begin{invariant}
+Un \code{VITE\_API\_BASE} qui pointe vers \code{http://127.0.0.1:8000} est
+\textbf{ignoré en production} : il désignerait la machine du visiteur, ce qui
+produirait un message trompeur du type \og backend inaccessible ? \fg. La
+résolution d'URL ignore un override local sur un hôte déployé.
+\end{invariant}
+
+\section{Les obstacles rencontrés}
+
+Le déploiement a été la partie la plus itérative du stage. L'historique des
+commits en garde la trace, et les enseignements valent d'être consignés.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Obstacles de déploiement et résolutions.}
+\label{tab:obstacles}
+\begin{tabularx}{\textwidth}{@{}X X@{}}
+\toprule
+\textbf{Symptôme} & \textbf{Cause et correction} \\
+\midrule
+\og Could not find a top-level \texttt{app} \fg &
+  La fonction Python doit exposer le nom \code{app} \textbf{au niveau racine
+  du module}, hors bloc conditionnel. Un diagnostic de démarrage peut rester,
+  mais l'affectation doit remonter sans indentation. \\
+\addlinespace
+\og pattern \texttt{api/index.py} doesn't match any Serverless Functions \fg &
+  Message trompeur : en configuration moderne, la fonction est écartée
+  silencieusement si le nom racine est absent. Le message ne mentionne pas la
+  vraie cause. \\
+\addlinespace
+\code{FUNCTION\_INVOCATION\_FAILED} (500) &
+  Variables d'environnement présentes mais vides. La configuration a été
+  durcie pour ignorer les variables vides plutôt que de les traiter comme
+  définies. \\
+\addlinespace
+Le répertoire statique monté au mauvais endroit &
+  Une configuration héritée montait le résultat du build sous un sous-chemin.
+  Correction par une configuration moderne. \\
+\addlinespace
+\og Vigilance crues indisponible \fg &
+  Sans règle de proxy, \api{/vigicrues/...} tombait dans le fallback SPA et
+  renvoyait du HTML au lieu de données. \\
+\addlinespace
+Routes clientes en 404 &
+  Ajout du fallback SPA. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Une leçon se dégage de cet ensemble : \textbf{les messages d'erreur d'une
+plateforme de déploiement désignent souvent le symptôme, pas la cause}. Le
+message \og le motif ne correspond à aucune fonction \fg{} n'indique pas que le
+motif est faux, mais que la fonction a été écartée pour une autre raison. Il a
+fallu remonter à la cause racine — la visibilité du nom racine — pour corriger.
+
+\section{Comportements propres au serverless}
+
+Le passage à une fonction serverless introduit des différences qu'il faut
+connaître avant une démonstration :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Démarrage à froid} — le réveil d'une fonction froide prend de
+        5 à 10~s, et un diagnostic complet peut atteindre environ 15~s à froid.
+        C'est normal sur l'offre gratuite ; l'astuce opérationnelle consiste à
+        appeler la sonde de vie une fois avant une démonstration.
+  \item \textbf{Cache non persistant} — le système de fichiers de la fonction
+        est éphémère. Chaque rapport narratif consomme donc un appel au modèle,
+        et la prose varie légèrement entre deux requêtes identiques.
+  \item \textbf{Clé Windy liée au domaine} — l'API météo n'autorise une clé que
+        sur les domaines déclarés. Le domaine de production doit y figurer,
+        sinon les couches météo échouent. La console nomme alors explicitement
+        le domaine à ajouter — un bon exemple de message d'erreur actionnable.
+\end{itemize}
+
+\section{Vérification de l'instance en ligne}
+
+Une instance de référence a été déployée et vérifiée le 15 septembre 2026.
+Le tableau~\ref{tab:verif} reproduit les contrôles effectués et leurs résultats.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Contrôles de l'instance déployée, vérifiés le 15 septembre 2026.}
+\label{tab:verif}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Contrôle} & \textbf{Résultat} \\
+\midrule
+\api{/} et \api{/zone} & 200 — application servie (fallback SPA) \\
+\api{/health}, \api{/health/detailed} & 200, \code{\{"status":"ok"\}} \\
+\api{/api/flood-alea} (Quai de la Rapée) & 200 — \code{in\_tri: true}, classes
+  TRI réelles \\
+\api{/api/meteo}, \api{/api/hydro}, \api{/api/photo} & 200 \\
+\api{/api/geocode/search} & 200 — géocodage réel \\
+\api{POST /diagnostic/adresse} (Quai de la Rapée) & 200 en environ 9 à 16~s \\
+\api{POST /api/report} & 200, repli non utilisé, prose française \\
+\api{POST /api/report/stream} & 200 en environ 1,6~s, avec les événements
+  \code{header}, \code{summary}, \code{mitigations}, \code{confidence},
+  \code{appendix}, \code{patch}, \code{done} \\
+Jeton Mapbox injecté dans le bundle & oui \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Adresses de référence}
+
+Pour que la démonstration soit reproductible, trois adresses de référence ont
+été identifiées et vérifiées.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Adresses de référence pour la démonstration.}
+\label{tab:adresses}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.2cm}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Adresse} & \textbf{Rôle} & \textbf{Résultat vérifié} \\
+\midrule
+Quai de la Rapée, 75012 Paris & Démonstration principale, eau sur le bâtiment &
+  \code{available: true}, Moyen 0--1~m, Faible 2--3~m, bassin Seine \\
+\addlinespace
+10 Quai de la Charente, 75019 Paris & Absence honnête : dans un TRI sans classe
+  au point &
+  \code{in\_tri: true}, 6/13 aléas, fiche BDNB 699~m\textsuperscript{2} \\
+\addlinespace
+Adresse intérieure hors TRI (ex. Brou, 28300) & Contraste \og hors TRI $\neq$
+  jamais inondé \fg &
+  \code{available: false}, \code{in\_tri: false} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Le parcours de démonstration suggéré exploite délibérément le contraste : la
+première adresse montre le produit en fonctionnement nominal, la deuxième
+montre la rigueur — un message distinct, aucun chiffre inventé — et la
+troisième montre l'honnêteté sur l'absence.
+
+\section{Alternative de déploiement}
+
+Une seconde option de déploiement est documentée pour le cas où les fonctions
+serverless seraient trop lentes : backend sur une plateforme d'hébergement
+classique (blueprint prêt dans le dépôt) et frontend statique. Le compromis est
+inverse : démarrage plus lent après inactivité (environ 30~s de réveil sur
+l'offre gratuite), mais performances d'exécution plus régulières. Cette option
+existe parce qu'un choix d'infrastructure est un arbitrage, pas une évidence.

@@ -24,13 +24,50 @@ point-in-polygon WFS) et vulnérabilité BDNB (139 champs verbatim), avec
 
 ## Aperçu
 
-| Étape 1 — Diagnostic | Étape 2 — Scénarios |
-|---|---|
-| ![Diagnostic](docs/screenshots/step1-diagnostic.png) | ![Scénarios](docs/screenshots/step2-scenario.png) |
+Captures rejouées sur l'application (`frontend/scripts/demo-shots.mjs`), pas
+composées pour l'illustration.
 
-*À gauche : 13 aléas Géorisques, fiche BDNB, photo Panoramax sur carte 3D.
-À droite : classes TRI officielles (moyen ~100 ans, extrême ~500 ans…),
-timeline horaire et Play — l'eau monte sur le bâtiment.*
+### Le tunnel, de l'adresse au rapport
+
+| Étape 1 — Diagnostic | Étape 2 — Analyse |
+|---|---|
+| ![Diagnostic](docs/screenshots/06-etape1-diagnostic.png) | ![Analyse](docs/screenshots/07-etape2-scenarios.png) |
+| 13 aléas Géorisques au point — chacun avec sa résolution et sa provenance — commune INSEE, fiche BDNB, photo Panoramax sur carte 3D. | Classes de crue TRI officielles (fréquent ~10 ans, moyen ~100 ans, extrême ~500 ans) : le niveau vient de la classe réglementaire, jamais d'un curseur. |
+
+| Étape 3 — Jumeau | Étape 4 — Rapport |
+|---|---|
+| ![Jumeau](docs/screenshots/08-etape3-jumeau.png) | ![Rapport](docs/screenshots/09-rapport.png) |
+| Le bâti en volume dans son propre environnement WebGL : faits du cadre à gauche, catalogue des aléas à droite, horloge de l'expérience en bas. | Page autonome : scénario de référence, faits clés, provenance. La prose LLM est un appoint estampillé, jamais la source des nombres. |
+
+### Les écrans de l'assureur
+
+| Tableau de bord | Portefeuille |
+|---|---|
+| ![Dashboard](docs/screenshots/03-tableau-de-bord.png) | ![Portfolio](docs/screenshots/04-portefeuille.png) |
+| Volume diagnostiqué, biens à expertiser, activité, qualité des faits — lu depuis le cache local, sans rappeler les sources. | Le livre des actifs trié par **résolution du fait** : vérifié à la parcelle, estimé à la commune, ou manquant. |
+
+| Landing | Connexion |
+|---|---|
+| ![Landing](docs/screenshots/01-landing.png) | ![Connexion](docs/screenshots/02-connexion.png) |
+
+| Surveillance | Paramètres du compte |
+|---|---|
+| ![Watchlist](docs/screenshots/05-surveillance.png) | ![Paramètres](docs/screenshots/10-parametres.png) |
+
+> ⚠️ Ces captures proviennent d'un dev server local dont l'API pointe vers
+> l'instance déployée (le poste de capture ne joint pas
+> `www.georisques.gouv.fr`). L'instance étant en retard sur ce dépôt,
+> `/api/meteo/france` y répond 404 : les cinq cartes météo de l'étape 2
+> affichent donc « Référence météo indisponible ». C'est une divergence de
+> versions, pas le comportement du code de ce dépôt.
+
+Captures (rejouables) :
+
+```bash
+cd frontend
+npm i -D playwright               # outil de capture, hors dépendances de l'app
+node scripts/demo-shots.mjs       # dev server + API requis (voir l'en-tête du script)
+```
 
 ## Fonctionnalités
 
@@ -100,34 +137,35 @@ les variables `VITE_*` depuis là via `envDir: '..'`) et renseigner :
 | `CDSAPI_KEY` / `CDSAPI_URL` | Copernicus CDS |
 | `PARTNER_API_KEYS` | Endpoints fermés si absent (mode dev) |
 
-## Démo — adresses de référence (vérifiées live 2026-09-14)
+## Démo — adresses de référence (re-vérifiées live 2026-10-10)
 
 | Adresse | Rôle | Résultat vérifié |
 |---|---|---|
 | **Quai de la Rapée, 75012 Paris** | Démo principale — eau sur le bâtiment | `available: true` · Moyen 0–1 m · Faible 2–3 m · bassin Seine |
 | **10 Quai de la Charente, 75019 Paris** | Absence honnête — dans un TRI sans classe au point | `in_tri: true`, 6/13 aléas, fiche BDNB 699 m² |
-| Adresse intérieure hors TRI (ex. Brou, 28300) | Contraste « hors TRI ≠ jamais inondé » | `available: false, in_tri: false` |
+| **Rue de la République, 28160 Brou** | Contraste « hors TRI ≠ jamais inondé » | `available: false` — commune rurale, hors périmètre TRI |
 
-Déroulé suggéré : Rapée (diagnostic → étape 2 → Moyen → scrub → Play) →
-Charente (rigueur : message distinct, aucun chiffre inventé) → hors TRI →
+⚠️ `Brou 28300` **n'est pas** une adresse valide : le code postal de Brou est
+`28160`, et le géocodeur répond `adresse_ambigue` sur `28300` (qui désigne
+Saint-Prest). L'API refuse alors de diagnostiquer plutôt que de choisir à la
+place de l'utilisateur — comportement voulu, mais le message affiché se limite
+à `error score 0.31` et perd le libellé proposé (`label_propose`)
+(défaut d'interface connu : `docs/screenshots/11-adresse-ambigue.png`).
+
+Déroulé suggéré : Rapée (diagnostic → étape 2 → Moyen → jumeau) →
+Charente (rigueur : message distinct, aucun chiffre inventé) → Brou (hors TRI) →
 export PDF.
 
 ## Tests & qualité
 
 ```bash
 # backend (depuis backend/)
-python -m pytest tests/ -q     # 214 tests hors-ligne, < 60 s
+python -m pytest tests/ -q     # 261 tests hors-ligne, ~3 min 54 (mesuré 2026-10-10)
 ruff check app tests
 
 # frontend (depuis frontend/)
-npm test                       # 143 tests vitest
+npm test                       # 521 tests vitest (63 fichiers)
 npm run build                  # tsc -b && vite build
-```
-
-Captures d'écran (rejouables) :
-
-```bash
-cd frontend && node scripts/demo-shots.mjs   # nécessite backend + vite en local
 ```
 
 La suite est **hors-ligne** (fixtures GML capturées, sources mockées) et doit

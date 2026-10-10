@@ -1,0 +1,122 @@
+\chapter{Le problème : ce que subissent assureurs et promoteurs}
+\label{ch:douleurs}
+
+Ce chapitre décrit les douleurs telles qu'elles se manifestent dans le travail
+réel, formulées en \textbf{coûts}, en \textbf{délais} et en \textbf{risques
+juridiques}. Chacune est ensuite reprise en \S\ref{ch:reponse} sous la forme
+« douleur \(\rightarrow\) réponse technique ».
+
+\section{Sept douleurs}
+
+\subsection{D1 — L'adresse n'est pas l'unité des données publiques}
+
+Les aléas sont publiés à la commune ou par emprises cartographiques ; le
+bâtiment, lui, est décrit par la BDNB. Répondre « au bâtiment » avec une donnée
+communale produit une réponse qui paraît précise et ne l'est pas.
+
+\begin{douleur}[title={D1 — Granularité inadaptée}]
+\textbf{Effet} : sur-estimation sur les biens situés hors des emprises, ou
+sous-estimation sur ceux situés à l'intérieur d'une emprise communale large.
+\textbf{Coût} : reprise manuelle pour les cas litigieux, et perte de confiance
+dans l'outil dès le premier écart détecté par un expert.
+\end{douleur}
+
+\subsection{D2 — Aucune clé de jointure commune}
+
+Le géocodeur rend une adresse et un point ; la BDNB rend un
+\code{batiment\_groupe\_id} et une géométrie ; Géorisques rend des polygones
+d'aléas ; l'hydrographie rend des tronçons ; la photo rend une prise de vue. Il
+n'existe pas d'identifiant partagé : la jointure se fait par
+\textbf{géométrie} (point dans polygone) et par codes administratifs, avec toutes
+les approximations que cela implique.
+
+\subsection{D3 — Résolution hétérogène, non déclarée}
+
+Certaines données sont communales (l'aléa retrait-gonflement des argiles), la
+plupart sont vectorielles et ponctuelles, quelques-unes sont surfaciques. Mélanger
+ces niveaux sans le dire revient à présenter une estimation communale comme une
+mesure sur le bien.
+
+\begin{invariant}[title={Chaque fait déclare sa finesse}]
+Tout objet d'aléa du contrat porte \code{source}, \code{resolution} et
+l'attribution LO 2.0 du producteur. L'aléa argile est \emph{toujours}
+\code{commune-level-estimate} tant qu'aucune source vectorielle n'est câblée :
+la changer exige un amendement de la constitution du projet.
+\end{invariant}
+
+\subsection{D4 — « Absence de donnée » confondue avec « absence de risque »}
+
+C'est la douleur la plus coûteuse, parce qu'elle est \emph{invisible}. Une source
+qui répond 500, un quota atteint, un service momentanément indisponible : si
+l'outil rend alors « aucun aléa », l'utilisateur conclut à un bien sans risque.
+Le pire des deux mondes — une décision prise sur du vide, avec l'apparence d'une
+réponse.
+
+\subsection{D5 — Traçabilité insuffisante pour justifier une décision}
+
+Un assureur doit pouvoir expliquer une tarification. Une valeur sans producteur,
+sans date de millésime et sans méthode n'est pas défendable devant un régulateur
+ni devant un client qui conteste.
+
+\subsection{D6 — Le coût et le délai de l'analyse manuelle}
+
+Croiser six sources par bien, à la main, représente typiquement plusieurs heures
+par dossier. Cela rend l'analyse exhaustive d'un portefeuille économiquement
+impossible : on échantillonne, donc on subit le risque de queue.
+
+\subsection{D7 — La dette juridique de l'IA générative}
+
+Introduire un modèle de langage dans un document réglementaire sans garde-fou
+revient à accepter qu'un chiffre inventé soit publié. La douleur n'est pas
+technique, elle est juridique : la responsabilité du contenu reste à celui qui le
+signe.
+
+\section{Les douleurs, mises en regard}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{4.2cm}Xp{3.4cm}@{}}
+\toprule
+\textbf{Douleur} & \textbf{Manifestation observable} & \textbf{Ce qu'elle coûte} \\
+\midrule
+D1 Granularité & Écarts entre l'outil et l'expert & Crédibilité \\
+D2 Jointure & Scripts ad hoc, cas non couverts & Maintenance \\
+D3 Résolution & Un chiffre communal présenté comme un fait du bien & Risque juridique \\
+D4 Absence \(\neq\) 0 & Décision prise sur une source muette & Sinistre non anticipé \\
+D5 Traçabilité & Valeur sans producteur ni millésime & Non-conformité \\
+D6 Volume & Analyse limitée à un échantillon & Risque de queue \\
+D7 IA non bornée & Chiffre plausible mais faux & Responsabilité \\
+\bottomrule
+\end{tabularx}
+\caption{Les sept douleurs, leur manifestation et ce qu'elles coûtent réellement.}
+\end{table}
+
+\section{Le test de réalité : un portefeuille de 1 200 biens}
+
+Pour rendre le problème tangible, prenons un cas représentatif.
+
+Un assureur doit réévaluer un portefeuille de 1 200 biens répartis sur le
+territoire. Le travail d'analyse disponible représente l'équivalent de deux
+postes à temps plein. À plusieurs heures par bien, seule une fraction du
+portefeuille peut être instruite en profondeur ; le reste est traité par
+approximation communale.
+
+Trois conséquences s'enchaînent :
+
+\begin{enumerate}
+  \item \textbf{Sur les biens non instruits}, la tarification retenue est celle
+    de la commune — par exemple une parcelle en bord de cours d'eau traitée
+    comme une parcelle quelconque du fait d'une emprise mal comprise.
+  \item \textbf{Sur les biens contestés}, l'analyse doit être refaite à la main
+    pour produire une justification acceptable, sans capitalisation du travail
+    déjà fait.
+  \item \textbf{Sur l'ensemble}, aucune réponse n'est reproductible : deux
+    analystes, deux méthodes, deux résultats.
+\end{enumerate}
+
+\begin{encadre}[title={Ce que la réponse doit donc garantir}]
+Une réponse \emph{par bâtiment}, \emph{traçable}, \emph{reproductible}, et
+capable de dire « je ne sais pas » sans le confondre avec « il n'y a rien ».
+C'est exactement le cahier des charges de \S\ref{ch:reponse}.
+\end{encadre}

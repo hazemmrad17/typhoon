@@ -1,0 +1,118 @@
+% =====================================================================
+\chapter{Glossaire}
+\label{ann:glossaire}
+% =====================================================================
+
+\section{Termes métier}
+
+\begin{description}[leftmargin=0em,style=nextline]
+  \item[Souscription (\emph{underwriting}).] Processus par lequel un assureur
+  accepte, met à l'étude ou refuse de couvrir un risque, et détermine les
+  conditions de la couverture.
+  \item[Souscripteur.] Professionnel qui traite les dossiers de souscription au
+  quotidien.
+  \item[Actuaire.] Professionnel qui construit les modèles de tarification et
+  de provisionnement, en s'appuyant sur des données plutôt que sur une
+  interface.
+  \item[Solvabilité II.] Cadre réglementaire européen de solvabilité des
+  assureurs. Il impose notamment la traçabilité et la justification des
+  décisions.
+  \item[Régime CatNat.] Régime français d'indemnisation des catastrophes
+  naturelles, fondé sur la reconnaissance de l'état de catastrophe naturelle
+  par arrêté interministériel.
+  \item[Non-stationnarité.] Propriété d'un risque dont la distribution change
+  dans le temps. Le risque climatique est non stationnaire : le passé ne prédit
+  pas directement le futur.
+  \item[PPR.] Plan de Prévention des Risques. Document réglementaire qui
+  délimite des zones exposées à un aléa et fixe des prescriptions.
+  \item[TRI.] Territoire à Risque Important d'inondation, issu de la Directive
+  Inondation. Classe l'exposition en quatre niveaux de période de retour.
+  \item[Période de retour.] Durée moyenne entre deux occurrences d'un événement
+  d'intensité donnée. Une crue centennale a une probabilité d'environ 1\,\% par
+  an.
+  \item[RGA.] Retrait-gonflement des argiles. Phénomène de déformation des sols
+  argileux selon leur humidité, cause majeure de fissuration des bâtiments.
+  \item[CatNat historique.] Liste des arrêtés de catastrophe naturelle pris
+  pour une commune.
+\end{description}
+
+\section{Termes techniques}
+
+\begin{description}[leftmargin=0em,style=nextline]
+  \item[WFS.] Web Feature Service. Standard de l'Open Geospatial Consortium
+  pour l'échange de données géographiques vectorielles.
+  \item[GML.] Geography Markup Language. Format XML d'encodage de géométries,
+  utilisé par les services WFS. Le projet traite GML 3.2.
+  \item[Point-in-polygon.] Test déterminant si un point est à l'intérieur d'un
+  polygone. Implémenté par lancer de rayon.
+  \item[Lancer de rayon.] Algorithme consistant à compter les intersections
+  d'un rayon partant du point avec les arêtes du polygone. Un nombre impair
+  signifie que le point est à l'intérieur.
+  \item[Boîte englobante (BBOX).] Rectangle délimitant la zone d'une requête
+  spatiale.
+  \item[Proximité géométrique.] Test applicable aux géométries non polygonales
+  (points, lignes) : le point est-il à moins d'un rayon donné ?
+  \item[Ordre des axes.] Convention de notation des coordonnées
+  (latitude/longitude ou longitude/latitude). Une erreur d'ordre fait échouer
+  silencieusement tout test géométrique.
+  \item[Verbatim.] Passage d'une donnée sans transformation : ni renommage, ni
+  filtrage, ni recalcul.
+  \item[Provenance.] Métadonnée décrivant l'origine d'un fait : fournisseur,
+  URL, chaîne d'attribution, horodatage de collecte.
+  \item[Résolution.] Niveau auquel un fait a été établi : par bâtiment, par
+  commune, ou estimé par commune.
+  \item[Mode dégradé.] Comportement du service lorsqu'une source échoue : la
+  réponse reste valide mais partielle, avec les faits concernés marqués comme
+  inconnus.
+  \item[Fixture.] Donnée de test figée, capturée une fois depuis une source
+  réelle, permettant des tests hors-ligne reproductibles.
+  \item[Serverless.] Modèle d'exécution où le code s'exécute dans une fonction
+  éphémère, sans serveur permanent. Le système de fichiers n'y persiste pas.
+  \item[Étiquetage.] Mention visible signalant qu'un rendu est illustratif et
+  non contractuel.
+  \item[Porte de recherche (\emph{grep gate}).] Vérification automatique qui
+  échoue si un motif interdit (par exemple un champ de score) apparaît dans le
+  code ou un schéma émis.
+\end{description}
+
+\section{Sigles}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Sigles et acronymes utilisés dans le rapport.}
+\label{tab:sigles}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Sigle} & \textbf{Signification} \\
+\midrule
+API & Application Programming Interface \\
+BAN & Base Adresse Nationale \\
+BDNB & Base de Données Nationale des Bâtiments \\
+BBOX & \emph{Bounding box} — boîte englobante \\
+CDS & Climate Data Store (Copernicus) \\
+CORS & \emph{Cross-Origin Resource Sharing} \\
+CSTB & Centre Scientifique et Technique du Bâtiment \\
+DPE & Diagnostic de Performance Énergétique \\
+GML & Geography Markup Language \\
+IGN & Institut Géographique National \\
+INSEE & Institut National de la Statistique et des Études Économiques \\
+LLM & \emph{Large Language Model} — grand modèle de langage \\
+OGC & Open Geospatial Consortium \\
+PPR & Plan de Prévention des Risques \\
+PPRI & Plan de Prévention du Risque Inondation \\
+RCP & \emph{Representative Concentration Pathway} — trajectoire de
+  concentration représentative (scénario climatique) \\
+REST & \emph{Representational State Transfer} \\
+RGA & Retrait-gonflement des argiles \\
+SSP & Sites et sols pollués \\
+SPA & \emph{Single Page Application} \\
+TMD & Transport de matières dangereuses \\
+TRI & Territoire à Risque Important d'inondation \\
+TTL & \emph{Time To Live} — durée de vie (d'un cache) \\
+VFX & \emph{Visual effects} — effets visuels (mode de rendu cinématique) \\
+WFS & Web Feature Service \\
+WMS & Web Map Service \\
+\bottomrule
+\end{tabularx}
+\end{table}

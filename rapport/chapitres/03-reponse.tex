@@ -1,0 +1,133 @@
+\chapter{La réponse}
+\label{ch:reponse}
+
+\section{La promesse en une phrase}
+
+\begin{center}
+\large\sffamily\color{typhoonBlue}
+Une adresse entre ; un \textbf{enregistrement canonique par bâtiment} sort, où
+chaque fait porte sa source, sa finesse et son attribution.
+\end{center}
+
+\begin{figure}[h]
+\centering
+\figbox{
+\begin{tikzpicture}[node distance=1.5cm and 1.2cm]
+  \node[uml,minimum width=2.6cm,fill=typhoonAmber!15] (in) {Une adresse\\\footnotesize (texte libre)};
+  \node[umlcomp,right=of in,minimum width=3.4cm,fill=typhoonBlue!10] (core)
+    {\textbf{Chaîne de collecte}\\\footnotesize 6 sources officielles};
+  \node[uml,right=of core,minimum width=3.4cm,fill=typhoonGreen!10] (out)
+    {\textbf{Contrat canonique}\\\footnotesize aléas + BDNB + provenance};
+  \draw[flow] (in) -- (core);
+  \draw[flow] (core) -- (out);
+  \node[umlnote,below=0.9cm of core,text width=7.6cm]
+    {Jamais de valeur par défaut : une source muette produit une \emph{absence}
+     déclarée, pas un zéro. Le schéma refuse les champs interdits
+     (score, bande, recommandation générée).};
+  \draw[flowd] (core) -- (out |- core.south);
+\end{tikzpicture}
+}
+\caption{La chaîne, de l'adresse au contrat. La provenance est portée par le
+contrat lui-même, pas rajoutée après coup.}
+\label{fig:promesse}
+\end{figure}
+
+\section{Chaque douleur reçoit une réponse nommée}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.6cm}p{5.2cm}X@{}}
+\toprule
+\textbf{Douleur} & \textbf{Réponse} & \textbf{Garantie vérifiée} \\
+\midrule
+D1 Granularité & Jointure \textbf{au point} : le polygone d'aléa est intersecté
+  avec les coordonnées exactes de l'adresse & Le résultat d'aléa est
+  \code{point-in-polygon}, jamais un report communal \\
+D2 Jointure & Pipeline unique côté serveur : géocodage, puis jointure par
+  géométrie et par identifiants administratifs & Une seule implémentation ;
+  le lot est \(N \times\) le pipeline unitaire \\
+D3 Résolution & Chaque objet d'aléa déclare \code{resolution} &
+  L'argile reste \code{commune-level-estimate} \\
+D4 Absence \(\neq\) 0 & Une panne de source devient une \emph{absence déclarée},
+  distincte d'une valeur nulle & Cinq états d'absence distincts et nommés
+  (\S\ref{sec:etats-tri}) \\
+D5 Traçabilité & \code{source} + millésime + attribution LO 2.0 sur chaque fait &
+  Champs obligatoires du schéma \\
+D6 Volume & Lot = \(N \times\) pipeline unitaire, avec budgets et quotas
+  protégés côté client & Budget mensuel BDNB ; limite de débit sur les routes
+  de collecte \\
+D7 IA non bornée & La prose ne peut pas introduire un fait : elle est
+  \textbf{validée} avant publication, champ par champ & Un nombre non ancré
+  fait rejeter la phrase et revenir au gabarit calculé \\
+\bottomrule
+\end{tabularx}
+\caption{Correspondance douleur \(\rightarrow\) réponse \(\rightarrow\) garantie.}
+\end{table}
+
+\section{Les invariants qui structurent tout le reste}
+
+Quatre règles expliquent la majorité des décisions techniques décrites en
+\S\ref{ch:architecture} et \S\ref{ch:donnees}.
+
+\begin{invariant}[title={I1 — Pas de jugement dans le contrat}]
+Aucun score, aucune bande D03, aucune recommandation générée ne peut être
+sérialisé. Le modèle actuariel reste celui de l'assureur. Le schéma l'impose
+techniquement, pas seulement par convention.
+\end{invariant}
+
+\begin{invariant}[title={I2 — L'absence est un fait, pas une panne}]
+« Hors TRI » est un fait sur le territoire ; « service indisponible » est un
+échec de source ; « dans un TRI sans classe au point » est un troisième état.
+Ces états ont des formulations distinctes et ne se confondent jamais avec zéro.
+\end{invariant}
+
+\begin{invariant}[title={I3 — Un seul ancrage pour les chiffres}]
+Le validateur qui garde la prose du rapport est \emph{le même} que celui qui
+garde l'assistant documentaire : il est importé, jamais dupliqué. Un chiffre
+absent du rapport fait refuser la réponse, il n'est jamais affiché.
+\end{invariant}
+
+\begin{invariant}[title={I4 — Une seule implémentation du calcul}]
+Le traitement par lot n'est pas un second moteur : c'est \(N\) appels au
+pipeline unitaire. Toute optimisation de volume qui créerait un second chemin de
+calcul est refusée par construction.
+\end{invariant}
+
+\section{Le parcours utilisateur, en quatre étapes}
+
+L'application suit le déroulé du travail d'analyse, et chaque étape a une seule
+responsabilité.
+
+\begin{enumerate}
+  \item \textbf{Diagnostic} — saisie de l'adresse, géocodage, collecte des aléas
+    et de la fiche bâtiment. C'est la seule étape qui interroge les sources.
+  \item \textbf{Scénario} — choix réglementaire : la \emph{classe de crue TRI}
+    fixe le niveau d'eau. La pluie prévue n'en fixe que la forme dans le temps ;
+    elle ne pilote jamais l'intensité.
+  \item \textbf{Jumeau} — représentation 3D des volumes du bâti réel, avec les
+    figures des aléas réellement constatés au point. Le bien est mis en évidence
+    par son identité (son identifiant BDNB), jamais par un plus-proche-voisin.
+  \item \textbf{Rapport} — document déterministe, exportable en PDF, complété par
+    une prose bornée et par un assistant documentaire qui refuse de répondre hors
+    des faits du rapport.
+\end{enumerate}
+
+\begin{encadre}[title={Un mode explicitement séparé}]
+Le jumeau comporte un \textbf{bac à sable} d'expérience (hypothèses, sans valeur
+réglementaire). Il est entré par un contrôle explicite, il n'écrit rien — aucun
+champ, aucun rapport, aucun PDF — et sa dépendance physique est chargée
+dynamiquement : le chemin de données factuel ne paie rien pour lui. Un test dédié
+vérifie qu'aucun module factuel ne l'importe.
+\end{encadre}
+
+\section{Ce que la réponse ne fait pas}
+
+\begin{itemize}
+  \item Elle ne calcule pas de prime et ne propose pas de tarif.
+  \item Elle ne classe pas les biens entre eux et ne produit aucune notation.
+  \item Elle n'invente pas de magnitude : quand aucune grandeur réelle ne pilote
+    un aléa, seule sa \emph{présence} est représentée.
+  \item Elle ne garantit pas la reproductibilité de la \emph{prose} : seuls le
+    rapport calculé, ses nombres et ses actions le sont.
+\end{itemize}

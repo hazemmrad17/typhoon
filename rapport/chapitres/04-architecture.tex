@@ -1,0 +1,193 @@
+\chapter{Architecture}
+\label{ch:architecture}
+
+\section{Vue d'ensemble}
+
+L'architecture suit une contrainte simple : \textbf{une seule implémentation du
+calcul}, et une frontière explicite autour du contrat de données. Le schéma de
+la figure~\ref{fig:composants} en montre les couches.
+
+\begin{figure}[h]
+\centering
+\figbox{
+\begin{tikzpicture}[node distance=0.45cm]
+
+  % ── Présentation ──
+  \node[umlcomp] (spa) {SPA React + Vite\\\footnotesize carte Mapbox 3D, panneaux, rapport};
+  \node[umlcomp,right=0.5cm of spa] (twin) {Jumeau 3D\\\footnotesize environnement WebGL dédié};
+  \node[umllayer,fit=(spa)(twin),
+        label={[font=\footnotesize\sffamily\color{typhoonGrey}]above:Présentation (navigateur)}] (lPres) {};
+
+  % ── API ──
+  \node[umlcomp,minimum width=11.6cm,below=0.75cm of lPres] (api)
+    {\textbf{API FastAPI} — \footnotesize routes \code{/diagnostic}, \code{/api/flood-alea},
+     \code{/api/hydro}, \code{/api/meteo}, \code{/api/photo}, \code{/api/report}, \code{/health}};
+  \node[umllayer,fit=(api),
+        label={[font=\footnotesize\sffamily\color{typhoonGrey}]above:Exposition}] (lApi) {};
+
+  % ── Services ──
+  \node[umlcomp,minimum width=2.7cm,below=0.8cm of lApi.south west,anchor=north west] (canon)
+    {pipeline canonique\\\footnotesize \code{build\_diagnostic\_record}};
+  \node[umlcomp,minimum width=2.7cm,right=0.28cm of canon] (batch)
+    {lot, budgets, limites\\\footnotesize \(N\times\) unitaire, quotas};
+  \node[umlcomp,minimum width=2.7cm,right=0.28cm of batch] (agent)
+    {rapport\\\footnotesize gabarit + prose validée};
+  \node[umlcomp,minimum width=2.7cm,right=0.28cm of agent] (assist)
+    {assistant ancré\\\footnotesize refuse hors périmètre};
+  \node[umllayer,fit=(canon)(batch)(agent)(assist),
+        label={[font=\footnotesize\sffamily\color{typhoonGrey}]above:Métier (services)}] (lServ) {};
+
+  % ── Connecteurs ──
+  \node[uml,minimum width=2.35cm,below=0.8cm of lServ.south west,anchor=north west] (c1) {BDNB};
+  \node[uml,minimum width=2.35cm,right=0.24cm of c1] (c2) {Géorisques\\\footnotesize REST + WFS};
+  \node[uml,minimum width=2.35cm,right=0.24cm of c2] (c3) {flood\_alea\\\footnotesize classes TRI};
+  \node[uml,minimum width=2.35cm,right=0.24cm of c3] (c4) {hydro\\\footnotesize Sandre / BD TOPO};
+  \node[uml,minimum width=2.35cm,below=0.22cm of c1] (c5) {météo\\\footnotesize Open-Meteo};
+  \node[uml,minimum width=2.35cm,right=0.24cm of c5] (c6) {géocodage\\\footnotesize BAN / Géoplateforme};
+  \node[uml,minimum width=2.35cm,right=0.24cm of c6] (c7) {photo\\\footnotesize Panoramax};
+  \node[umllayer,fit=(c1)(c2)(c3)(c4)(c5)(c6)(c7),
+        label={[font=\footnotesize\sffamily\color{typhoonGrey}]above:Connecteurs (une source = un module)}] (lConn) {};
+
+  % ── Externes ──
+  \node[uml,minimum width=4.2cm,below=0.7cm of lConn.south] (llm)
+    {Fournisseur de prose\\\footnotesize Gemini (défaut) ou Mistral};
+  \node[umlnote,right=0.5cm of llm,text width=7.4cm]
+    {Réglable par configuration. Une valeur inconnue ne choisit
+     \emph{aucun} fournisseur : le rapport sort en gabarit plutôt que vers un
+     tiers non choisi.};
+
+  % ── Flux ──
+  \draw[flow] (lPres.south) -- node[right,font=\footnotesize]{HTTPS / JSON} (lApi.north);
+  \draw[flow] (lApi.south) -- (lServ.north);
+  \draw[flow] (lServ.south) -- (lConn.north);
+  \draw[flow] (lConn.south) -- (llm.north);
+  \draw[flowd] (agent.south) to[out=-90,in=90] (llm.north west);
+
+\end{tikzpicture}
+}
+\caption{Diagramme de composants. Les connecteurs sont isolés des services : un
+service ne parle jamais directement à une source.}
+\label{fig:composants}
+\end{figure}
+
+\section{Les couches et leur responsabilité}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.5cm}p{5.6cm}X@{}}
+\toprule
+\textbf{Couche} & \textbf{Contenu} & \textbf{Responsabilité unique} \\
+\midrule
+Présentation & React, Vite, TypeScript, Mapbox & Afficher des faits ; ne calcule
+  aucun risque \\
+Exposition & FastAPI, schémas Pydantic & Valider l'entrée, refuser les champs
+  interdits, limiter le débit \\
+Métier & \code{canonical}, \code{batch}, budgets, rapport, assistant & Calculer,
+  assembler, valider la prose \\
+Connecteurs & Une source par module & Parler à une source, normaliser sa
+  réponse, ne rien inventer \\
+Externe & Prose LLM & Reformuler uniquement, sous validation \\
+\bottomrule
+\end{tabularx}
+\caption{Le découpage en couches et la responsabilité unique de chacune.}
+\end{table}
+
+\section{Le contrat comme frontière}
+
+La pièce centrale n'est pas une base de données : c'est un \textbf{schéma}. Le
+contrat canonique est validé par Pydantic, et son intérêt est autant ce qu'il
+accepte que ce qu'il \emph{refuse}.
+
+\begin{lstlisting}[language=Python,caption={Extrait du schéma : les champs interdits sont refusés, pas ignorés.}]
+class DiagnosticRecord(BaseModel):
+    # ... adresse, geometrie, aleas, batiment, provenance ...
+    model_config = ConfigDict(extra="forbid")   # un champ inconnu = erreur
+
+    # Explicitement ABSENTS du contrat :
+    #   niveau            -> bande D03 : display-only, hors contrat
+    #   score             -> jugement fusionne, interdit (constitution 2)
+    #   recommandations   -> narration IA, interdite
+    #   copernicus        -> hors perimetre v1
+\end{lstlisting}
+
+\begin{invariant}
+Un champ interdit ne peut pas être « ajouté discrètement » : il faut modifier le
+schéma, donc passer par un amendement explicite. C'est ce qui rend la règle
+tenable dans le temps — elle n'est pas une consigne d'équipe, elle est une
+propriété du code.
+\end{invariant}
+
+\section{Déploiement}
+
+\begin{figure}[h]
+\centering
+\figbox{
+\begin{tikzpicture}[node distance=0.5cm and 1.1cm]
+
+  % ── Poste utilisateur ──
+  \node[uml,minimum width=4.0cm] (poste) {\textbf{Poste utilisateur}\\\footnotesize navigateur};
+  \node[uml,minimum width=3.6cm,below=0.18cm of poste] (spa) {\footnotesize SPA (bundle statique)};
+
+  % ── Hébergement ──
+  \node[umlcomp,minimum width=4.4cm,right=of poste] (vercel)
+    {\textbf{Option A — Vercel}\\\footnotesize fonction Python + statique};
+  \node[umlcomp,minimum width=4.4cm,below=0.55cm of vercel] (render)
+    {\textbf{Option B — Render}\\\footnotesize uvicorn \code{:8000}};
+  \node[umlnote,below=0.4cm of render,text width=4.4cm]
+    {Cache de rapports en mémoire de processus : \textbf{non persistant} en
+     serverless (recalcul à chaque appel).};
+
+  % ── Externe ──
+  \node[uml,minimum width=4.2cm,right=of vercel,fill=typhoonAmber!10] (ext)
+    {\textbf{Sources officielles}\\\footnotesize Géorisques, BDNB, IGN,\\Open-Meteo, Panoramax};
+  \node[uml,minimum width=4.2cm,below=0.55cm of ext,fill=typhoonGreen!10] (llm)
+    {\textbf{Fournisseur de prose}\\\footnotesize API Generative Language};
+
+  \draw[flow] (poste) -- node[above,font=\footnotesize]{HTTPS} (vercel);
+  \draw[flow] (render) -- (vercel);
+  \draw[flow] (vercel) -- node[above,font=\footnotesize]{HTTPS} (ext);
+  \draw[flow] (render.east) to[out=0,in=180] node[below,font=\footnotesize]{HTTPS} (ext.west);
+  \draw[flow] (render) -- (llm);
+\end{tikzpicture}
+}
+\caption{Diagramme de déploiement. Les deux options d'hébergement exposent la
+même API ; seule la persistance du cache diffère.}
+\label{fig:deploiement}
+\end{figure}
+
+Deux mécanismes transverses protègent l'ensemble :
+
+\begin{itemize}
+  \item \textbf{La limitation de débit} s'applique aux routes qui déclenchent une
+    vraie collecte, et non aux lectures légères : les chemins sont énumérés
+    exactement, ce qui évite d'attraper par préfixe les routes qui n'ont pas à
+    être freinées.
+  \item \textbf{Les quotas amont sont protégés côté client} : la BDNB est
+    appelée sous un plafond de 120 requêtes par minute et le géocodage sous
+    50 par seconde, avec une réattente unique sur un 429 explicite.
+\end{itemize}
+
+\section{Les choix d'architecture, et pourquoi}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{4.6cm}X@{}}
+\toprule
+\textbf{Choix} & \textbf{Raison} \\
+\midrule
+FastAPI + Pydantic & Le contrat est le livrable ; le valider à l'entrée et à la
+  sortie est plus utile qu'un schéma documentaire \\
+Un module par source & Une source qui tombe ne doit pas contaminer les autres, et
+  un parseur par format (REST, GML 3.2) reste lisible \\
+Lot \(= N \times\) unitaire & Deux moteurs divergeraient : un chiffre pour
+  l'unité, un autre pour le portefeuille \\
+Client HTTP dédié au WFS & Le \emph{keep-alive} du WFS Géorisques est lié à son
+  backend ; le mélanger avec les appels REST produit des 404 en cascade \\
+Prose validée \emph{après} génération & Aucun prompt ne garantit qu'un modèle ne
+  produira pas un chiffre plausible ; la garantie est dans le validateur \\
+\bottomrule
+\end{tabularx}
+\caption{Cinq décisions structurantes et leur justification.}
+\end{table}

@@ -1,0 +1,212 @@
+\chapter{Les parcours}
+\label{ch:parcours}
+
+\newcommand{\acteur}[3]{%
+  \draw[thick,typhoonBlue!80] (#1,#2) circle (2.2mm);
+  \draw[thick,typhoonBlue!80] (#1,#2-0.22) -- (#1,#2-0.66);
+  \draw[thick,typhoonBlue!80] (#1-0.30,#2-0.38) -- (#1+0.30,#2-0.38);
+  \draw[thick,typhoonBlue!80] (#1,#2-0.66) -- (#1-0.26,#2-1.00);
+  \draw[thick,typhoonBlue!80] (#1,#2-0.66) -- (#1+0.26,#2-1.00);
+  \node[font=\footnotesize\sffamily,align=center,below] at (#1,#2-1.05) {#3};%
+}
+
+\section{Diagramme de cas d'usage}
+
+Quatre acteurs, neuf cas d'usage. Le périmètre du système est explicite : tout ce
+qui est en dehors relève de l'assureur (son modèle actuariel) et n'est pas
+implémenté ici.
+
+\begin{figure}[h]
+\centering
+\figbox{
+\begin{tikzpicture}[uc/.style={ellipse,draw=typhoonAccent!80,fill=typhoonAccent!5,
+    align=center,font=\scriptsize,minimum width=3.6cm,minimum height=0.82cm,inner sep=1pt}]
+
+  % ── Frontière du système ──
+  \draw[typhoonBlue!45,dashed,rounded corners=4pt] (2.9,0.1) rectangle (13.4,7.0);
+  \node[font=\scriptsize\sffamily\color{typhoonGrey},anchor=south west] at (2.95,7.0)
+    {Typhoon — service de données};
+
+  % ── Acteurs ──
+  \acteur{1.0}{6.1}{Assureur}
+  \acteur{1.0}{3.5}{Gestionnaire\\de portefeuille}
+  \acteur{1.0}{0.9}{Promoteur}
+  \acteur{14.6}{3.5}{Analyste}
+
+  % ── Cas d'usage ──
+  \node[uc] (u1) at (6.1,6.2) {Diagnostiquer une adresse};
+  \node[uc] (u2) at (6.1,5.0) {Consulter la fiche BDNB};
+  \node[uc] (u3) at (6.1,3.8) {Choisir un scénario TRI};
+  \node[uc] (u4) at (6.1,2.6) {Simuler dans le jumeau};
+  \node[uc] (u5) at (6.1,1.4) {Générer le rapport};
+  \node[uc] (v1) at (10.6,6.2) {Analyser un portefeuille};
+  \node[uc] (v2) at (10.6,5.0) {Exporter le PDF};
+  \node[uc] (v3) at (10.6,3.8) {Interroger l'assistant};
+  \node[uc] (v4) at (10.6,2.6) {Suivre un bien dans le temps};
+
+  % ── Associations ──
+  \draw[flow] (1.5,6.1) -- (u1.west);
+  \draw[flow] (1.5,6.1) -- (u3.west);
+  \draw[flow] (1.5,3.5) -- (u5.west);
+  \draw[flow] (1.5,3.5) -- (v1.west);
+  \draw[flow] (1.5,0.9) -- (u4.west);
+  \draw[flow] (1.5,0.9) -- (u5.west);
+  \draw[flow] (14.1,3.5) -- (u2.east);
+  \draw[flow] (14.1,3.5) -- (v3.east);
+  \draw[flow] (u4.east) -- (v4.west);
+  \draw[flow] (u5.east) -- (v2.west);
+\end{tikzpicture}
+}
+\caption{Diagramme de cas d'usage. Le classement des biens et le calcul de
+prime sont \emph{absents} du périmètre : ce sont les cas d'usage que Typhoon
+refuse volontairement de couvrir.}
+\label{fig:usecase}
+\end{figure}
+
+\section{Séquence 1 — diagnostiquer une adresse}
+
+C'est le parcours qui interroge les sources. Il doit tenir deux promesses
+simultanées : ne pas attendre indéfiniment, et ne jamais transformer une panne en
+absence de risque. Le traitement par lot réutilise exactement ce parcours :
+\(N\) appels au pipeline unitaire, aucun second moteur.
+
+\begin{figure}[h]
+\centering
+\figbox{
+\begin{tikzpicture}[font=\scriptsize,
+    life/.style={draw=typhoonGrey!55,dashed},
+    head/.style={umlcomp,minimum width=2.2cm,minimum height=0.7cm,font=\scriptsize}]
+
+  % ── Participants ──
+  \node[head] (nav) at (1.3,0) {Navigateur};
+  \node[head] (api) at (4.6,0) {API FastAPI};
+  \node[head] (geo) at (7.8,0) {Géocodeur BAN};
+  \node[head] (conn) at (10.7,0) {Connecteurs};
+  \node[head] (pipe) at (13.6,0) {Pipeline};
+
+  \foreach \p in {nav,api,geo,conn,pipe} {\draw[life] (\p.south) -- ++(0,-6.1);}
+
+  % ── Messages ──
+  \draw[flow] (1.3,-0.6) -- node[above]{POST /diagnostic/adresse} (4.6,-0.6);
+  \draw[flow] (4.6,-1.3) -- node[above]{géocodage} (7.8,-1.3);
+  \draw[flowback] (7.8,-2.0) -- node[above]{point + codes INSEE} (4.6,-2.0);
+  \draw[flow] (4.6,-2.7) -- node[above]{collecte parallèle (6 sources)} (10.7,-2.7);
+  \draw[flowback] (10.7,-3.4) -- node[above]{faits bruts, ou absence déclarée} (4.6,-3.4);
+  \draw[flow] (4.6,-4.1) -- node[above]{\code{build\_diagnostic\_record}} (13.6,-4.1);
+  \draw[flowback] (13.6,-4.8) -- node[above]{contrat validé, champs interdits refusés} (4.6,-4.8);
+  \draw[flowback] (4.6,-5.5) -- node[above]{200 — JSON canonique + provenance} (1.3,-5.5);
+
+  % ── Notes, en bandeau sous le diagramme ──
+  \node[umlnote,anchor=north west,text width=8.0cm] at (0.2,-6.4)
+    {\textbf{429} : une seule réattente sur un refus explicite, puis échec franc.
+     Le géocodeur est la source la plus sollicitée.};
+  \node[umlnote,anchor=north west,text width=5.9cm] at (8.9,-6.4)
+    {\textbf{Quotas} protégés côté client : BDNB 120/min, Géoplateforme 50/s.};
+\end{tikzpicture}
+}
+\caption{Séquence d'un diagnostic. La réponse finale ne peut pas contenir « aucun
+aléa » à la place d'une source en panne : les deux sont produits par des
+branches distinctes.}
+\label{fig:seq-diagnostic}
+\end{figure}
+
+\section{Séquence 2 — la prose du rapport}
+
+Le rapport est \emph{template-first} : les sections calculées partent
+immédiatement, et la prose arrive ensuite, si elle passe la validation. Le
+document n'attend jamais le modèle pour exister.
+
+\begin{figure}[h]
+\centering
+\figbox{
+\begin{tikzpicture}[font=\scriptsize,
+    life/.style={draw=typhoonGrey!55,dashed},
+    head/.style={umlcomp,minimum width=2.6cm,minimum height=0.7cm,font=\scriptsize}]
+
+  \node[head] (cli) at (1.4,0) {Navigateur (SSE)};
+  \node[head] (str) at (5.2,0) {\code{report\_agent}};
+  \node[head] (val) at (9.0,0) {Validateur d'ancrage};
+  \node[head] (llm) at (13.0,0) {Fournisseur de prose};
+
+  \foreach \p in {cli,str,val,llm} {\draw[life] (\p.south) -- ++(0,-6.3);}
+
+  \draw[flow] (1.4,-0.6) -- node[above]{POST /api/report/stream} (5.2,-0.6);
+  \draw[flowback] (5.2,-1.4) -- node[above]{sections calculées} (1.4,-1.4);
+  \draw[flow] (5.2,-2.2) -- node[above]{prose demandée (JSON strict)} (13.0,-2.2);
+  \draw[flowback] (13.0,-3.0) -- node[above]{JSON — ou rien (clé absente, erreur)} (5.2,-3.0);
+  \draw[flow] (5.2,-3.8) -- node[above]{chaque champ, un par un} (9.0,-3.8);
+  \draw[flowwarn] (9.0,-4.5) -- node[above]{rejeté : nombre non ancré} (5.2,-4.5);
+  \draw[flowok] (9.0,-5.2) -- node[above]{accepté} (5.2,-5.2);
+  \draw[flowback] (5.2,-5.9) -- node[above]{« patch », puis « done »} (1.4,-5.9);
+
+  \node[umlnote,anchor=north west,text width=7.4cm] at (0.2,-6.6)
+    {Le repli est \textbf{par champ} : un champ rejeté ne fait pas tomber les
+     autres. Le modèle annoncé est celui du fournisseur actif.};
+  \node[umlnote,anchor=north west,text width=6.6cm] at (8.2,-6.6)
+    {\code{fallback\_used} dit, sans ambiguïté, si le document contient de la
+     prose ou seulement le gabarit calculé.};
+\end{tikzpicture}
+}
+\caption{Séquence de la prose. Le modèle est un rédacteur sous contrainte, pas
+une source de faits : tout ce qu'il écrit est vérifié avant d'être publié.}
+\label{fig:seq-prose}
+\end{figure}
+
+\section{Les écrans du parcours}
+
+Les deux séquences précédentes décrivent le système ; les captures qui suivent
+montrent ce qu'il rend. Elles ont été prises sur l'application en service, en
+rejouant le parcours complet depuis une recherche d'adresse — pas composées pour
+l'illustration : les chiffres, les classes et les états de source visibles sur
+ces images sont ceux que la source a rendus à cet instant. La provenance de
+l'environnement de capture est donnée au chapitre~\ref{ch:resultats}.
+
+\begin{figure}[htbp]
+\centering
+\ecran{06-etape1-diagnostic.png}{\textbf{Étape 1 — Diagnostic.} Les aléas du
+  référentiel au point, chacun avec son niveau de résolution ; la commune
+  retenue et ses chiffres INSEE ; la carte 3D du bâti.}
+\hfill
+\ecran{07-etape2-scenarios.png}{\textbf{Étape 2 — Scénarios.} Les classes de
+  crue TRI officielles ; la hauteur d'eau au point en découle, elle n'est jamais
+  choisie par un curseur.}\\[8pt]
+\ecran{08-etape3-jumeau.png}{\textbf{Étape 3 — Jumeau.} Le bâti en volume dans
+  son propre environnement WebGL : panneau des faits à gauche, catalogue des
+  catastrophes à droite, horloge de l'expérience en bas.}
+\hfill
+\ecran{09-rapport.png}{\textbf{Étape 4 — Rapport.} Page autonome : scénario de
+  référence, faits clés, provenance. La prose estampillée est un appoint, jamais
+  la source des nombres.}
+\caption{Le tunnel, de l'adresse au rapport. Chaque étape n'ajoute pas des
+chiffres : elle change ce qu'on peut \emph{faire} de ceux de l'étape
+précédente.}
+\label{fig:ecrans-tunnel}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\ecran{03-tableau-de-bord.png}{\textbf{Tableau de bord.} Ce que l'assureur
+  regarde en arrivant : volume diagnostiqué, biens à expertiser, dernières
+  analyses, et la qualité des faits.}
+\hfill
+\ecran{04-portefeuille.png}{\textbf{Portefeuille.} Le livre des actifs, trié par
+  résolution du fait : vérifié à la parcelle, estimé à la commune, ou
+  manquant.}
+\caption{Les deux écrans d'entrée de l'assureur. Tous deux lisent le cache
+local des diagnostics : ils ne rejouent aucune requête vers les sources.}
+\label{fig:ecrans-assureur}
+\end{figure}
+
+\section{Ce que ces deux séquences garantissent}
+
+\begin{itemize}
+  \item \textbf{Le calcul précède la rédaction.} Tous les nombres, niveaux et
+    actions de mitigation sont produits par du code déterministe. Le modèle
+    réécrit, il ne décide pas.
+  \item \textbf{La validation est unique.} Le même validateur garde la prose du
+    rapport et les réponses de l'assistant documentaire : il est importé, jamais
+    recopié.
+  \item \textbf{L'échec est un état, pas une exception.} Une clé absente, un
+    quota atteint, une sortie non-JSON conduisent tous à un rapport complet et
+    annoncé comme tel.
+\end{itemize}

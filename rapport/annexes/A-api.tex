@@ -1,0 +1,58 @@
+\chapter{Annexe A — Surface d'API}
+\label{ann:api}
+
+Toutes les routes sont servies par l'API FastAPI. Les routes de \emph{collecte}
+sont soumises à la limitation de débit ; les lectures légères ne le sont pas.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{6.3cm}p{1.6cm}X@{}}
+\toprule
+\textbf{Route} & \textbf{Méthode} & \textbf{Rôle} \\
+\midrule
+\code{/diagnostic/adresse} & POST & Adresse \(\rightarrow\) enregistrement canonique (pipeline unitaire) \\
+\code{/diagnostic/batch} & POST & Soumission d'un lot (\(N \times\) unitaire) \\
+\code{/diagnostic/batch/\{id\}} & GET & Suivi d'un lot (léger, non limité) \\
+\code{/diagnostic/zone/building} & GET & Fiche BDNB par identifiant de bâtiment \\
+\code{/diagnostic/zone/buildings} & GET & Bâtiments d'une emprise \\
+\code{/diagnostic/adresse/rapport-pdf} & GET & Rapport exportable en PDF \\
+\code{/api/flood-alea} & GET & Classes de crue TRI au point (point dans polygone) \\
+\code{/api/hydro} & GET & Tracé hydrographique au point (Sandre / BD TOPO) \\
+\code{/api/hydro/extend} & GET & Extension amont et aval du tracé \\
+\code{/api/meteo} & GET & Pluie horaire et débit prévus (Open-Meteo) \\
+\code{/api/meteo/france} & GET & Synthèse nationale (moyenne de points représentatifs) \\
+\code{/api/photo} & GET & Photo de terrain et crédit (Panoramax) \\
+\code{/api/geocode/search} & GET & Autocomplétion d'adresse (BAN / Géoplateforme) \\
+\code{/api/report} & POST & Rapport complet (gabarit + prose validée) \\
+\code{/api/report/stream} & POST & Même rapport en flux SSE (patch de prose) \\
+\code{/api/report/assistant} & POST & Question sur \emph{ce} rapport, avec refus explicites \\
+\code{/health} & GET & Sonde de vie \\
+\code{/health/detailed} & GET & Sonde détaillée \\
+\bottomrule
+\end{tabularx}
+\caption{Surface d'API. Les routes de collecte sont énumérées \emph{exactement}
+dans le limiteur de débit, ce qui évite de freiner les lectures légères.}
+\end{table}
+
+\section{Codes et états}
+
+\begin{itemize}
+  \item \textbf{200} — la réponse est produite, éventuellement
+    \emph{partiellement} renseignée (dégradation déclarée dans le corps).
+  \item \textbf{422} — l'entrée ne satisfait pas le schéma (question vide ou trop
+    longue, champ inconnu, \code{extra="forbid"}).
+  \item \textbf{429} — plafond de débit atteint sur une route de collecte.
+  \item \textbf{5xx} — réservé aux erreurs réellement inattendues : une source
+    publique en panne n'en produit pas, elle devient une absence déclarée.
+\end{itemize}
+
+\section{Le cas de l'assistant documentaire}
+
+La route \code{/api/report/assistant} mérite une mention : elle ne répond qu'à
+partir des faits du rapport fourni dans la requête elle-même. Aucune recherche
+web, aucune mémoire d'un rapport précédent, aucune persistance côté serveur — la
+conversation n'existe que dans l'échange HTTP. Une question hors périmètre
+obtient un \emph{refus} (un fait sur le document) ; une défaillance du modèle
+obtient une \emph{indisponibilité} (une panne de source). Les deux messages sont
+distincts, et jamais remplacés par une réponse inventée.

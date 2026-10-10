@@ -1,0 +1,123 @@
+% =====================================================================
+\chapter{Surface de l'API et mise en œuvre}
+\label{ann:api}
+% =====================================================================
+
+\section{Points d'entrée}
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Points d'entrée de l'API, avec authentification requise.}
+\label{tab:api-full}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Méthode et chemin} & \textbf{Auth} & \textbf{Description} \\
+\midrule
+\api{POST /diagnostic/adresse} & oui &
+  Transaction canonique, adresse $\rightarrow$ enregistrement complet \\
+\api{POST /diagnostic/batch} & oui &
+  Soumission d'un lot ($\leq$ 10\,000 adresses) \\
+\api{GET /diagnostic/batch/\{id\}} & oui &
+  État et résultats du lot \\
+\api{GET /diagnostic/adresse/rapport-pdf} & oui &
+  Relais vers le PDF officiel Géorisques \\
+\api{GET /diagnostic/zone/building} & oui &
+  Fiche BDNB au point \\
+\api{GET /diagnostic/zone/buildings} & oui &
+  Fiches BDNB autour du point \\
+\api{GET /api/flood-alea} & oui &
+  Classes TRI au point \\
+\api{GET /api/hydro} & oui & Tracé hydrographique \\
+\api{GET /api/hydro/extend} & oui & Extension du tracé \\
+\api{GET /api/meteo} & oui & Pluie horaire et débit \\
+\api{GET /api/photo} & oui & Photographie Panoramax et crédit \\
+\api{GET /api/report} & oui & Rapport narratif \\
+\api{GET /api/report/stream} & oui & Rapport narratif en flux \\
+\api{GET /api/geocode/search} & oui & Autocomplétion d'adresse \\
+\api{GET /health} & non & Sonde de vie \\
+\api{GET /health/detailed} & non & Sonde détaillée \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Format des erreurs}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Codes d'erreur et signification.}
+\label{tab:erreurs-api}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Code} & \textbf{Identifiant} & \textbf{Signification} \\
+\midrule
+401 & — & Clé d'API absente \\
+403 & — & Clé d'API invalide \\
+422 & \code{adresse\_non\_trouvee} & Adresse introuvable par le géocodeur \\
+422 & \code{adresse\_ambigue} & Score de géocodage inférieur à 0,4 \\
+429 & \code{budget\_epuise} & Budget mensuel amont épuisé (lot uniquement) \\
+502 & \code{geocodage\_indisponible} & Géocodeur injoignable ou saturé \\
+502 & — & Exception inattendue (jamais de 500 HTML) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Commandes d'installation}
+
+\begin{lstlisting}[language=bash,caption={Installation et exécution en local.},
+label={lst:install}]
+# Backend (Python 3.11+)
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# Frontend (Node 18+)
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
+\end{lstlisting}
+
+Le fichier d'exemple d'environnement, à copier à la racine du dépôt,
+documente chaque variable nécessaire : jeton Mapbox, URL et clé Supabase, clé
+Windy, clé du modèle de rédaction, identifiants Copernicus, et clés d'API
+partenaires.
+
+\section{Commandes de vérification}
+
+\begin{lstlisting}[language=bash,caption={Exécution des suites de test.},
+label={lst:tests-cmd}]
+# Backend (depuis backend/)
+python -m pytest tests/ -q     # 214 tests hors-ligne, < 60 s
+ruff check app tests           # lint
+
+# Frontend (depuis frontend/)
+npm test                       # 143 tests Vitest
+npm run build                  # tsc -b && vite build
+\end{lstlisting}
+
+\section{Vérification de l'instance déployée}
+
+\begin{lstlisting}[language=bash,caption={Contrôles de bon fonctionnement de
+l'instance en ligne.},label={lst:verif-cmd}]
+BASE=https://<projet>.vercel.app
+curl $BASE/health
+curl "$BASE/api/flood-alea?lat=48.848&lon=2.370" | head -c 200
+curl -X POST "$BASE/diagnostic/adresse" \
+  -H 'Content-Type: application/json' \
+  -d '{"adresse":"Quai de la Rapee, 75012 Paris"}' | head -c 200
+\end{lstlisting}
+
+Le réveil d'une fonction froide prend de 5 à 10~s, et un diagnostic complet
+peut atteindre environ 15~s à froid. C'est normal sur l'offre gratuite :
+appeler la sonde de vie une fois avant une démonstration suffit à préchauffer
+l'instance.
+
+\section{Reproduction des captures d'écran}
+
+\begin{lstlisting}[language=bash,caption={Génération des captures
+d'écran.},label={lst:shots}]
+cd frontend && node scripts/demo-shots.mjs
+# necessite le backend et le serveur vite en local
+\end{lstlisting}

@@ -1,0 +1,164 @@
+\chapter{Ce qui fait encore mal — et le remède}
+\label{ch:douleurs-restantes}
+
+\section{Deux lectures du même mot}
+
+Le mot \emph{douleur} désigne ici deux choses qu'il faut distinguer :
+
+\begin{itemize}
+  \item la douleur \textbf{résolue} (\S\ref{ch:douleurs}) — ce que l'assureur et
+    le promoteur subissaient avant, et que l'architecture traite par
+    construction ;
+  \item la douleur \textbf{restante} — ce qui, aujourd'hui, continue de faire mal
+    à l'usage, et qui n'est pas caché dans ce rapport.
+\end{itemize}
+
+Cette seconde liste est la plus utile au lecteur : elle dit où le produit
+n'est pas encore au niveau de sa promesse, et ce qu'il faudrait décider pour y
+arriver.
+
+\section{Les huit douleurs restantes}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{4.3cm}X@{}}
+\toprule
+\textbf{Douleur} & \textbf{Effet pour l'assureur ou le promoteur} \\
+\midrule
+P1 Prose refusée selon le format des nombres & Le résumé exécutif peut retomber
+  en gabarit tandis que le reste est rédigé : document inégal devant un client \\
+P2 Prose non reproductible & Deux demandes identiques peuvent produire deux
+  formulations différentes \\
+P3 Tier gratuit peu compatible avec des adresses réelles & Le contenu envoyé
+  peut servir à l'amélioration des produits du fournisseur \\
+P4 Communication publique en décalage & La page publique crédite encore un autre
+  fournisseur et promet une souveraineté que le tier gratuit n'offre pas \\
+P5 Aléa argile communal & Impossible de distinguer deux bâtiments d'une même
+  commune — précisément sur l'aléa le plus sinistrogène \\
+P6 Cache non persistant en serverless & Chaque rapport peut consommer un appel
+  de modèle : un pic peut épuiser un quota et basculer en gabarit en pleine
+  démonstration \\
+P7 Dette de nommage & Le point d'entrée garde un nom de fournisseur qui n'est
+  plus celui par défaut \\
+P8 Outillage de test fragile & La suite ne démarre pas sans exclure un plugin
+  tiers bloqué par la politique de sécurité de la machine \\
+\bottomrule
+\end{tabularx}
+\caption{Les huit douleurs restantes, du point de vue de l'utilisateur.}
+\end{table}
+
+\section{Les trois douleurs qui coûtent le plus}
+
+\subsection{P1 — La prose dépend du format des nombres}
+
+C'est la douleur la plus visible, et elle a été \textbf{mesurée}. Le validateur
+d'ancrage n'accepte que les nombres présents dans le rapport. Or le fournisseur
+actuel écrit volontiers les nombres sous forme compacte ou à la française
+(« 409 k€ », « 1,1 m »), là où l'ensemble autorisé ne contient que les formes
+complètes (\code{408700}, \code{294264}, \code{523136}).
+
+Résultat concret : les cinq narratifs de catégorie et les quatre narratifs de
+mitigation sont acceptés, mais le \emph{résumé exécutif} est refusé et remplacé
+par le gabarit calculé.
+
+\begin{douleur}[title={Douleur observée}]
+Le document mélange une prose de qualité et un premier paragraphe mécanique. Le
+client ne connaît pas la cause et la lit comme un défaut de finition — alors
+qu'il s'agit d'un garde-fou qui fonctionne.
+\end{douleur}
+
+\begin{remede}[title={Remède proposé}]
+Élargir l'ensemble des nombres autorisés aux \textbf{faits du rapport lui-même} :
+profondeur du scénario, bornes basses et hautes des dommages, et leurs formes
+compactes (k€), plus les chiffres portés par le libellé du scénario. Le garde-fou
+n'est pas affaibli : on autorise des faits du document, jamais des chiffres
+extérieurs. Le changement exige un test sur une sortie réelle du modèle, car
+cette autorité d'ancrage est partagée avec l'assistant documentaire.
+\end{remede}
+
+\subsection{P3 — Un tier gratuit qui n'est pas compatible avec des adresses}
+
+Un assureur manipule des adresses de biens : la donnée est identifiante. Or, sur
+le tier gratuit du fournisseur retenu par défaut, le contenu envoyé
+\emph{peut servir à l'amélioration des produits} du fournisseur. Le même
+connecteur, avec une clé facturée, ne présente pas cette réserve.
+
+\begin{douleur}[title={Douleur}]
+Le service fonctionne, mais pas dans les conditions qu'un client assurance
+attendrait pour des données de portefeuille.
+\end{douleur}
+
+\begin{remede}[title={Remède proposé}]
+Le fournisseur est déjà réglable par configuration : basculer sur une clé
+facturée ne demande aucune modification de code. La décision à prendre est
+commerciale (qui paie l'appel), pas technique. À défaut, un fournisseur
+souverain peut être branché sans toucher au reste de l'architecture, puisque
+l'interface du connecteur est neutralisée par un simple routage.
+\end{remede}
+
+\subsection{P5 — L'aléa argile reste communal}
+
+C'est la douleur la plus coûteuse \emph{en sinistralité}. Le retrait-gonflement
+des argiles est aujourd'hui publié en \code{commune-level-estimate} : deux
+bâtiments d'une même commune reçoivent la même estimation, alors que leur
+exposition réelle dépend du sol, de la végétation et du bâti.
+
+\begin{douleur}[title={Douleur}]
+Sur l'aléa qui pèse le plus dans les sinistres de sécheresse, le service ne
+différencie pas les biens — ce qui est exactement ce qu'on lui demande par
+ailleurs.
+\end{douleur}
+
+\begin{remede}[title={Remède proposé}]
+Câbler une source vectorielle d'aléa argile et passer la résolution à
+\code{building-level} ou \code{point-in-polygon}. La règle actuelle est inscrite
+dans la constitution du projet : la modification doit donc passer par un
+amendement explicite, puis par la spécification — jamais par une retouche de
+code silencieuse.
+\end{remede}
+
+\section{Les cinq autres, en bref}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{1.1cm}X@{}}
+\toprule
+\textbf{} & \textbf{Douleur \(\rightarrow\) remède} \\
+\midrule
+P2 & Prose non reproductible \(\rightarrow\) le cache rend une même demande
+  identique au rejeu ; pour le reste, la reproductibilité n'est pas promise, et
+  aucun fait ne dépend de la prose. \\
+P4 & Communication publique en décalage \(\rightarrow\) mettre la page publique,
+  la FAQ et la mention légale en accord avec le fournisseur réellement utilisé,
+  ou revenir à un fournisseur souverain. \\
+P6 & Cache non persistant en serverless \(\rightarrow\) stockage externe, ou
+  budget d'appels de prose journalier, sur le modèle du budget BDNB déjà en
+  place. \\
+P7 & Dette de nommage du point d'entrée \(\rightarrow\) renommage neutre dans un
+  change set dédié, qui met à jour les tests qui épinglent ce chemin d'appel. \\
+P8 & Outillage de test fragile \(\rightarrow\) exclusion documentée du plugin
+  tiers en échec, ou image d'intégration continue maîtrisée, pour que
+  « lancer les tests » redevienne une commande unique. \\
+\bottomrule
+\end{tabularx}
+\caption{Les cinq douleurs restantes et leur remède.}
+\end{table}
+
+\section{Les décisions qui reviennent au commanditaire}
+
+Trois questions ne sont pas techniques et ne peuvent pas être tranchées par
+l'équipe :
+
+\begin{enumerate}
+  \item \textbf{Qui paie l'appel au modèle ?} Le tier gratuit est utilisable et
+    suffisant en démonstration ; il n'est pas compatible avec des adresses de
+    portefeuille réelles.
+  \item \textbf{Où doit vivre la prose ?} En Europe (souveraineté) ou chez le
+    fournisseur le moins cher (coût) — l'architecture supporte les deux, la
+    décision est commerciale.
+  \item \textbf{Jusqu'où automatiser l'interprétation ?} Le projet s'arrête
+    volontairement avant le score et la recommandation. Aller plus loin exige un
+    amendement de la constitution, pas un ajout de champ.
+  \end{enumerate}

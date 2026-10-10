@@ -1,0 +1,87 @@
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Le risque climatique est devenu une ligne de compte}
+
+Un assureur dommages français ne peut plus tarifer un bien immobilier sans
+regarder ce qui lui arrive : submersion, ruissellement, mouvements de terrain,
+retrait-gonflement des argiles, séisme, feux de forêt. Un promoteur ne peut plus
+livrer un programme sans répondre à la même question, posée par son assureur,
+son banquier ou son acquéreur.
+
+Les données existent. elles sont publiques, souvent de grande qualité, et
+produites par des acteurs identifiés : Géorisques (BRGM, MTE), la BDNB (CSTB),
+le géocodage de la Géoplateforme (IGN), l'hydrographie de la BD TOPO, Open-Meteo,
+Panoramax. Le problème n'est donc pas l'absence de données : c'est leur
+\textbf{dispersion}, leur \textbf{hétérogénéité} et l'absence de clé de jointure
+commune.
+
+\begin{encadre}[title={Le décalage central}]
+Les référentiels publics décrivent le risque à l'échelle de la \textbf{commune}
+ou du \textbf{secteur}. Une décision d'assurance ou d'investissement se prend à
+l'échelle du \textbf{bâtiment}. Tout l'écart entre les deux est du travail manuel
+— et, quand il est franchi sans méthode, une source d'erreur silencieuse.
+\end{encadre}
+
+\section{Objet du document}
+
+Ce rapport décrit \textbf{Typhoon}, un service dont la fonction est de combler
+cet écart : à partir d'une adresse, produire un enregistrement canonique qui
+joint les aléas du référentiel Géorisques au bâtiment lui-même, en déclarant
+pour chaque fait son origine et sa finesse.
+
+Le document est organisé en trois mouvements, dans l'ordre du problème vers la
+solution :
+
+\begin{itemize}
+  \item \textbf{le problème métier} (\S\ref{ch:douleurs}) — les douleurs que
+    subissent concrètement l'assureur et le promoteur, formulées en coûts et en
+    risques, et non en fonctionnalités ;
+  \item \textbf{la réponse} (\S\ref{ch:reponse} à \S\ref{ch:robustesse}) — le
+    contrat de données, l'architecture en diagrammes UML, les parcours réels et
+    les garanties de robustesse ;
+  \item \textbf{le bilan} (\S\ref{ch:resultats} et \S\ref{ch:douleurs-restantes})
+    — ce qui a été mesuré, puis les points de douleur qui \emph{subsistent},
+    chacun suivi de son remède.
+\end{itemize}
+
+\section{Les acteurs}
+
+Quatre profils utilisent le service, avec des besoins différents qui expliquent
+la forme du contrat de données.
+
+\begin{itemize}
+  \item \textbf{L'assureur} — tarifie un portefeuille, doit justifier sa
+    décision devant son régulateur et ne veut pas d'une boîte noire. Il lui faut
+    la provenance de chaque fait et le droit de ne pas conclure quand la source
+    n'a pas répondu.
+  \item \textbf{Le promoteur} — engage un programme immobilier et doit répondre
+    vite à une question de risque, en amont de l'acquisition.
+  \item \textbf{Le gestionnaire de portefeuille} — suit un ensemble de biens
+    dans le temps et compare ce qui est comparable.
+  \item \textbf{L'analyste} — ouvre la fiche bâtiment, lit les champs BDNB
+    verbatim et cherche ce qui motive un écart de tarification.
+\end{itemize}
+
+\section{Périmètre et non-périmètre}
+
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Dans le périmètre} & \textbf{Hors périmètre (par décision)} \\
+\midrule
+Diagnostic par bâtiment, France métropolitaine & Calcul de prime, tarification actuarielle \\
+Aléas Géorisques + classe TRI au point & Score composite, bande de risque, notation \\
+Vulnérabilité BDNB verbatim (139 champs) & Recommandation générée présentée comme un fait \\
+Provenance, résolution, attribution sur chaque fait & Prédiction de sinistre \\
+Estimation de dommages paramétrique (scénarios TRI) & Données Copernicus dans le contrat sérialisé \\
+\bottomrule
+\end{tabularx}
+
+\begin{invariant}
+\textbf{Aucun score, aucune bande, aucune recommandation générée} n'entre dans
+le contrat sérialisé. Ce n'est pas une réserve commerciale, c'est une contrainte
+technique : le schéma canonique du backend
+(\code{diagnostic\_record.py}) \emph{refuse} ces champs à la validation. Une
+donnée qui n'a pas de source ne peut pas être ajoutée au contrat sans qu'un
+amendement explicite soit voté.
+\end{invariant}

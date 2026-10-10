@@ -1,0 +1,252 @@
+% =====================================================================
+\chapter{Le métier de l'assurance et les invariants du produit}
+\label{ch:metier}
+% =====================================================================
+
+Un projet technique appliqué à un métier se juge d'abord sur sa compréhension
+de ce métier. Ce chapitre expose ce que j'ai appris du secteur, comment cela a
+déterminé les choix de conception, et les règles qui en découlent — règles que
+le projet s'interdit de violer.
+
+\section{Deux acheteurs, un moteur}
+
+Les échanges menés au démarrage du stage ont fait apparaître que \og
+l'assureur \fg{} n'est pas un utilisateur unique. Deux profils aux besoins
+différents cohabitent.
+
+\subsection{Le souscripteur (\emph{underwriter})}
+
+C'est l'utilisateur principal de la version~1. Il traite des dossiers : une
+adresse arrive, il doit décider \emph{accepter}, \emph{mettre à l'étude} ou
+\emph{refuser}. Ses contraintes :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{rapidité} — la décision s'insère dans un flux de travail, pas
+        dans une analyse hebdomadaire ;
+  \item \textbf{jugement spatial} — il pense en distance, en périmètre, en
+        relief. Il regarde une carte, il ne lit pas un tableau de bord ;
+  \item \textbf{traçabilité} — sa décision peut être auditée. Il doit pouvoir
+        dire d'où vient chaque élément.
+\end{itemize}
+
+C'est pour ce profil que la carte reste une fonctionnalité de premier plan,
+et non une décoration : elle ne montre pas les couches sources, elle montre
+\emph{la jointure} — l'empreinte du bâtiment colorée par le résultat du test
+géométrique, accompagnée d'une fiche de vulnérabilité.
+
+\subsection{L'actuaire (\emph{pricing})}
+
+Profil secondaire, hors périmètre de la version~1 mais structurant. Il
+construit des modèles de tarification et de provisionnement. Ses besoins sont
+presque opposés :
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{pas d'interface} — il veut de la donnée, pas un écran ;
+  \item \textbf{volume} — il traite des portefeuilles entiers, pas une adresse ;
+  \item \textbf{variables brutes} — il veut appliquer \emph{ses} formules.
+\end{itemize}
+
+Le point décisif : l'actuaire interrogé ne voulait \emph{pas} de notre score.
+Il voulait les variables par aléa, par horizon et par scénario climatique,
+étiquetées et propres, pour exécuter ses propres calculs. Cette réponse a
+directement conduit à l'invariant central du produit.
+
+\section{La non-stationnarité : pourquoi la donnée historique ne suffit pas}
+
+Le raisonnement qui fonde l'intérêt du produit mérite d'être explicité, car il
+n'est pas immédiat.
+
+Un assureur possède un actif que nous n'aurons jamais : l'historique de ses
+sinistres. Pour un bien déjà couvert, cet historique est un meilleur prédicteur
+que n'importe quelle reconstitution à partir de sources publiques. Il serait
+donc absurde de prétendre \og mieux connaître le risque actuel \fg.
+
+Mais le risque climatique est \textbf{non stationnaire} : le futur ne ressemble
+pas au passé. Un historique de sinistres, aussi volumineux soit-il, décrit des
+pertes réalisées sous le climat d'hier. Il ne peut structurellement pas
+indiquer comment l'exposition d'un bâtiment donné évolue sur les 25 à 75
+prochaines années. Cette information doit venir de la science du climat et des
+modèles de projection, pas d'un registre de sinistres.
+
+\begin{encadre}
+\textbf{L'argument de vente n'est donc pas \og plus de données \fg.} C'est \og
+la partie de l'information qui ne peut pas venir de votre historique \fg.
+Aucune quantité de données propriétaires ne comble ce trou précis.
+\end{encadre}
+
+C'est pour cette raison que la trajectoire temporelle — aujourd'hui, 2050,
+2100 — est le cœur du produit, et non un ornement. Et c'est pour cette raison
+que la donnée climatique, un temps écartée du périmètre, a dû y revenir sous
+une forme honnête (voir chapitre~\ref{ch:donnees}).
+
+\section{Les invariants du produit}
+
+Le projet a produit un document de référence, la \emph{constitution}
+(\fichier{constitution.md}), qui fixe les règles non négociables. Chaque règle
+porte un mécanisme d'application : un test automatisé, une porte CI, ou une
+revue humaine. En voici les principales, avec leur justification.
+
+\subsection{Faits et provenance uniquement — pas de score}
+
+\begin{invariant}
+Aucune réponse de l'API ne peut contenir de score composite, de jugement de
+risque, de recommandation, ni d'évaluation générée par IA. La graduation
+fournie par la source est transmise verbatim sous forme de texte ; toute
+conversion en bandes est de la coloration de présentation et n'est
+\emph{jamais} sérialisée dans le contrat canonique.
+\end{invariant}
+
+La justification est double. Juridiquement, un score tiers de risque
+climatique, produit par un acteur qui n'est ni l'assureur ni le régulateur,
+crée une responsabilité : s'il est erroné et qu'il a servi à refuser un
+contrat, qui est responsable ? Techniquement, un score se fait
+\emph{reconstruire} ou \emph{refuser} : l'actuaire qui reçoit un score
+non transparent finit par ignorer la boîte noire ou par la réimplémenter.
+
+La conséquence architecturale est forte : puisque le score disparaît, le champ
+\texttt{resolution} devient \emph{le seul signal de qualité} du contrat. Chaque
+objet aléa doit dire à quel niveau il a été établi.
+
+\subsection{Un niveau de résolution sur chaque fait}
+
+\begin{invariant}
+Chaque objet aléa du contrat porte \texttt{source}, \texttt{resolution} et les
+champs d'attribution exigés par la Licence Ouverte~2.0. Un objet aléa sans ces
+champs échoue la validation du schéma.
+\end{invariant}
+
+Trois valeurs de résolution existent, et elles ne sont pas interchangeables :
+
+\begin{table}[H]
+\centering
+\small
+\caption{Les trois niveaux de résolution et leur signification exacte.}
+\label{tab:resolution}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Valeur} & \textbf{Origine} & \textbf{Signification} \\
+\midrule
+\code{per-building} & Test géométrique WFS &
+  Le point a été testé contre un polygone source. L'affirmation porte
+  réellement sur ce bâtiment. \\
+\addlinespace
+\code{commune-level} & Décret ou arrêté &
+  Le fait est communal \emph{par nature} (zonage sismique, classement radon).
+  Ce n'est pas une dégradation : c'est la résolution maximale qui existe. \\
+\addlinespace
+\code{commune-level-estimate} & Repli, ou RGA &
+  Nous n'avons pas pu établir le fait au niveau du bâtiment. Le fait est une
+  estimation communale. À traiter avec prudence. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+La distinction entre les deux derniers cas est essentielle. Un aléa sismique
+\code{commune-level} est \emph{correct} : le zonage est décrétal, il n'existe
+pas de version par bâtiment. Un aléa inondation \code{commune-level-estimate}
+signale au contraire que la source n'a pas répondu et que l'information est
+dégradée. Confondre les deux ferait passer une panne pour un fait.
+
+\subsection{Passage verbatim de la BDNB}
+
+\begin{invariant}
+Le contrat transmet les attributs BDNB sans suppression ni renommage
+silencieux. Un champ indisponible est explicitement \texttt{null}, avec
+l'échec enregistré dans la liste d'erreurs — jamais omis.
+\end{invariant}
+
+C'est une conséquence directe du profil actuaire : s'il doit filtrer lui-même,
+il lui faut l'intégralité du champ. La curation — quels attributs montrer dans
+le panneau latéral — se fait uniquement à la couche de présentation.
+
+\subsection{Une seule forme canonique}
+
+\begin{invariant}
+Il existe exactement un schéma de réponse par ressource. Deux formes vivantes
+pour la même ressource constituent un défaut.
+\end{invariant}
+
+Cette règle a une histoire : au cours du projet, deux pipelines concurrents
+produisaient deux JSON différents pour la même adresse. L'un était utilisé par
+l'interface, l'autre par le lot. Les divergences silencieuses entre les deux
+sont exactement le genre de bug qui détruit la confiance dans un contrat de
+données. La règle a été formalisée en question ouverte (OQ-1) puis tranchée.
+
+\subsection{Le lot est N fois l'unitaire}
+
+\begin{invariant}
+\api{POST /diagnostic/batch} traite chaque adresse à travers le pipeline
+unitaire identique. Aucune seconde implémentation en masse, aucun chemin de
+code d'extraction versionnée.
+\end{invariant}
+
+L'intérêt est la garantie de cohérence : il ne peut pas exister de différence
+entre le résultat d'un appel unitaire et celui du même appel au sein d'un lot,
+hors horodatage. Cette équivalence est testée.
+
+\subsection{Honnêteté sur le RGA}
+
+\begin{invariant}
+Tant qu'aucune source vectorielle n'est câblée, le retrait-gonflement des
+argiles (RGA) est livré avec \code{resolution: "commune-level-estimate"} et
+rien ne peut revendiquer une résolution par bâtiment pour cet aléa.
+\end{invariant}
+
+Le RGA est un motif majeur de sinistres en France. La tentation d'afficher un
+résultat par bâtiment est donc forte. Mais la donnée disponible au moment du
+stage était communale. Le choix a été de l'annoncer plutôt que de la surinterpréter.
+
+\subsection{Pas de code dormant}
+
+\begin{invariant}
+Les fonctionnalités retirées sont supprimées, non commentées ou laissées non
+référencées. L'historique Git est l'archive.
+\end{invariant}
+
+Cette règle est inconfortable mais saine : elle interdit de conserver du code
+\og au cas où \fg, qui est la principale source d'ambiguïté dans un dépôt. Elle
+a conduit à supprimer des milliers de lignes — connecteurs, schémas, composants
+d'interface — et à assumer que Git garderait la trace.
+
+\section{Synthèse}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Décisions métier verrouillées lors de la phase de cadrage, et leur
+traduction en règle technique.}
+\label{tab:decisions-metier}
+\begin{tabularx}{\textwidth}{@{}c X X@{}}
+\toprule
+\textbf{\#} & \textbf{Décision} & \textbf{Conséquence technique} \\
+\midrule
+1 & L'acheteur est l'assureur français, pilote au poste de souscription &
+  Interface orientée dossier unique, pas portefeuille \\
+2 & Le livrable principal est un contrat JSON, pas une interface &
+  Schéma Pydantic versionné comme artefact central \\
+3 & La jointure WFS $\times$ BDNB est le périmètre ; Copernicus et
+  Open-Meteo hors v1 &
+  Suppression des connecteurs climatiques de la version 1 \\
+4 & La transaction est l'adresse unique &
+  \api{POST /diagnostic/adresse} comme primitive, le lot en dérivé \\
+5 & 13 aléas, certification sur 4 d'entre eux &
+  Carte de couches en configuration, pas en logique \\
+6 & RGA étiqueté communal &
+  Résolution forcée au niveau du schéma \\
+7 & Sismique et radon communaux par nature &
+  Résolution permanente \code{commune-level} \\
+8 & BDNB verbatim &
+  Test de conformité clé par clé \\
+9 & Score composite mort &
+  Schéma qui refuse la sérialisation de champs de score \\
+10 & Bandes D03 en présentation seulement &
+  Coloration côté frontend, hors contrat \\
+11 & Le champ de résolution est le signal de qualité &
+  Tests de dégradation aussi rigoureux que les tests nominaux \\
+12 & La carte reste, mais montre la jointure &
+  Empreinte colorée par le test, panneau de vulnérabilité \\
+13 & Le géocodage est un composant produit &
+  Tests dédiés : arrondissements, seuil de confiance, saturation \\
+\bottomrule
+\end{tabularx}
+\end{table}

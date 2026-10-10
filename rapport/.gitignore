@@ -1,0 +1,10 @@
+# Intermédiaires de compilation — régénérés à chaque build, jamais commités.
+# `main.pdf` n'est PAS ignoré : c'est le livrable du rapport.
+main.aux
+main.log
+main.out
+main.toc
+main.lof
+main.lot
+main.xdv
+*.synctex.gz

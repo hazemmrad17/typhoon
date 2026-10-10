@@ -1,0 +1,150 @@
+\chapter{Résultats mesurés}
+\label{ch:resultats}
+
+Tous les chiffres de ce chapitre proviennent d'exécutions réelles sur une
+installation locale (API FastAPI, frontend Vite, sources publiques interrogées en
+direct). Rien n'est extrapolé : ce qui n'a pas pu être mesuré est signalé comme
+tel.
+
+\begin{encadre}[title={Environnement des captures et des mesures}]
+Les captures du chapitre~\ref{ch:parcours} ont été prises dans Chrome
+(1440\,\texttimes\,900) sur le frontend servi par un dev server Vite local, la
+session étant ouverte avec le compte de démonstration, et les adresses de
+référence diagnostiquées au préalable pour alimenter le cache local qui nourrit
+le tableau de bord et le portefeuille. L'API interrogée est celle de
+l'\emph{instance déployée}, pour une raison d'environnement : le poste de capture
+ne joint pas \code{www.georisques.gouv.fr}. Un diagnostic y reste bloqué jusqu'au
+délai de chaque appel Géorisques (mesuré : 224\,s au lieu de 10\,s) et rend les
+treize aléas en \code{erreur: source Géorisques indisponible} — la capture
+n'aurait montré qu'un état de panne.
+
+Deux conséquences sont visibles sur les images et ne sont pas des défauts de
+l'application : l'instance déployée est en retard sur ce dépôt, donc
+\code{/api/meteo/france} y répond 404 et les cinq cartes météo de l'étape 2
+affichent « Référence météo indisponible » ; et l'adresse de référence rend les
+aléas selon le millésime de l'instance, non celui du poste. Ce que le contrat
+exige reste vérifiable sur ces captures : une source en panne produit un
+\emph{état} nommé, jamais une valeur par défaut.
+\end{encadre}
+
+\section{Le diagnostic, en conditions réelles}
+
+Un diagnostic sur « Quai de la Rapée, 75012 Paris » a produit les faits suivants.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{5.2cm}X@{}}
+\toprule
+\textbf{Élément observé} & \textbf{Résultat} \\
+\midrule
+Commune retenue & Paris 12\textsuperscript{e} arrondissement, INSEE 75112 (138 024 habitants, 8 431 hab./km²) \\
+Aléas du référentiel & 13 objets dans le contrat, dont 4 constatés \emph{présents} au point (ICPE, inondation, sismicité, radon) \\
+Classe de crue au point & dans le périmètre TRI ; classes \emph{moyen} et \emph{faible} cartographiées au point, hauteur d'eau réglementaire disponible \\
+Hydrographie & réseau reconstruit côté serveur jusqu'à la mer (Seine) \\
+Météo & prévision ponctuelle de l'adresse (et non moyenne départementale) \\
+Photo de terrain & Panoramax, 24 candidates, la plus proche à 18,4\,m, orientée vers le bien \\
+Erreur serveur & aucune \\
+\bottomrule
+\end{tabularx}
+\caption{Résultat d'un diagnostic réel, exécuté pendant l'écriture de ce rapport.}
+\end{table}
+
+La durée d'un diagnostic complet se situe entre 9 et 16 secondes à froid sur
+l'instance déployée, la première requête payant le réveil de la fonction ; la
+même adresse rejouée depuis le cache local est instantanée. Quand une source
+canonique est injoignable, la durée monte au délai cumulé des appels
+(224 secondes mesurées) : c'est ce cas qui a justifié la \emph{borne} côté
+client, plafonnée à cinq minutes et affichée à l'écran avec le temps écoulé.
+À titre de comparaison, la reconstruction manuelle des mêmes faits demande
+plusieurs heures par bien.
+
+\begin{encadre}[title={Ce que cette mesure ne dit pas}]
+Elle ne dit pas que l'analyse de risque prend 15 secondes : elle dit que
+l'\emph{assemblage des faits} prend 15 secondes. L'interprétation, la
+tarification et la décision restent humaines — c'est précisément la répartition
+que le projet revendique.
+\end{encadre}
+
+\section{Le rapport}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{4.6cm}X@{}}
+\toprule
+\textbf{Scénario} & \textbf{Mesure} \\
+\midrule
+Sans fournisseur de prose configuré & 200 ; \code{fallback\_used = true} ; modèle annoncé \code{template-first} ; document complet de 2 752 caractères \\
+Avec prose & 200 ; \code{fallback\_used = false} ; modèle annoncé \code{gemini-2.5-flash} ; 5 narratifs de catégorie et 4 narratifs de mitigation acceptés ; 2 850 caractères \\
+Rejeu de la même requête & servi par le cache (\code{cache\_hit = true}), à l'identique \\
+Flux SSE & séquence complète \code{header}, \code{summary}, \code{category} \(\times\) 5, \code{mitigations}, \code{confidence}, \code{appendix}, \code{done} \\
+Flux SSE avec prose & 9 événements \code{patch} de prose réellement validée \\
+\bottomrule
+\end{tabularx}
+\caption{Le rapport, mesuré avec et sans fournisseur de prose.}
+\end{table}
+
+\section{Le fournisseur de prose}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Opération} & \textbf{Durée mesurée} \\
+\midrule
+Appel structuré (JSON) & 1,1 seconde \\
+Appel en flux (SSE) & 0,7 seconde \\
+\bottomrule
+\end{tabular}
+\caption{Latence du fournisseur de prose sur des requêtes courtes.}
+\end{table}
+
+La vérification du câblage a été faite sans clé valide, par comparaison d'erreurs :
+sans en-tête d'authentification, l'API répond
+« \emph{Method doesn't allow unregistered callers} » ; avec un en-tête portant une
+clé invalide, elle répond \code{API\_KEY\_INVALID}. Le \emph{changement} de
+réponse prouve que l'en-tête est bien celui attendu — c'est un contrôle de
+câblage, pas un test de bout en bout.
+
+\section{La suite de tests}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Périmètre} & \textbf{Résultat} & \textbf{Durée} \\
+\midrule
+Backend, suite offline & 261 tests réussis, 0 échec (2 avertissements de ressource) & 3 min 54 \\
+Frontend (Vitest) & 521 tests réussis, 0 échec, 63 fichiers & 28 s \\
+Lint Python & aucun avertissement & — \\
+Garde-fou d'isolation du bac à sable & vert & — \\
+\bottomrule
+\end{tabular}
+\caption{État de la suite de tests au moment de la rédaction.}
+\end{table}
+
+Un point de méthode mérite d'être souligné : la suite reste \textbf{verte alors
+qu'une clé d'API réelle est configurée} dans l'environnement. C'est une propriété
+importante — un test qui appellerait le modèle en direct serait lent, non
+déterministe et coûteux ; ici, toutes les sources sont simulées, et la présence
+d'une clé ne change rien au résultat.
+
+\section{Les quotas, protégés côté client}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.7cm}p{3.5cm}X@{}}
+\toprule
+\textbf{Source} & \textbf{Plafond appliqué} & \textbf{Comportement en cas de refus} \\
+\midrule
+BDNB & 120 requêtes / minute & budget mensuel de 10 000 appels ; retour partiel déclaré \\
+Géocodage (Géoplateforme) & 50 requêtes / seconde & une seule réattente sur un 429 explicite, puis échec franc \\
+Routes de collecte & 30 requêtes / 60 s & réponse 429 côté API, jamais un ralentissement silencieux \\
+\bottomrule
+\end{tabularx}
+\caption{Les plafonds vérifiés chez le fournisseur et leur application.}
+\end{table}
