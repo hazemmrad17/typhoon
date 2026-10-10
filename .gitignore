@@ -77,7 +77,8 @@ nollahealth-mirror/
 
 wget.pid
 
-# Rapport de stage (sources LaTeX, PDF compilé, rapport archive) :
-# il vit sur le poste, pas dans le dépôt — seul le README et les captures
-# quil affiche sont versionnés.
+# Rapport de stage : TOUT le dossier reste sur le poste (sources LaTeX,
+# intermédiaires, archive et PDF compilé `main.pdf`). Aucun fichier de ce
+# dossier n'est versionné ; ce qui est publié dans le dépôt, c'est le README
+# de la racine et les captures de `docs/screenshots/` qu'il affiche.
 /rapport/
