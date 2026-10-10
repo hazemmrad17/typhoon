@@ -76,3 +76,8 @@ nollahealth-mirror/
 .tools/
 
 wget.pid
+
+# Rapport de stage (sources LaTeX, PDF compilé, rapport archive) :
+# il vit sur le poste, pas dans le dépôt — seul le README et les captures
+# quil affiche sont versionnés.
+/rapport/
